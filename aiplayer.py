@@ -164,9 +164,7 @@ class AIPlayer(Player):
             if expected_points < future_expected_points:
                 future_expected_points = expected_points
                 best_next_discard_option = discard_option
-            prefer_no_jokers = len(discard_option) < len(best_next_discard_option) # Keep needless joker discard in hand
-            if expected_points == future_expected_points and \
-                prefer_no_jokers: 
+            if expected_points == future_expected_points: 
                 future_expected_points = expected_points
                 best_next_discard_option = discard_option
         
@@ -216,25 +214,24 @@ class AIPlayer(Player):
         """
         Determine the best option to discard from the given list of discard options.
         """
-        best_discard_options = []
-        
+        best_discard_options = []    
         best_points = 0 # Initialize
+
         for option in discard_options:
             discard_points = sum(card.value for card in option)
             if discard_points > best_points:
                 best_points = discard_points
                 best_discard_options = [option]
-            elif discard_points == best_points:
-               best_discard_options.append(option)
+            elif discard_points == best_points and len(best_discard_options) > 0: # keep jokers when you can
+                if len(option) < len(best_discard_options[0]):
+                    best_discard_options = [option]
+                elif len(option) == len(best_discard_options[0]):
+                    best_discard_options.append(option)
         
         return best_discard_options
 
     def _calculate_new_total_points(self, potential_hand, discard_option):
         """
-        TODO: This may have a major bug? Calcs...
-        21 in [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('A', 'Spades')]
-        1 in [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
-        31 in [Card('A', 'Spades')]
         Calculate the new total points given a hand and the best discard option.
         """
         return sum(card.value for card in potential_hand if card not in discard_option)

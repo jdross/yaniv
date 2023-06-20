@@ -93,9 +93,28 @@ class TestAIPlayer(unittest.TestCase):
         self.assertTrue(len(best_option) == 1)
         self.assertEqual(best_option[0], [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
 
-        self.aiplayer.hand = [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts')]
-        discard_options = [[Card('7', 'Hearts')], [Card('8', 'Hearts')], [Card('9', 'Hearts')], [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts')]]
-        self.assertEqual(self.aiplayer._get_best_discard_options(discard_options)[0], [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts')])
+        self.aiplayer.hand = [Card('7', 'Hearts'), Card('9', 'Hearts'), Card('9', 'Diamonds')]
+        discard_options = [[Card('7', 'Hearts')], [Card('9', 'Hearts')], [Card('9', 'Diamonds'), Card('9', 'Hearts')]]
+        best_option = self.aiplayer._get_best_discard_options(discard_options)
+        self.assertTrue(len(best_option) == 1)
+        self.assertEqual(best_option[0], [Card('9', 'Diamonds'), Card('9', 'Hearts')])
+
+        self.aiplayer.hand = [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts'), Card('9', 'Diamonds')]
+        discard_options = [[Card('7', 'Hearts')], [Card('8', 'Hearts')], [Card('9', 'Hearts')], [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts')], [Card('9', 'Diamonds'), Card('9', 'Hearts')]]
+        best_option = self.aiplayer._get_best_discard_options(discard_options)
+        self.assertTrue(len(best_option) == 1)
+        self.assertEqual(best_option[0], [Card('7', 'Hearts'), Card('8', 'Hearts'), Card('9', 'Hearts')])
+
+    # Test best discard option won't discard a joker if it doesn't need to
+    def test_get_best_discard_option_joker(self):
+        self.aiplayer.hand = [Card('Joker', 'j1'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
+        discard_options = [[Card('Joker', 'j1')], [Card('J', 'Hearts')], [Card('Q', 'Hearts')], [Card('K', 'Hearts')],
+                           [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')],
+                           [Card('Joker', 'j1'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]]
+        best_option = self.aiplayer._get_best_discard_options(discard_options)
+        print(best_option)
+        self.assertTrue(len(best_option) == 1)
+        self.assertEqual(best_option[0], [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
 
     # Test best discard options
     def test_discard_pair(self):
