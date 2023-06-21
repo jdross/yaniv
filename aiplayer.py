@@ -91,9 +91,7 @@ class AIPlayer(Player):
         Returns:
             dict: The action to take to minimize the score.
         """
-        # For example, the AI could discard the highest-point card in its hand and draw a card from the deck.
         action = self._simulate_next_turn()
-        # discard_option = max(self._get_discard_options(), key=self._option_value) # consider sets and runs
         return {
             'discard': action['discard'],
             'draw': action['draw'],
@@ -187,10 +185,8 @@ class AIPlayer(Player):
         return best_draw_card, best_score
 
     def _simulate_next_turn(self):
-        # _low_draw_card = min(self.draw_options, key=lambda card: card.value)
         best_discard = self._get_best_discard_options(self._get_discard_options())[0]
         best_score = sum(card.value for card in self.hand) - sum(card.value for card in best_discard) + 0 # Assume draw joker...
-        
         best_draw_card = 'deck'
 
         # Iterate over all possible discard options
@@ -207,6 +203,11 @@ class AIPlayer(Player):
                 best_score = score
                 best_draw_card = draw_card
                 best_discard = discard_option
+            if score == best_score:
+                if sum(card.value for card in discard_option) < sum(card.value for card in best_discard):
+                    best_score = score
+                    best_draw_card = draw_card
+                    best_discard = discard_option
         draw_string = best_draw_card if best_draw_card == 'deck' else str(self.draw_options[best_draw_card])
         return {'draw': best_draw_card, 'discard': best_discard, 'points': best_score}
 
@@ -219,8 +220,6 @@ class AIPlayer(Player):
 
         for option in discard_options:
             discard_points = sum(card.value for card in option)
-            if option[0].rank == 'Joker':
-                print(f"option: {option} for {discard_points}, best: {best_discard_options} for {best_points}")
             if discard_points > best_points:
                 best_points = discard_points
                 best_discard_options = [option]

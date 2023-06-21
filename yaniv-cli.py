@@ -66,7 +66,7 @@ def main():
             if draw_source == 'd':
                 draw_action = 'deck'
             else:
-                pile_index = 0 if len(discard_indices)==1 else int(input("Enter the index of card from discard pile to draw: ").strip())
+                pile_index = 0 if len(discard_options)==1 else int(input("Enter the index of card from discard pile to draw: ").strip())
                 draw_action = pile_index
 
             action = {
@@ -74,14 +74,14 @@ def main():
                 'draw': draw_action
             }
         action = game.play_turn(current_player, action)
-        print(f"{current_player.name} discarded {action['discard']}")
+        print(f"{current_player.name} discarded {', '.join(map(str, action['discard']))}.")
         if isinstance(current_player, AIPlayer):
             if action['draw'] != 'deck':
                 print(f"{current_player.name} took {str(current_player.hand[-1])} and ended their turn with {len(current_player.hand)} cards.")
             else:
-                print(f"{current_player.name} drew from the deck.")
+                print(f"{current_player.name} drew from the deck and ended with {len(current_player.hand)} cards.")
         else:
-            print(f"{current_player.name} drew a {str(current_player.hand[-1])} and ended their turn.")
+            print(f"{current_player.name} drew a {str(current_player.hand[-1])} and ended their turn with {len(current_player.hand)} cards.")
 
 if __name__ == "__main__":
     main()
