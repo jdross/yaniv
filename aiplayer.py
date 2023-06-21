@@ -118,12 +118,12 @@ class AIPlayer(Player):
                             discard_options.append(list(combo) + list(joker_combo))
                 # Check if combo of the same suit can be turned into a run using jokers
                 elif len(set(card.suit for card in combo)) == 1:
-                    sorted_combo = sorted(combo, key=lambda card: Card.RANKS[card.rank])
+                    sorted_combo = sorted(combo, key=lambda card: card.rank_index())
 
                     # Calculate gaps
-                    gaps = [(i, Card.RANKS[sorted_combo[i+1].rank] - Card.RANKS[sorted_combo[i].rank] - 1)
+                    gaps = [(i, sorted_combo[i+1].rank_index() - sorted_combo[i].rank_index() - 1)
                             for i in range(len(sorted_combo) - 1)
-                            if Card.RANKS[sorted_combo[i+1].rank] - Card.RANKS[sorted_combo[i].rank] > 1]
+                            if sorted_combo[i+1].rank_index() - sorted_combo[i].rank_index() > 1]
 
                     if sum(gap for _, gap in gaps) <= len(jokers):
                         joker_index = 0
@@ -136,9 +136,9 @@ class AIPlayer(Player):
                         # Add remaining jokers at the beginning and end of the run
                         remaining_jokers = jokers[joker_index:]
                         for joker in remaining_jokers:
-                            if Card.RANKS[sorted_combo[0].rank] > 1:
+                            if sorted_combo[0].rank_index() > 1:
                                 discard_options.append([joker] + sorted_combo)  # add to the beginning if the first card isn't Ace
-                            if Card.RANKS[sorted_combo[-1].rank] < 13:
+                            if sorted_combo[-1].rank_index() < 13:
                                 discard_options.append(sorted_combo + [joker])  # add to the end if the last card isn't King
                         
                         if len(sorted_combo) >= 3:

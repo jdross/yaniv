@@ -14,14 +14,13 @@ class YanivGame:
             self.players = []
     
     def to_dict(self):
-        # serialize the entire game state
+        # serialize the essential game state
         return {
             'game_id': self.game_id,
-            'deck': [card.to_dict() for card in self.deck],
-            'discard_pile': [card.to_dict() for card in self.discard_pile],
-            'last_discard': [card.to_dict() for card in self.last_discard],
+            'discard_pile': [card.serialize() for card in self.discard_pile],
             'players': [player.to_dict() for player in self.players],
             'current_player_index': self.current_player_index,
+            'last_discard_size': len(self.last_discard),
         }
     
     @classmethod
@@ -29,11 +28,16 @@ class YanivGame:
         # Create a method to construct a game from a dictionary
         game = cls()
         game.game_id = data['game_id']
-        game.deck = [Card.from_dict(card_data) for card_data in data['deck']]
-        game.discard_pile = [Card.from_dict(card_data) for card_data in data['discard_pile']]
-        game.last_discard = [Card.from_dict(card_data) for card_data in data['last_discard']]
         game.players = [Player.from_dict(player_data) for player_data in data['players']]
         game.current_player_index = data['current_player_index']
+        game.discard_pile = [Card.deserialize(card_data) for card_data in data['discard_pile']]
+        game.last_discard = game.discard_pile[-data['last_discard_size']:]
+        
+        game._create_deck()
+        for card in game.discard_pile + [card for player in game.players for card in player.hand]:
+            game.deck.remove(card)
+        game._shuffle_deck()
+
         return game
 
     ### Game API ###
@@ -217,7 +221,7 @@ class YanivGame:
             return False
 
         # Get the ranks of the non-joker cards
-        ranks = [Card.RANKS[card.rank] for card in non_joker_cards]
+        ranks = [card.rank_index() for card in non_joker_cards]
         ranks.sort()
 
         # Count the number of jokers

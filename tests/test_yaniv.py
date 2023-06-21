@@ -1,4 +1,6 @@
-import unittest
+import unittest, sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from yaniv import YanivGame, Player, Card
 
 class TestCard(unittest.TestCase):
@@ -17,7 +19,7 @@ class TestCard(unittest.TestCase):
         card1 = Card('4', 'Hearts')
         card2 = Card('7', 'Clubs')
         card3 = Card('A', 'Diamonds')
-        card4 = Card('Joker', 'j1')
+        card4 = Card('Joker', 'Spades')
         card5 = Card('K', 'Spades')
         card6 = Card('Q', 'Hearts')
         card7 = Card('K', 'Diamonds')
@@ -57,14 +59,14 @@ class TestYanivGame(unittest.TestCase):
         self.assertEqual(self.player1.score, 30)
         self.assertEqual(self.player2.score, 39)
 
-        self.player1.hand = [Card('Joker', 'j1'), Card('2', 'Diamonds'), Card('A', 'Spades')]
+        self.player1.hand = [Card('Joker', 'Spades'), Card('2', 'Diamonds'), Card('A', 'Spades')]
         self.player2.hand = [Card('2', 'Spades'), Card('A', 'Diamonds'), Card('2', 'Clubs')]
         self.game._update_scores(self.player1)
         self.assertEqual(self.player1.score, 30)
         self.assertEqual(self.player2.score, 44)
 
         # Lose & Reset
-        self.player1.hand = [Card('Joker', 'j1'), Card('2', 'Diamonds'), Card('A', 'Spades')]
+        self.player1.hand = [Card('Joker', 'Spades'), Card('2', 'Diamonds'), Card('A', 'Spades')]
         self.player2.hand = [Card('2', 'Spades'), Card('3', 'Diamonds'), Card('A', 'Clubs')]
         self.game._update_scores(self.player1)
         self.assertEqual(self.player1.score, 30)
@@ -72,8 +74,8 @@ class TestYanivGame(unittest.TestCase):
 
         # Assaf to Reset
         self.player1.score = 20
-        self.player1.hand = [Card('Joker', 'j1'), Card('2', 'Diamonds'), Card('A', 'Spades')]
-        self.player2.hand = [Card('Joker', 'j2'), Card('A', 'Diamonds')]
+        self.player1.hand = [Card('Joker', 'Spades'), Card('2', 'Diamonds'), Card('A', 'Spades')]
+        self.player2.hand = [Card('Joker', 'Hearts'), Card('A', 'Diamonds')]
         self.game._update_scores(self.player1)
         self.assertEqual(self.player1.score, 0)
         self.assertEqual(self.player2.score, 0)
@@ -114,18 +116,18 @@ class TestYanivGame(unittest.TestCase):
         self.assertEqual(self.game._return_run_if_valid(cards), cards)
 
         # Test with a valid run with a Joker replacing the middle card
-        cards = [Card('2', 'Hearts'), Card('Joker', 'j1'), Card('4', 'Hearts')]
-        expected = [Card('2', 'Hearts'), Card('Joker', 'j1'), Card('4', 'Hearts')]
+        cards = [Card('2', 'Hearts'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
+        expected = [Card('2', 'Hearts'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
         self.assertEqual(self.game._return_run_if_valid(cards), expected)
 
         # Test with a valid run with a Joker replacing the first card
-        cards = [Card('Joker', 'j1'), Card('3', 'Hearts'), Card('4', 'Hearts')]
-        expected = [Card('Joker', 'j1'), Card('3', 'Hearts'), Card('4', 'Hearts')]
+        cards = [Card('Joker', 'Spades'), Card('3', 'Hearts'), Card('4', 'Hearts')]
+        expected = [Card('Joker', 'Spades'), Card('3', 'Hearts'), Card('4', 'Hearts')]
         self.assertEqual(self.game._return_run_if_valid(cards), expected)
 
         # Test with a valid run with two Jokers replacing the first two cards
-        cards = [Card('Joker', 'j1'), Card('Joker', 'j1'), Card('4', 'Hearts')]
-        expected = [Card('Joker', 'j1'), Card('Joker', 'j1'), Card('4', 'Hearts')]
+        cards = [Card('Joker', 'Spades'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
+        expected = [Card('Joker', 'Spades'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
         self.assertEqual(self.game._return_run_if_valid(cards), expected)
 
     def test_return_run_if_valid_invalid(self):
@@ -142,7 +144,7 @@ class TestYanivGame(unittest.TestCase):
         self.assertFalse(self.game._return_run_if_valid(cards))
 
         # Test with an invalid run (not enough Jokers to fill in the gaps)
-        cards = [Card('2', 'Hearts'), Card('Joker', 'j1'), Card('5', 'Hearts')]
+        cards = [Card('2', 'Hearts'), Card('Joker', 'Spades'), Card('5', 'Hearts')]
         self.assertFalse(self.game._return_run_if_valid(cards))
 
     def test_get_draw_options_set(self):
@@ -160,7 +162,7 @@ class TestYanivGame(unittest.TestCase):
     def test_get_draw_options_run_with_joker(self):
         # Test with a run that includes a Joker in the last discarded cards
         game = self.game
-        game.last_discard = [Card('2', 'Hearts'), Card('Joker', 'j1'), Card('4', 'Hearts')]
+        game.last_discard = [Card('2', 'Hearts'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
         self.assertEqual(game._get_draw_options(), [game.last_discard[0], game.last_discard[-1]])
 
     def test_discard_and_draw(self):

@@ -1,4 +1,5 @@
-import unittest
+import unittest, sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from aiplayer import AIPlayer, Card
 
 class TestAIPlayer(unittest.TestCase):
@@ -10,60 +11,60 @@ class TestAIPlayer(unittest.TestCase):
     def test_get_discard_options_run(self):
         
         # Valid joker runs
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'j2'), Card('6', 'Hearts'), Card('5', 'Hearts')]
-        expected_output = [[Card('4', 'Hearts')], [Card('Joker', 'j2')], [Card('6', 'Hearts')],
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('6', 'Hearts'), Card('5', 'Hearts')]
+        expected_output = [[Card('4', 'Hearts')], [Card('Joker', 'Hearts')], [Card('6', 'Hearts')],
                            [Card('4', 'Hearts')], [Card('5', 'Hearts')], [Card('6', 'Hearts')],
-                           [Card('4', 'Hearts')], [Card('5', 'Hearts')], [Card('Joker', 'j2')],
-                           [Card('Joker', 'j2'), Card('5', 'Hearts'), Card('6', 'Hearts')]]
+                           [Card('4', 'Hearts')], [Card('5', 'Hearts')], [Card('Joker', 'Hearts')],
+                           [Card('Joker', 'Hearts'), Card('5', 'Hearts'), Card('6', 'Hearts')]]
         actual_output = self.aiplayer._get_discard_options()
         for option in expected_output:
             self.assertIn(option, actual_output)
 
         # Test sorting
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('6', 'Hearts'), Card('Joker', 'j1')]
-        self.assertIn([Card('4', 'Hearts'), Card('Joker', 'j1'), Card('6', 'Hearts')], 
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('6', 'Hearts'), Card('Joker', 'Spades')]
+        self.assertIn([Card('4', 'Hearts'), Card('Joker', 'Spades'), Card('6', 'Hearts')], 
                       self.aiplayer._get_discard_options())
 
     def test_get_discard_options_joker_end(self):
         # Joker at end
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('5', 'Hearts'), Card('Joker', 'j1')]
-        self.assertIn([Card('4', 'Hearts'), Card('5', 'Hearts'), Card('Joker', 'j1')], 
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('5', 'Hearts'), Card('Joker', 'Spades')]
+        self.assertIn([Card('4', 'Hearts'), Card('5', 'Hearts'), Card('Joker', 'Spades')], 
                       self.aiplayer._get_discard_options())
-        self.assertIn([Card('Joker', 'j1'), Card('4', 'Hearts'), Card('5', 'Hearts')], 
+        self.assertIn([Card('Joker', 'Spades'), Card('4', 'Hearts'), Card('5', 'Hearts')], 
                       self.aiplayer._get_discard_options())
     
     def test_get_discard_options_two_jokers(self):
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('6', 'Hearts'), Card('Joker', 'j1'), Card('Joker', 'j2')]
-        expected_output = [[Card('4', 'Hearts'), Card('Joker', 'j1'), Card('6', 'Hearts')],
-                           [Card('4', 'Hearts'), Card('Joker', 'j1'), Card('6', 'Hearts'), Card('Joker', 'j2')],
-                           [Card('Joker', 'j2'), Card('4', 'Hearts'), Card('Joker', 'j1'), Card('6', 'Hearts')]]
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('6', 'Hearts'), Card('Joker', 'Spades'), Card('Joker', 'Hearts')]
+        expected_output = [[Card('4', 'Hearts'), Card('Joker', 'Spades'), Card('6', 'Hearts')],
+                           [Card('4', 'Hearts'), Card('Joker', 'Spades'), Card('6', 'Hearts'), Card('Joker', 'Hearts')],
+                           [Card('Joker', 'Hearts'), Card('4', 'Hearts'), Card('Joker', 'Spades'), Card('6', 'Hearts')]]
         actual_output = self.aiplayer._get_discard_options()
         for option in expected_output:
             self.assertIn(option, actual_output)
     
     def test_get_discard_options_two_middle_jokers(self):
         ## Two jokers in a row
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('7', 'Hearts'), Card('Joker', 'j1'), Card('Joker', 'j2')]
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('7', 'Hearts'), Card('Joker', 'Spades'), Card('Joker', 'Hearts')]
         actual_output = self.aiplayer._get_discard_options()
-        self.assertIn([Card('4', 'Hearts'), Card('Joker', 'j2'), Card('Joker', 'j1'), Card('7', 'Hearts')], actual_output)
-        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'j1'), Card('7', 'Hearts')], actual_output)
-        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'j2'), Card('7', 'Hearts')], actual_output)
-        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'j2'), Card('7', 'Hearts'), Card('Joker','j1')], actual_output)
+        self.assertIn([Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('Joker', 'Spades'), Card('7', 'Hearts')], actual_output)
+        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'Spades'), Card('7', 'Hearts')], actual_output)
+        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('7', 'Hearts')], actual_output)
+        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('7', 'Hearts'), Card('Joker','Spades')], actual_output)
 
     def test_get_discard_options_invalid(self):
         # Invalid runs
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'j2'), Card('6', 'Clubs'), Card('6','Hearts'), Card('9', 'Hearts')]
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('6', 'Clubs'), Card('6','Hearts'), Card('9', 'Hearts')]
         actual_output = self.aiplayer._get_discard_options()
         unexpected_output = [
-            [Card('4', 'Hearts'), Card('Joker', 'j2'), Card('6', 'Clubs')],
+            [Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('6', 'Clubs')],
             [Card('4', 'Hearts'), Card('6', 'Hearts')],
             [Card('4', 'Hearts'), Card('6', 'Hearts'),Card('9','Hearts')],
         ]
         for option in unexpected_output:
             self.assertNotIn(option, actual_output)
         
-        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'j2'), Card('7', 'Hearts')]
-        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'j2'), Card('7', 'Hearts')], 
+        self.aiplayer.hand = [Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('7', 'Hearts')]
+        self.assertNotIn([Card('4', 'Hearts'), Card('Joker', 'Hearts'), Card('7', 'Hearts')], 
                          self.aiplayer._get_discard_options())
 
         self.aiplayer.hand = [Card('4', 'Hearts'), Card('5', 'Hearts'), Card('6', 'Clubs')]
@@ -73,16 +74,16 @@ class TestAIPlayer(unittest.TestCase):
                          self.aiplayer._get_discard_options())
         
     def test_get_discard_options_invalid_jokers(self):
-        self.aiplayer.hand = [Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('Joker', 'j1')]
-        self.assertIn([Card('Joker', 'j1'), Card('Q', 'Hearts'), Card('K', 'Hearts')], 
+        self.aiplayer.hand = [Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('Joker', 'Spades')]
+        self.assertIn([Card('Joker', 'Spades'), Card('Q', 'Hearts'), Card('K', 'Hearts')], 
                          self.aiplayer._get_discard_options())
-        self.assertNotIn([Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('Joker', 'j1')], 
+        self.assertNotIn([Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('Joker', 'Spades')], 
                          self.aiplayer._get_discard_options())
         
-        self.aiplayer.hand = [Card('A', 'Hearts'), Card('2', 'Hearts'), Card('Joker', 'j1')]
-        self.assertIn([Card('A', 'Hearts'), Card('2', 'Hearts'), Card('Joker', 'j1')], 
+        self.aiplayer.hand = [Card('A', 'Hearts'), Card('2', 'Hearts'), Card('Joker', 'Spades')]
+        self.assertIn([Card('A', 'Hearts'), Card('2', 'Hearts'), Card('Joker', 'Spades')], 
                          self.aiplayer._get_discard_options())
-        self.assertNotIn([Card('Joker', 'j1'), Card('A', 'Hearts'), Card('2', 'Hearts')], 
+        self.assertNotIn([Card('Joker', 'Spades'), Card('A', 'Hearts'), Card('2', 'Hearts')], 
                          self.aiplayer._get_discard_options())
 
     # Test identification of a good vs bad discard
@@ -107,12 +108,11 @@ class TestAIPlayer(unittest.TestCase):
 
     # Test best discard option won't discard a joker if it doesn't need to
     def test_get_best_discard_option_joker(self):
-        self.aiplayer.hand = [Card('Joker', 'j1'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
-        discard_options = [[Card('Joker', 'j1')], [Card('J', 'Hearts')], [Card('Q', 'Hearts')], [Card('K', 'Hearts')],
+        self.aiplayer.hand = [Card('Joker', 'Spades'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
+        discard_options = [[Card('Joker', 'Spades')], [Card('J', 'Hearts')], [Card('Q', 'Hearts')], [Card('K', 'Hearts')],
                            [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')],
-                           [Card('Joker', 'j1'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]]
+                           [Card('Joker', 'Spades'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]]
         best_option = self.aiplayer._get_best_discard_options(discard_options)
-        print(best_option)
         self.assertTrue(len(best_option) == 1)
         self.assertEqual(best_option[0], [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
 
@@ -148,14 +148,14 @@ class TestAIPlayer(unittest.TestCase):
 
     # Testing drawing logic
     def test_simulate_next_turn_run(self):
-        print("Draw to complete run vs complete set")
+        """ Draw to complete run vs complete set """
         self.aiplayer.hand = [Card('9', 'Hearts'), Card('10', 'Hearts'), Card('J', 'Hearts'), Card('K', 'Hearts')]
         self.aiplayer.discard_pile = [Card('K', 'Spades'), Card('Q','Hearts')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
         self.assertEqual(self.aiplayer._simulate_next_turn()['draw'], 1)
 
     def test_simulate_next_turn_run_2(self):
-        print("Draw for a set against complete run")
+        """ Draw for a set against complete run """
         self.aiplayer.hand = [Card('9', 'Hearts'), Card('10', 'Hearts'), Card('J', 'Hearts'), Card('K', 'Hearts')]
         self.aiplayer.discard_pile = [Card('Q','Hearts'), Card('K', 'Spades')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
@@ -164,7 +164,7 @@ class TestAIPlayer(unittest.TestCase):
         # TODO Fix this. should drop run and take the king; currently drops set then tries to complete the dropped run :O
     
     def test_simulate_next_turn_complete_run_drop(self):
-        print("Draw against a complete run")
+        """ Draw against a complete run """
         self.aiplayer.hand = [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('A','Spades')]
         self.aiplayer.discard_pile = [Card('K', 'Spades')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
@@ -173,7 +173,7 @@ class TestAIPlayer(unittest.TestCase):
         self.assertEqual(action['draw'], 'deck')
 
     def test_simulate_next_turn_complete_run_pile(self):
-        print("Draw to complete run")
+        """ Draw to complete run """
         self.aiplayer.hand = [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('2', 'Hearts')]
         self.aiplayer.discard_pile = [Card('K', 'Hearts')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
@@ -182,7 +182,7 @@ class TestAIPlayer(unittest.TestCase):
         self.assertEqual(action['discard'], [Card('2','Hearts')])
 
     def test_simulate_next_turn_set(self):
-        print("Draw for a set")
+        """ Draw for a set """
         self.aiplayer.hand = [Card('Q', 'Hearts'), Card('K', 'Hearts')]
         self.aiplayer.discard_pile = [Card('10', 'Spades'), Card('J', 'Spades'), Card('Q', 'Spades')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
@@ -190,9 +190,8 @@ class TestAIPlayer(unittest.TestCase):
         self.assertEqual(action['draw'], 2)
 
     def test_simulate_next_turn_joker(self):
-        print("Keep Joker Set")
-        # TODO: Support "Keep the joker" logic in other scenarios
-        self.aiplayer.hand = [Card('Joker', 'j1'), Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('9', 'Hearts')]
+        """ Keep the Joker in the set """
+        self.aiplayer.hand = [Card('Joker', 'Spades'), Card('Q', 'Hearts'), Card('K', 'Hearts'), Card('9', 'Hearts')]
         self.aiplayer.discard_pile = [Card('J', 'Hearts')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
         action = self.aiplayer._simulate_next_turn()
@@ -201,17 +200,15 @@ class TestAIPlayer(unittest.TestCase):
         self.assertEqual(action['points'], 0)
 
     def test_simulate_next_turn_joker_2(self):
-        print("Drop Joker No Set")
-        # Discard the Q, take the Jack
-        self.aiplayer.hand = [Card('Joker', 'j1'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
+        # TODO Smarter play would discard the Q, take the Jack (keep joker protected)
+        self.aiplayer.hand = [Card('Joker', 'Spades'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
         self.aiplayer.discard_pile = [Card('J', 'Spades')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
         action = self.aiplayer._simulate_next_turn()
         self.assertEqual(action['draw'], 'deck')
-        self.assertEqual(action['discard'], [Card('Joker', 'j1'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
+        self.assertEqual(action['discard'], [Card('Joker', 'Spades'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
     
     def test_simulate_next_turn_overdone_set(self):
-        print("Simulate Too Complete")
         self.aiplayer.hand = [Card('9', 'Hearts'), Card('10', 'Hearts'), Card('J', 'Hearts'), Card('K', 'Hearts')]
         # Get the best discard option and new total points
         self.aiplayer.discard_pile = [Card('Q','Hearts')]
