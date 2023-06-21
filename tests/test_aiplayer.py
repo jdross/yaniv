@@ -112,9 +112,11 @@ class TestAIPlayer(unittest.TestCase):
         discard_options = [[Card('Joker', 'Spades')], [Card('J', 'Hearts')], [Card('Q', 'Hearts')], [Card('K', 'Hearts')],
                            [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')],
                            [Card('Joker', 'Spades'), Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')]]
+        print("TESTING JOKER")
         best_option = self.aiplayer._get_best_discard_options(discard_options)
         self.assertTrue(len(best_option) == 1)
         self.assertEqual(best_option[0], [Card('J', 'Hearts'), Card('Q', 'Hearts'), Card('K', 'Hearts')])
+        print("END TESTING JOKER")
 
     # Test best discard options
     def test_discard_pair(self):

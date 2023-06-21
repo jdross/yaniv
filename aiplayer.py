@@ -219,6 +219,8 @@ class AIPlayer(Player):
 
         for option in discard_options:
             discard_points = sum(card.value for card in option)
+            if option[0].rank == 'Joker':
+                print(f"option: {option} for {discard_points}, best: {best_discard_options} for {best_points}")
             if discard_points > best_points:
                 best_points = discard_points
                 best_discard_options = [option]

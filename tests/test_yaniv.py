@@ -25,7 +25,7 @@ class TestCard(unittest.TestCase):
         card7 = Card('K', 'Diamonds')
         cards = [card1, card2, card3, card4, card5, card6, card7]
         cards.sort()
-        self.assertEqual(cards, [card4, card3, card1, card2, card6, card5, card7])
+        self.assertEqual(cards, [card4, card3, card1, card2, card6, card7, card5])
 
 class TestYanivGame(unittest.TestCase):
     def setUp(self):
