@@ -224,7 +224,7 @@ def create_game():
         'last_round': None,
         'last_turn': None,
     }
-    return jsonify({'code': code})
+    return jsonify({'code': code, 'pid': pid})
 
 
 @app.route('/api/join', methods=['POST'])
@@ -246,7 +246,7 @@ def join_game():
         room['members'].append({'pid': pid, 'name': name, 'is_ai': False})
 
     push_state(code)
-    return jsonify({'code': code})
+    return jsonify({'code': code, 'pid': pid})
 
 
 @app.route('/api/room/<code>')

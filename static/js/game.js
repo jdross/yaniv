@@ -41,6 +41,18 @@ const es = new EventSource(`/api/events/${code}/${pid}`);
 es.onmessage = e => onState(JSON.parse(e.data));
 es.onerror   = () => { /* reconnects automatically */ };
 
+// Polling fallback: if the hand isn't arriving via SSE (e.g. pid mismatch from
+// a cached page), fetch state over HTTP which always passes the correct pid.
+setInterval(async () => {
+  if (!state?.game) return;
+  if (state.game.players?.find(p => p.is_self)?.hand) return; // SSE working fine
+  try {
+    const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
+    const data = await res.json();
+    if (!data.error) onState(data);
+  } catch (_) {}
+}, 1500);
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function post(url, body) {
   clearError();
@@ -142,7 +154,7 @@ function showBoard(s) {
             data-id="${c.id}">
          <span class="card-num">${i+1}</span>
          <span class="card-rank">${esc(c.rank)}</span>
-         <span class="card-suit">${suitSymbol(c.suit)}</span>
+         <span class="card-suit">${c.suit ? suitSymbol(c.suit) : '🃏'}</span>
          <span class="card-rank-bot">${esc(c.rank)}</span>
        </div>`
     ).join('');

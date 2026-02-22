@@ -81,6 +81,7 @@
       });
       const data = await res.json();
       if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
+      if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
       window.location.href = `/game/${data.code}`;
     });
 
@@ -96,6 +97,7 @@
       });
       const data = await res.json();
       if (data.error) { document.getElementById('join-error').textContent = data.error; return; }
+      if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
       window.location.href = `/game/${code}`;
     });
 
