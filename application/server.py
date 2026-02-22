@@ -9,7 +9,9 @@ from player import Player
 from aiplayer import AIPlayer
 from card import Card
 
-app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'))
+app = Flask(__name__,
+            static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'),
+            static_url_path='')
 app.secret_key = 'yaniv-secret-key-change-in-prod'
 socketio = SocketIO(app, cors_allowed_origins='*')
 
