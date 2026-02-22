@@ -9,6 +9,8 @@ const pid  = (() => {
 let state        = null;
 let selectedCards = [];
 let selectedDraw  = null;
+let prevTurnKey  = null;   // fingerprint of the last rendered turn
+let prevRoundKey = null;   // fingerprint of the last rendered round banner
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $lobby        = document.getElementById('lobby');
@@ -20,7 +22,7 @@ const $lobbyPlayers = document.getElementById('lobby-players');
 const $startBtn     = document.getElementById('start-btn');
 const $scoreBar     = document.getElementById('score-bar');
 const $roundBanner  = document.getElementById('round-banner');
-const $lastAction   = document.getElementById('last-action');
+const $turnLog      = document.getElementById('turn-log');
 const $turnStatus   = document.getElementById('turn-status');
 const $drawSection  = document.getElementById('draw-section');
 const $drawOptions  = document.getElementById('draw-options');
@@ -117,19 +119,16 @@ function showBoard(s) {
      </div>`
   ).join('');
 
-  // Banners
+  // Round result banner (Yaniv / Assaf) — persists for one full lap
   if (s.last_round) {
     $roundBanner.innerHTML = formatRoundBanner(s.last_round);
-    show($roundBanner); hide($lastAction);
+    show($roundBanner);
   } else {
     hide($roundBanner);
-    if (s.last_turn) {
-      $lastAction.innerHTML = formatLastTurn(s.last_turn, me);
-      show($lastAction);
-    } else {
-      hide($lastAction);
-    }
   }
+
+  // Turn log (last 3 plays, animated)
+  renderTurnLog(s.last_turn, s.last_round);
 
   // Turn status
   $turnStatus.textContent = g.is_my_turn
@@ -351,23 +350,86 @@ function cardColor(c) {
   return (c.suit === 'Hearts' || c.suit === 'Diamonds') ? 'red' : '';
 }
 
+// ── Turn log (last 3 plays with slide-in animation) ───────────────────────────
+function renderTurnLog(lastTurn, lastRound) {
+  // When a brand-new round starts, wipe the log so old turns don't linger
+  const roundKey = lastRound ? JSON.stringify(lastRound) : null;
+  if (roundKey !== prevRoundKey) {
+    if (roundKey && !prevRoundKey) {
+      // New round just started — clear old turns
+      $turnLog.innerHTML = '';
+      prevTurnKey = null;
+    }
+    prevRoundKey = roundKey;
+  }
+
+  if (!lastTurn) return;
+
+  const key = JSON.stringify(lastTurn);
+  if (key === prevTurnKey) return; // already rendered this turn
+  prevTurnKey = key;
+
+  const me = state?.game?.players?.find(p => p.is_self);
+  const el = document.createElement('div');
+  el.className = 'turn-log-item new';
+  el.innerHTML = formatLastTurn(lastTurn, me);
+  $turnLog.insertBefore(el, $turnLog.firstChild);
+
+  // Keep at most 3 entries
+  while ($turnLog.children.length > 3) $turnLog.removeChild($turnLog.lastChild);
+}
+
 // ── Banner formatters ─────────────────────────────────────────────────────────
 function formatRoundBanner(r) {
-  let html = r.assaf
-    ? `😱 <strong>${esc(r.assaf.assafed)}</strong> was Assafed by <strong>${esc(r.assaf.by)}</strong>!<br>`
-    : `🎉 <strong>${esc(r.declarer)}</strong> called Yaniv!<br>`;
-  if (r.resets?.length)     html += `🔄 Score reset: ${r.resets.map(esc).join(', ')}<br>`;
-  if (r.eliminated?.length) html += `❌ Eliminated: ${r.eliminated.map(esc).join(', ')}`;
-  return html;
+  const myName = state?.game?.players?.find(p => p.is_self)?.name;
+  const handPts = r.declarer_hand_value != null ? ` (${r.declarer_hand_value} pts)` : '';
+
+  // Headline
+  let headline;
+  if (r.assaf) {
+    const assafedStr = myName === r.assaf.assafed ? 'You' : `<strong>${esc(r.assaf.assafed)}</strong>`;
+    const byStr      = myName === r.assaf.by      ? 'you'  : `<strong>${esc(r.assaf.by)}</strong>`;
+    headline = `😱 ${assafedStr} called Yaniv${handPts} but got Assaf'd by ${byStr}!`;
+  } else {
+    const who = myName === r.declarer ? 'You' : `<strong>${esc(r.declarer)}</strong>`;
+    headline = `🎉 ${who} called Yaniv${handPts}!`;
+  }
+
+  // Per-player score chips
+  let chipsHtml = '';
+  if (r.score_changes?.length) {
+    const chips = r.score_changes.map(sc => {
+      const isMe       = myName === sc.name;
+      const name       = isMe ? 'You' : esc(sc.name);
+      const isAssafed  = r.assaf?.assafed === sc.name;
+
+      let delta;
+      if (sc.added === 0)  delta = `→ ${sc.new_score}`;
+      else if (sc.reset)   delta = `+${sc.added} → reset to ${sc.new_score}`;
+      else                 delta = `+${sc.added} → ${sc.new_score}`;
+      if (sc.eliminated)   delta += ' ❌';
+
+      const cls = ['score-chip',
+        isAssafed   ? 'assafed' : '',
+        sc.reset    ? 'reset'   : '',
+        sc.eliminated ? 'elim'  : '',
+      ].filter(Boolean).join(' ');
+
+      return `<span class="${cls}"><strong>${name}</strong> ${delta}</span>`;
+    }).join('');
+    chipsHtml = `<div class="round-score-changes">${chips}</div>`;
+  }
+
+  return `<div class="round-headline">${headline}</div>${chipsHtml}`;
 }
 
 function formatLastTurn(t, me) {
   const isYou = me && me.name === t.player;
   const who   = isYou ? 'You' : esc(t.player);
-  const cards  = t.discarded.map(cardShort).join(' ');
-  const drew   = t.drawn_from === 'pile'
-    ? (t.drawn_card ? `<strong>${cardShort(t.drawn_card)}</strong> from the pile` : 'from the pile')
-    : (isYou ? 'from the deck' : 'an unknown card from the deck');
+  const cards = t.discarded.map(cardShort).join(' ');
+  const drew  = t.drawn_from === 'pile'
+    ? (t.drawn_card ? `<strong>${cardShort(t.drawn_card)}</strong> from pile` : 'from pile')
+    : (isYou ? 'from deck' : 'unknown card from deck');
   return `${who} discarded <strong>${cards}</strong> · drew ${drew}`;
 }
 

@@ -203,15 +203,42 @@ input[type="range"] {
   border: 1px solid rgba(255,255,255,.2);
 }
 
-/* Last turn action (who discarded what, drew what) */
-.last-action {
+/* Turn log — last 3 plays stacked, newest on top */
+.turn-log { display: flex; flex-direction: column; gap: .25rem; }
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.turn-log-item {
   background: rgba(0,0,0,.2);
   border-radius: 8px;
-  padding: .45rem .8rem;
+  padding: .4rem .8rem;
   font-size: .82rem;
-  color: rgba(255,255,255,.8);
-  border-left: 3px solid rgba(244,208,63,.5);
+  color: rgba(255,255,255,.85);
+  border-left: 3px solid rgba(244,208,63,.45);
 }
+.turn-log-item:not(:first-child) {
+  opacity: .55;
+  font-size: .77rem;
+  border-left-color: rgba(255,255,255,.12);
+}
+.turn-log-item.new { animation: slide-down .28s ease; }
+
+/* Round-result banner enrichments */
+.round-headline { font-weight: 600; margin-bottom: .35rem; }
+.round-score-changes { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .25rem; }
+.score-chip {
+  background: rgba(255,255,255,.1);
+  border-radius: 6px;
+  padding: .18rem .45rem;
+  font-size: .76rem;
+  white-space: nowrap;
+}
+.score-chip.reset   { background: rgba(244,208,63,.2);  border: 1px solid rgba(244,208,63,.35); }
+.score-chip.assafed { background: rgba(231,76,60,.22);  border: 1px solid rgba(231,76,60,.4); }
+.score-chip.elim    { background: rgba(0,0,0,.3); opacity: .7; }
 
 /* Turn status */
 .turn-status {

@@ -99,16 +99,40 @@ def push_state(code):
                 pass
 
 
-def format_round_result(update_info, eliminated, declarer_name):
-    result = {'declarer': declarer_name, 'assaf': None, 'resets': [], 'eliminated': []}
+def format_round_result(update_info, eliminated, declarer_name,
+                        all_players_before, scores_before, declarer_hand_value=0):
+    reset_names = set(p.name for p in update_info.get('reset_players', []))
+    elim_names  = set(p.name for p in eliminated)
+
+    result = {
+        'declarer': declarer_name,
+        'declarer_hand_value': declarer_hand_value,
+        'assaf': None,
+        'resets': list(reset_names),
+        'eliminated': list(elim_names),
+        'score_changes': [],
+    }
+
     if 'assaf' in update_info:
         result['assaf'] = {
             'assafed': update_info['assaf']['assafed'].name,
-            'by': update_info['assaf']['assafed_by'].name,
+            'by':      update_info['assaf']['assafed_by'].name,
         }
-    if 'reset_players' in update_info:
-        result['resets'] = [p.name for p in update_info['reset_players']]
-    result['eliminated'] = [p.name for p in eliminated]
+
+    # Per-player score details (all players, including eliminated)
+    for p in all_players_before:
+        old  = scores_before[p.name]
+        net  = p.score - old
+        # Gross points added before any reset (reset subtracts 50 at exactly 50/100)
+        added = net + 50 if p.name in reset_names else net
+        result['score_changes'].append({
+            'name':      p.name,
+            'added':     added,
+            'new_score': p.score,
+            'reset':     p.name in reset_names,
+            'eliminated': p.name in elim_names,
+        })
+
     return result
 
 
@@ -137,8 +161,15 @@ def process_ai_turns(code):
         if not isinstance(current_player, AIPlayer):
             break
         if g.can_declare_yaniv(current_player) and current_player.should_declare_yaniv():
+            hand_val = sum(c.value for c in current_player.hand)
+            all_before = list(g.players)
+            scores_before = {p.name: p.score for p in g.players}
             update_info, eliminated, winner = g.declare_yaniv(current_player)
-            room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+            room['last_round'] = format_round_result(
+                update_info, eliminated, current_player.name,
+                all_before, scores_before, hand_val,
+            )
+            room['round_banner_turns_left'] = len(g.players)
             room['last_turn'] = None
             if winner:
                 room['status'] = 'finished'
@@ -148,7 +179,14 @@ def process_ai_turns(code):
             push_state(code)
             continue
         action = g.play_turn(current_player)
-        room['last_round'] = None
+        # Persist the round banner for one full lap after a Yaniv
+        left = room.get('round_banner_turns_left', 0)
+        if left > 0:
+            room['round_banner_turns_left'] = left - 1
+            if left - 1 == 0:
+                room['last_round'] = None
+        else:
+            room['last_round'] = None
         room['last_turn'] = make_last_turn(
             current_player.name, action['discard'], action['draw'], draw_opts_before
         )
@@ -305,8 +343,15 @@ def do_action():
     if data.get('declare_yaniv'):
         if not g.can_declare_yaniv(current_player):
             return jsonify({'error': 'Cannot declare Yaniv'}), 400
+        hand_val = sum(c.value for c in current_player.hand)
+        all_before = list(g.players)
+        scores_before = {p.name: p.score for p in g.players}
         update_info, eliminated, winner = g.declare_yaniv(current_player)
-        room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+        room['last_round'] = format_round_result(
+            update_info, eliminated, current_player.name,
+            all_before, scores_before, hand_val,
+        )
+        room['round_banner_turns_left'] = len(g.players)
         room['last_turn'] = None
         if winner:
             room['status'] = 'finished'
@@ -340,7 +385,14 @@ def do_action():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
-    room['last_round'] = None
+    # Persist the round banner for one full lap after a Yaniv
+    left = room.get('round_banner_turns_left', 0)
+    if left > 0:
+        room['round_banner_turns_left'] = left - 1
+        if left - 1 == 0:
+            room['last_round'] = None
+    else:
+        room['last_round'] = None
     room['last_turn'] = make_last_turn(
         current_player.name, discard_cards, draw_action, draw_opts_before
     )
