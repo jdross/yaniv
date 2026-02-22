@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yaniv</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="game-page">
+
+  <!-- LOBBY -->
+  <div id="lobby" class="lobby hidden">
+    <div class="lobby-inner">
+      <h1 class="logo">Yaniv</h1>
+      <div class="room-code-box">
+        <span class="room-code-label">Room code</span>
+        <span id="lobby-code" class="room-code"></span>
+      </div>
+      <p class="share-hint">Share this link: <span id="share-url" class="share-link"></span></p>
+      <div id="lobby-players" class="lobby-players"></div>
+      <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
+      <p id="lobby-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- GAME BOARD -->
+  <div id="board" class="board hidden">
+    <!-- Scores -->
+    <div class="score-bar" id="score-bar"></div>
+
+    <!-- Round result banner -->
+    <div id="round-banner" class="round-banner hidden"></div>
+
+    <!-- Turn status -->
+    <div id="turn-status" class="turn-status"></div>
+
+    <!-- Discard pile -->
+    <div class="section-label">Discard pile</div>
+    <div id="discard-pile" class="card-row"></div>
+
+    <!-- Draw options (only visible on your turn) -->
+    <div id="draw-section" class="draw-section hidden">
+      <div class="section-label">Draw from</div>
+      <div id="draw-options" class="card-row draw-row">
+        <div id="deck-btn" class="draw-choice deck-choice" data-draw="deck">
+          <div class="deck-icon">🂠</div>
+          <span>Deck</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Your hand -->
+    <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
+    <div id="hand" class="card-row hand-row"></div>
+
+    <!-- Key hints -->
+    <div class="key-hints">Keys: <kbd>1</kbd>–<kbd>5</kbd> select cards &nbsp; <kbd>D</kbd> deck &nbsp; <kbd>Enter</kbd> play &nbsp; <kbd>Y</kbd> Yaniv</div>
+
+    <!-- Actions -->
+    <div class="action-bar">
+      <button id="yaniv-btn" class="btn btn-yaniv hidden">🎉 Yaniv!</button>
+      <button id="play-btn" class="btn btn-primary" disabled>Play turn</button>
+    </div>
+
+    <p id="game-error" class="error-msg"></p>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="gameover" class="gameover hidden">
+    <div class="gameover-inner">
+      <h1>🏆 Game Over!</h1>
+      <p id="winner-text" class="winner-text"></p>
+      <div id="final-scores" class="final-scores"></div>
+      <a href="/" class="btn btn-primary">Play again</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/js/game.js"></script>
+</body>
+</html>

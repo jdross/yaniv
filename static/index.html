@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yaniv</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="home-page">
+  <div class="home-container">
+    <header>
+      <h1 class="logo">Yaniv</h1>
+      <p class="tagline">The fast-paced Israeli card game</p>
+    </header>
+
+    <section class="rules-box">
+      <h2>How to Play</h2>
+      <ul>
+        <li>Each player starts with 5 cards. On your turn: discard card(s), then draw one.</li>
+        <li>You can discard a <strong>single card</strong>, a <strong>set</strong> (3+ same rank), or a <strong>run</strong> (3+ consecutive same suit).</li>
+        <li>When your hand totals <strong>5 or less points</strong>, you can call <strong>Yaniv!</strong></li>
+        <li>If someone else has fewer points — you're <strong>Assafed</strong> (+30 pts).</li>
+        <li>Score resets at exactly 50 or 100 points. First to exceed 100 is eliminated. Last player wins!</li>
+        <li>Card values: Ace/Joker = 1 &nbsp;|&nbsp; 2-9 = face value &nbsp;|&nbsp; 10/J/Q/K = 10</li>
+      </ul>
+    </section>
+
+    <div class="panels">
+      <div class="panel">
+        <h2>Create Game</h2>
+        <div class="form-group">
+          <label for="create-name">Your name</label>
+          <input id="create-name" type="text" maxlength="20" placeholder="Enter your name" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="ai-count">AI opponents: <span id="ai-label">0</span></label>
+          <input id="ai-count" type="range" min="0" max="3" value="0">
+          <div class="ai-hint">Total players capped at 4</div>
+        </div>
+        <button id="create-btn" class="btn btn-primary">Create Game</button>
+        <p id="create-error" class="error-msg"></p>
+      </div>
+
+      <div class="divider">or</div>
+
+      <div class="panel">
+        <h2>Join Game</h2>
+        <div class="form-group">
+          <label for="join-name">Your name</label>
+          <input id="join-name" type="text" maxlength="20" placeholder="Enter your name" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="join-code">Room code</label>
+          <input id="join-code" type="text" maxlength="5" placeholder="abcde" autocomplete="off" class="code-input">
+        </div>
+        <button id="join-btn" class="btn btn-secondary">Join Game</button>
+        <p id="join-error" class="error-msg"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const aiCountEl = document.getElementById('ai-count');
+    const aiLabelEl = document.getElementById('ai-label');
+    aiCountEl.addEventListener('input', () => { aiLabelEl.textContent = aiCountEl.value; });
+
+    function saveSession(data) {
+      Object.entries(data).forEach(([k,v]) => sessionStorage.setItem(k, v));
+    }
+
+    document.getElementById('create-btn').addEventListener('click', async () => {
+      const name = document.getElementById('create-name').value.trim();
+      if (!name) { document.getElementById('create-error').textContent = 'Enter your name'; return; }
+      const res = await fetch('/api/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, ai_count: parseInt(aiCountEl.value)})
+      });
+      const data = await res.json();
+      if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
+      saveSession({playerName: name});
+      window.location.href = `/game/${data.code}`;
+    });
+
+    document.getElementById('join-btn').addEventListener('click', async () => {
+      const name = document.getElementById('join-name').value.trim();
+      const code = document.getElementById('join-code').value.trim().toLowerCase();
+      if (!name) { document.getElementById('join-error').textContent = 'Enter your name'; return; }
+      if (!code) { document.getElementById('join-error').textContent = 'Enter room code'; return; }
+      const res = await fetch('/api/join', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, code})
+      });
+      const data = await res.json();
+      if (data.error) { document.getElementById('join-error').textContent = data.error; return; }
+      saveSession({playerName: name});
+      window.location.href = `/game/${code}`;
+    });
+
+    // allow enter key in join code field
+    document.getElementById('join-code').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('join-btn').click();
+    });
+    document.getElementById('create-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('create-btn').click();
+    });
+    document.getElementById('join-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('join-btn').click();
+    });
+  </script>
+</body>
+</html>

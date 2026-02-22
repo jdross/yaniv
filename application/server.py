@@ -1,5 +1,323 @@
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import sys, os, uuid, random, string
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from yaniv import YanivGame, Player, AIPlayer
+from flask import Flask, request, session, jsonify, send_from_directory
+from flask_socketio import SocketIO, join_room, emit
 
+from yaniv import YanivGame
+from player import Player
+from aiplayer import AIPlayer
+from card import Card
+
+app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'))
+app.secret_key = 'yaniv-secret-key-change-in-prod'
+socketio = SocketIO(app, cors_allowed_origins='*')
+
+# In-memory game rooms: code -> room dict
+rooms = {}
+
+
+def gen_code():
+    return ''.join(random.choices(string.ascii_lowercase, k=5))
+
+
+def get_pid():
+    if 'pid' not in session:
+        session['pid'] = str(uuid.uuid4())
+    return session['pid']
+
+
+def card_to_dict(c):
+    return {
+        'id': c._card,
+        'rank': c.rank,
+        'suit': c.suit if c.rank != 'Joker' else None,
+        'value': c.value,
+    }
+
+
+def room_state(room, pid=None):
+    """Serialize room state. If pid given, include that player's hand."""
+    players_out = []
+    for p in room['members']:
+        players_out.append({
+            'pid': p['pid'],
+            'name': p['name'],
+            'is_ai': p['is_ai'],
+        })
+
+    game_out = None
+    if room['game']:
+        g = room['game']
+        current_player, draw_options = g.start_turn()
+        gplayers = []
+        for gp in g.players:
+            gpd = {
+                'name': gp.name,
+                'score': gp.score,
+                'hand_count': len(gp.hand),
+                'is_ai': isinstance(gp, AIPlayer),
+                'is_current': gp is current_player,
+            }
+            mem = next((m for m in room['members'] if m['name'] == gp.name and not m['is_ai']), None)
+            if mem:
+                gpd['pid'] = mem['pid']
+                if pid and mem['pid'] == pid:
+                    gpd['hand'] = [card_to_dict(c) for c in gp.hand]
+                    gpd['is_self'] = True
+                    gpd['can_yaniv'] = g.can_declare_yaniv(gp)
+            else:
+                gpd['pid'] = None
+            gplayers.append(gpd)
+
+        is_my_turn = False
+        my_draw_options = []
+        if pid:
+            cur_mem = next((m for m in room['members'] if m['pid'] == pid), None)
+            if cur_mem and current_player.name == cur_mem['name']:
+                is_my_turn = True
+                my_draw_options = [card_to_dict(c) for c in draw_options]
+
+        game_out = {
+            'players': gplayers,
+            'discard_top': [card_to_dict(c) for c in g.last_discard],
+            'draw_options': my_draw_options,
+            'current_player_name': current_player.name,
+            'is_my_turn': is_my_turn,
+            'deck_size': len(g.deck),
+        }
+
+    return {
+        'code': room['code'],
+        'status': room['status'],
+        'members': players_out,
+        'game': game_out,
+        'winner': room.get('winner'),
+        'last_round': room.get('last_round'),
+    }
+
+
+def push_state(code, event='state'):
+    room = rooms.get(code)
+    if not room:
+        return
+    for mem in room['members']:
+        if not mem['is_ai'] and mem.get('sid'):
+            socketio.emit(event, room_state(room, mem['pid']), to=mem['sid'])
+
+
+def format_round_result(update_info, eliminated, declarer_name):
+    result = {'declarer': declarer_name, 'assaf': None, 'resets': [], 'eliminated': []}
+    if 'assaf' in update_info:
+        result['assaf'] = {
+            'assafed': update_info['assaf']['assafed'].name,
+            'by': update_info['assaf']['assafed_by'].name,
+        }
+    if 'reset_players' in update_info:
+        result['resets'] = [p.name for p in update_info['reset_players']]
+    result['eliminated'] = [p.name for p in eliminated]
+    return result
+
+
+def process_ai_turns(code):
+    room = rooms.get(code)
+    if not room or room['status'] != 'playing':
+        return
+    g = room['game']
+    while True:
+        current_player, _ = g.start_turn()
+        if not isinstance(current_player, AIPlayer):
+            break
+        if g.can_declare_yaniv(current_player) and current_player.should_declare_yaniv():
+            update_info, eliminated, winner = g.declare_yaniv(current_player)
+            room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+            if winner:
+                room['status'] = 'finished'
+                room['winner'] = winner.name
+                push_state(code)
+                return
+            push_state(code)
+            continue
+        g.play_turn(current_player)
+        push_state(code)
+
+
+# ── HTTP routes ────────────────────────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
+
+
+@app.route('/game/<code>')
+def game_page(code):
+    return send_from_directory(app.static_folder, 'game.html')
+
+
+@app.route('/api/create', methods=['POST'])
+def create_game():
+    pid = get_pid()
+    data = request.json or {}
+    name = (data.get('name') or 'Player').strip()[:20] or 'Player'
+    ai_count = max(0, min(3, int(data.get('ai_count', 0))))
+
+    code = gen_code()
+    while code in rooms:
+        code = gen_code()
+
+    members = [{'pid': pid, 'name': name, 'is_ai': False, 'sid': None}]
+    for i in range(ai_count):
+        members.append({'pid': f'ai-{i}', 'name': f'AI {i+1}', 'is_ai': True, 'sid': None})
+
+    rooms[code] = {
+        'code': code,
+        'status': 'waiting',
+        'members': members,
+        'game': None,
+        'winner': None,
+        'last_round': None,
+    }
+    return jsonify({'code': code})
+
+
+@app.route('/api/join', methods=['POST'])
+def join_game():
+    pid = get_pid()
+    data = request.json or {}
+    code = (data.get('code') or '').strip().lower()
+    name = (data.get('name') or 'Player').strip()[:20] or 'Player'
+
+    room = rooms.get(code)
+    if not room:
+        return jsonify({'error': 'Room not found'}), 404
+    if room['status'] != 'waiting':
+        return jsonify({'error': 'Game already started'}), 400
+
+    human_count = sum(1 for m in room['members'] if not m['is_ai'])
+    if human_count >= 4:
+        return jsonify({'error': 'Room is full'}), 400
+
+    existing = next((m for m in room['members'] if m['pid'] == pid), None)
+    if not existing:
+        room['members'].append({'pid': pid, 'name': name, 'is_ai': False, 'sid': None})
+
+    push_state(code)
+    return jsonify({'code': code})
+
+
+@app.route('/api/room/<code>')
+def get_room(code):
+    pid = get_pid()
+    room = rooms.get(code)
+    if not room:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(room_state(room, pid))
+
+
+# ── SocketIO events ────────────────────────────────────────────────────────────
+
+@socketio.on('subscribe')
+def on_subscribe(data):
+    code = data.get('code', '').lower()
+    pid = data.get('pid')
+    room = rooms.get(code)
+    if not room:
+        emit('error', {'msg': 'Room not found'})
+        return
+    join_room(code)
+    mem = next((m for m in room['members'] if m['pid'] == pid), None)
+    if mem:
+        mem['sid'] = request.sid
+    emit('state', room_state(room, pid))
+
+
+@socketio.on('start')
+def on_start(data):
+    code = data.get('code', '').lower()
+    room = rooms.get(code)
+    if not room or room['status'] != 'waiting':
+        return
+    if len(room['members']) < 2:
+        emit('error', {'msg': 'Need at least 2 players'})
+        return
+
+    players = []
+    for m in room['members']:
+        if m['is_ai']:
+            players.append(AIPlayer(m['name']))
+        else:
+            players.append(Player(m['name']))
+
+    g = YanivGame(players)
+    g.start_game()
+    room['game'] = g
+    room['status'] = 'playing'
+    room['last_round'] = None
+
+    push_state(code)
+    process_ai_turns(code)
+
+
+@socketio.on('action')
+def on_action(data):
+    code = data.get('code', '').lower()
+    pid = data.get('pid')
+    room = rooms.get(code)
+    if not room or room['status'] != 'playing':
+        return
+
+    g = room['game']
+    current_player, draw_options = g.start_turn()
+
+    mem = next((m for m in room['members'] if m['pid'] == pid), None)
+    if not mem or current_player.name != mem['name']:
+        emit('error', {'msg': 'Not your turn'})
+        return
+
+    if data.get('declare_yaniv'):
+        if not g.can_declare_yaniv(current_player):
+            emit('error', {'msg': 'Cannot declare Yaniv'})
+            return
+        update_info, eliminated, winner = g.declare_yaniv(current_player)
+        room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+        if winner:
+            room['status'] = 'finished'
+            room['winner'] = winner.name
+            push_state(code)
+            return
+        push_state(code)
+        process_ai_turns(code)
+        return
+
+    card_ids = data.get('discard', [])
+    draw = data.get('draw')
+
+    discard_cards = []
+    hand_copy = list(current_player.hand)
+    for cid in card_ids:
+        match = next((c for c in hand_copy if c._card == cid), None)
+        if not match:
+            emit('error', {'msg': f'Card not in hand'})
+            return
+        discard_cards.append(match)
+        hand_copy.remove(match)
+
+    if not discard_cards:
+        emit('error', {'msg': 'Must discard at least one card'})
+        return
+
+    draw_action = 'deck' if draw == 'deck' else int(draw)
+
+    try:
+        g.play_turn(current_player, {'discard': discard_cards, 'draw': draw_action})
+    except ValueError as e:
+        emit('error', {'msg': str(e)})
+        return
+
+    room['last_round'] = None
+    push_state(code)
+    process_ai_turns(code)
+
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
