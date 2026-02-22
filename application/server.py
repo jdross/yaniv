@@ -94,6 +94,7 @@ def room_state(room, pid=None):
         'game': game_out,
         'winner': room.get('winner'),
         'last_round': room.get('last_round'),
+        'last_turn': room.get('last_turn'),
     }
 
 
@@ -119,18 +120,35 @@ def format_round_result(update_info, eliminated, declarer_name):
     return result
 
 
+def make_last_turn(player_name, discard_cards, draw_action, draw_opts_before):
+    """Build a last_turn dict for state broadcasting."""
+    drawn_card = None
+    drawn_from = 'deck'
+    if draw_action != 'deck':
+        drawn_from = 'pile'
+        if draw_action < len(draw_opts_before):
+            drawn_card = card_to_dict(draw_opts_before[draw_action])
+    return {
+        'player': player_name,
+        'discarded': [card_to_dict(c) for c in discard_cards],
+        'drawn_from': drawn_from,
+        'drawn_card': drawn_card,
+    }
+
+
 def process_ai_turns(code):
     room = rooms.get(code)
     if not room or room['status'] != 'playing':
         return
     g = room['game']
     while True:
-        current_player, _ = g.start_turn()
+        current_player, draw_opts_before = g.start_turn()
         if not isinstance(current_player, AIPlayer):
             break
         if g.can_declare_yaniv(current_player) and current_player.should_declare_yaniv():
             update_info, eliminated, winner = g.declare_yaniv(current_player)
             room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+            room['last_turn'] = None
             if winner:
                 room['status'] = 'finished'
                 room['winner'] = winner.name
@@ -138,7 +156,11 @@ def process_ai_turns(code):
                 return
             push_state(code)
             continue
-        g.play_turn(current_player)
+        action = g.play_turn(current_player)
+        room['last_round'] = None
+        room['last_turn'] = make_last_turn(
+            current_player.name, action['discard'], action['draw'], draw_opts_before
+        )
         push_state(code)
 
 
@@ -176,6 +198,7 @@ def create_game():
         'game': None,
         'winner': None,
         'last_round': None,
+        'last_turn': None,
     }
     return jsonify({'code': code})
 
@@ -253,6 +276,7 @@ def on_start(data):
     room['game'] = g
     room['status'] = 'playing'
     room['last_round'] = None
+    room['last_turn'] = None
 
     push_state(code)
     process_ai_turns(code)
@@ -307,6 +331,7 @@ def on_action(data):
         return
 
     draw_action = 'deck' if draw == 'deck' else int(draw)
+    draw_opts_before = list(draw_options)  # captured before play_turn modifies state
 
     try:
         g.play_turn(current_player, {'discard': discard_cards, 'draw': draw_action})
@@ -315,6 +340,9 @@ def on_action(data):
         return
 
     room['last_round'] = None
+    room['last_turn'] = make_last_turn(
+        current_player.name, discard_cards, draw_action, draw_opts_before
+    )
     push_state(code)
     process_ai_turns(code)
 

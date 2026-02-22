@@ -28,8 +28,11 @@
     <!-- Scores -->
     <div class="score-bar" id="score-bar"></div>
 
-    <!-- Round result banner -->
+    <!-- Round result banner (Yaniv/Assaf) -->
     <div id="round-banner" class="round-banner hidden"></div>
+
+    <!-- Last turn action info -->
+    <div id="last-action" class="last-action hidden"></div>
 
     <!-- Turn status -->
     <div id="turn-status" class="turn-status"></div>
@@ -40,11 +43,17 @@
 
     <!-- Draw options (only visible on your turn) -->
     <div id="draw-section" class="draw-section hidden">
-      <div class="section-label">Draw from</div>
-      <div id="draw-options" class="card-row draw-row">
-        <div id="deck-btn" class="draw-choice deck-choice" data-draw="deck">
-          <div class="deck-icon">🂠</div>
-          <span>Deck</span>
+      <div class="draw-section-inner">
+        <div class="draw-group">
+          <div class="section-label">Deck</div>
+          <div id="deck-btn" class="draw-choice deck-choice" data-draw="deck">
+            <div class="deck-icon">🂠</div>
+            <span id="deck-size-label"></span>
+          </div>
+        </div>
+        <div class="draw-group" id="pile-draw-group">
+          <div class="section-label">From pile <span class="pile-hint" id="pile-hint"></span></div>
+          <div id="draw-options" class="card-row draw-row"></div>
         </div>
       </div>
     </div>

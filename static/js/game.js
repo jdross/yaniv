@@ -11,20 +11,23 @@ let selectedCards = [];    // card ids selected for discard
 let selectedDraw  = null;  // 'deck' or index number
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
-const $lobby     = document.getElementById('lobby');
-const $board     = document.getElementById('board');
-const $gameover  = document.getElementById('gameover');
-const $lobbyCode = document.getElementById('lobby-code');
-const $shareUrl  = document.getElementById('share-url');
+const $lobby       = document.getElementById('lobby');
+const $board       = document.getElementById('board');
+const $gameover    = document.getElementById('gameover');
+const $lobbyCode   = document.getElementById('lobby-code');
+const $shareUrl    = document.getElementById('share-url');
 const $lobbyPlayers = document.getElementById('lobby-players');
-const $startBtn  = document.getElementById('start-btn');
-const $scoreBar  = document.getElementById('score-bar');
+const $startBtn    = document.getElementById('start-btn');
+const $scoreBar    = document.getElementById('score-bar');
 const $roundBanner = document.getElementById('round-banner');
+const $lastAction  = document.getElementById('last-action');
 const $turnStatus  = document.getElementById('turn-status');
 const $discardPile = document.getElementById('discard-pile');
 const $drawSection = document.getElementById('draw-section');
 const $drawOptions = document.getElementById('draw-options');
 const $deckBtn     = document.getElementById('deck-btn');
+const $deckSizeLabel = document.getElementById('deck-size-label');
+const $pileHint    = document.getElementById('pile-hint');
 const $hand        = document.getElementById('hand');
 const $handValue   = document.getElementById('hand-value');
 const $yanivBtn    = document.getElementById('yaniv-btn');
@@ -66,8 +69,7 @@ function onState(s) {
 function showLobby(s) {
   show($lobby); hide($board); hide($gameover);
   $lobbyCode.textContent = s.code;
-  const url = location.href;
-  $shareUrl.textContent = url;
+  $shareUrl.textContent = location.href;
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
@@ -93,16 +95,24 @@ function showBoard(s) {
     `<div class="score-player ${p.is_current ? 'current' : ''} ${p.is_self ? 'self' : ''}">
        <div class="sp-name">${esc(p.name)}</div>
        <div class="sp-score">${p.score}</div>
-       <div class="sp-cards">${p.hand_count} cards</div>
+       <div class="sp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
      </div>`
   ).join('');
 
-  // Round banner
+  // Round banner (Yaniv / Assaf)
   if (s.last_round) {
     $roundBanner.innerHTML = formatRoundBanner(s.last_round);
     show($roundBanner);
+    hide($lastAction);
   } else {
     hide($roundBanner);
+    // Last turn action
+    if (s.last_turn) {
+      $lastAction.innerHTML = formatLastTurn(s.last_turn, me);
+      show($lastAction);
+    } else {
+      hide($lastAction);
+    }
   }
 
   // Turn status
@@ -118,6 +128,7 @@ function showBoard(s) {
   // Draw section
   if (g.is_my_turn) {
     show($drawSection);
+    $deckSizeLabel.textContent = `${g.deck_size} left`;
     renderDrawOptions(g.draw_options);
   } else {
     hide($drawSection);
@@ -127,7 +138,7 @@ function showBoard(s) {
   if (me && me.hand) {
     $hand.innerHTML = me.hand.map((c, i) =>
       `<div class="card ${cardColor(c)} ${selectedCards.includes(c.id) ? 'selected' : ''}"
-            data-id="${c.id}" data-idx="${i}">
+            data-id="${c.id}">
          <span class="card-num">${i+1}</span>
          <span class="card-rank">${esc(c.rank)}</span>
          <span class="card-suit">${suitSymbol(c.suit)}</span>
@@ -144,7 +155,6 @@ function showBoard(s) {
       });
     }
 
-    // Yaniv button
     if (g.is_my_turn && me.can_yaniv) {
       show($yanivBtn);
     } else {
@@ -160,27 +170,33 @@ function showBoard(s) {
 }
 
 function renderDrawOptions(options) {
-  // Keep deck button, rebuild pile options
-  const existing = $drawOptions.querySelectorAll('.draw-choice:not(.deck-choice)');
-  existing.forEach(e => e.remove());
+  $drawOptions.innerHTML = '';
+
+  // Pile hint: explain which cards are available when it's a run
+  if (options.length >= 2) {
+    $pileHint.textContent = '(run — pick an end card)';
+  } else if (options.length === 1) {
+    $pileHint.textContent = '';
+  } else {
+    $pileHint.textContent = '(none available)';
+  }
 
   options.forEach((c, i) => {
     const div = document.createElement('div');
     div.className = 'draw-choice' + (selectedDraw === i ? ' selected' : '');
     div.dataset.draw = i;
-    div.innerHTML = `${cardHtml(c)}<span>${esc(c.rank)}${c.suit ? ' ' + suitSymbol(c.suit) : ''}</span>`;
+    div.innerHTML = `${cardHtml(c)}<span class="draw-label">${esc(c.rank)}${c.suit ? ' ' + suitSymbol(c.suit) : ''}</span>`;
     div.addEventListener('click', () => selectDraw(i));
     $drawOptions.appendChild(div);
   });
 
-  // Update deck selected state
+  // Deck button selected state
   $deckBtn.className = 'draw-choice deck-choice' + (selectedDraw === 'deck' ? ' selected' : '');
   $deckBtn.onclick = () => selectDraw('deck');
 }
 
 function selectDraw(val) {
   selectedDraw = val;
-  // re-render draw choices highlighting
   const g = state.game;
   renderDrawOptions(g.draw_options);
   updatePlayBtn();
@@ -192,8 +208,21 @@ function toggleCard(id) {
   } else {
     selectedCards.push(id);
   }
-  // Re-render hand with new selection
-  showBoard(state);
+  // Re-render hand with updated selection (preserve draw state)
+  const g = state.game;
+  const me = g.players.find(p => p.is_self);
+  if (me && me.hand) {
+    $hand.querySelectorAll('.card').forEach(el => {
+      const cid = parseInt(el.dataset.id);
+      el.classList.toggle('selected', selectedCards.includes(cid));
+    });
+    // Re-attach listeners
+    $hand.querySelectorAll('.card').forEach(el => {
+      el.onclick = () => toggleCard(parseInt(el.dataset.id));
+    });
+    const total = me.hand.reduce((s,c) => s + c.value, 0);
+    $handValue.textContent = `(${total} pts)`;
+  }
   updatePlayBtn();
 }
 
@@ -222,7 +251,7 @@ function playTurn() {
 // ── Game Over ─────────────────────────────────────────────────────────────────
 function showGameOver(s) {
   hide($lobby); hide($board); show($gameover);
-  $winnerText.textContent = `${s.winner} wins!`;
+  $winnerText.textContent = `${esc(s.winner)} wins!`;
   if (s.game) {
     $finalScores.innerHTML = s.game.players
       .slice()
@@ -281,6 +310,12 @@ function cardHtml(c) {
   </div>`;
 }
 
+function cardShort(c) {
+  if (!c) return '?';
+  const suit = c.suit ? suitSymbol(c.suit) : '';
+  return `${esc(c.rank)}${suit}`;
+}
+
 function suitSymbol(suit) {
   return { Clubs: '♣', Diamonds: '♦', Hearts: '♥', Spades: '♠' }[suit] || '';
 }
@@ -303,6 +338,19 @@ function formatRoundBanner(r) {
     html += `❌ Eliminated: ${r.eliminated.map(esc).join(', ')}`;
   }
   return html;
+}
+
+function formatLastTurn(t, me) {
+  const isYou = me && me.name === t.player;
+  const who = isYou ? 'You' : esc(t.player);
+  const discarded = t.discarded.map(cardShort).join(' ');
+  let drew;
+  if (t.drawn_from === 'pile') {
+    drew = t.drawn_card ? `<strong>${cardShort(t.drawn_card)}</strong> from the pile` : 'from the pile';
+  } else {
+    drew = isYou ? 'from the deck' : 'an unknown card from the deck';
+  }
+  return `${who} discarded <strong>${discarded}</strong> · drew ${drew}`;
 }
 
 function esc(s) {

@@ -192,7 +192,7 @@ input[type="range"] {
 .score-player .sp-cards { font-size: .7rem; opacity: .6; }
 .score-player.self .sp-name::after { content: ' (you)'; opacity: .6; font-weight: 400; }
 
-/* Round banner */
+/* Round banner (Yaniv/Assaf) */
 .round-banner {
   background: rgba(0,0,0,.5);
   border-radius: 10px;
@@ -200,7 +200,17 @@ input[type="range"] {
   font-size: .9rem;
   line-height: 1.6;
   text-align: center;
-  border: 1px solid rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.2);
+}
+
+/* Last turn action (who discarded what, drew what) */
+.last-action {
+  background: rgba(0,0,0,.2);
+  border-radius: 8px;
+  padding: .45rem .8rem;
+  font-size: .82rem;
+  color: rgba(255,255,255,.8);
+  border-left: 3px solid rgba(244,208,63,.5);
 }
 
 /* Turn status */
@@ -287,7 +297,13 @@ input[type="range"] {
 
 /* Draw options */
 .draw-section { padding: .5rem .6rem; background: rgba(0,0,0,.2); border-radius: 10px; }
-.draw-row { align-items: center; min-height: unset; }
+.draw-section-inner { display: flex; gap: 1.2rem; align-items: flex-start; }
+.draw-group { display: flex; flex-direction: column; }
+.draw-group:first-child { flex-shrink: 0; }
+.draw-group:last-child { flex: 1; }
+.pile-hint { font-size: .7rem; opacity: .6; text-transform: none; letter-spacing: 0; margin-left: .2rem; }
+.draw-row { align-items: center; min-height: unset; flex-wrap: wrap; }
+.draw-label { font-size: .7rem; }
 .draw-choice {
   display: flex;
   flex-direction: column;
