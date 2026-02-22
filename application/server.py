@@ -1,32 +1,24 @@
-import sys, os, uuid, random, string
+import sys, os, uuid, random, string, queue, threading, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, request, session, jsonify, send_from_directory
-from flask_socketio import SocketIO, join_room, emit
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 
 from yaniv import YanivGame
 from player import Player
 from aiplayer import AIPlayer
-from card import Card
 
 app = Flask(__name__,
             static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'),
             static_url_path='')
 app.secret_key = 'yaniv-secret-key-change-in-prod'
-socketio = SocketIO(app, cors_allowed_origins='*')
 
-# In-memory game rooms: code -> room dict
 rooms = {}
+sse_clients = {}   # code -> {pid: queue.Queue}
+sse_lock = threading.Lock()
 
 
 def gen_code():
     return ''.join(random.choices(string.ascii_lowercase, k=5))
-
-
-def get_pid():
-    if 'pid' not in session:
-        session['pid'] = str(uuid.uuid4())
-    return session['pid']
 
 
 def card_to_dict(c):
@@ -39,14 +31,8 @@ def card_to_dict(c):
 
 
 def room_state(room, pid=None):
-    """Serialize room state. If pid given, include that player's hand."""
-    players_out = []
-    for p in room['members']:
-        players_out.append({
-            'pid': p['pid'],
-            'name': p['name'],
-            'is_ai': p['is_ai'],
-        })
+    players_out = [{'pid': m['pid'], 'name': m['name'], 'is_ai': m['is_ai']}
+                   for m in room['members']]
 
     game_out = None
     if room['game']:
@@ -100,13 +86,17 @@ def room_state(room, pid=None):
     }
 
 
-def push_state(code, event='state'):
+def push_state(code):
     room = rooms.get(code)
     if not room:
         return
-    for mem in room['members']:
-        if not mem['is_ai'] and mem.get('sid'):
-            socketio.emit(event, room_state(room, mem['pid']), to=mem['sid'])
+    with sse_lock:
+        clients = sse_clients.get(code, {})
+        for pid, q in list(clients.items()):
+            try:
+                q.put_nowait(room_state(room, pid))
+            except queue.Full:
+                pass
 
 
 def format_round_result(update_info, eliminated, declarer_name):
@@ -123,7 +113,6 @@ def format_round_result(update_info, eliminated, declarer_name):
 
 
 def make_last_turn(player_name, discard_cards, draw_action, draw_opts_before):
-    """Build a last_turn dict for state broadcasting."""
     drawn_card = None
     drawn_from = 'deck'
     if draw_action != 'deck':
@@ -166,7 +155,7 @@ def process_ai_turns(code):
         push_state(code)
 
 
-# ── HTTP routes ────────────────────────────────────────────────────────────────
+# ── Static pages ───────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -178,10 +167,43 @@ def game_page(code):
     return send_from_directory(app.static_folder, 'game.html')
 
 
+# ── SSE stream ─────────────────────────────────────────────────────────────────
+
+@app.route('/api/events/<code_>/<pid>')
+def sse_stream(code_, pid):
+    q = queue.Queue(maxsize=50)
+    with sse_lock:
+        sse_clients.setdefault(code_, {})[pid] = q
+
+    def generate():
+        try:
+            room = rooms.get(code_)
+            if room:
+                yield f"data: {json.dumps(room_state(room, pid))}\n\n"
+            while True:
+                try:
+                    state = q.get(timeout=25)
+                    yield f"data: {json.dumps(state)}\n\n"
+                except queue.Empty:
+                    yield ": heartbeat\n\n"
+        finally:
+            with sse_lock:
+                if code_ in sse_clients:
+                    sse_clients[code_].pop(pid, None)
+
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+# ── REST API ───────────────────────────────────────────────────────────────────
+
 @app.route('/api/create', methods=['POST'])
 def create_game():
-    pid = get_pid()
     data = request.json or {}
+    pid = data.get('pid') or str(uuid.uuid4())
     name = (data.get('name') or 'Player').strip()[:20] or 'Player'
     ai_count = max(0, min(3, int(data.get('ai_count', 0))))
 
@@ -189,9 +211,9 @@ def create_game():
     while code in rooms:
         code = gen_code()
 
-    members = [{'pid': pid, 'name': name, 'is_ai': False, 'sid': None}]
+    members = [{'pid': pid, 'name': name, 'is_ai': False}]
     for i in range(ai_count):
-        members.append({'pid': f'ai-{i}', 'name': f'AI {i+1}', 'is_ai': True, 'sid': None})
+        members.append({'pid': f'ai-{i}', 'name': f'AI {i+1}', 'is_ai': True})
 
     rooms[code] = {
         'code': code,
@@ -207,8 +229,8 @@ def create_game():
 
 @app.route('/api/join', methods=['POST'])
 def join_game():
-    pid = get_pid()
     data = request.json or {}
+    pid = data.get('pid') or str(uuid.uuid4())
     code = (data.get('code') or '').strip().lower()
     name = (data.get('name') or 'Player').strip()[:20] or 'Player'
 
@@ -217,14 +239,11 @@ def join_game():
         return jsonify({'error': 'Room not found'}), 404
     if room['status'] != 'waiting':
         return jsonify({'error': 'Game already started'}), 400
-
-    human_count = sum(1 for m in room['members'] if not m['is_ai'])
-    if human_count >= 4:
+    if sum(1 for m in room['members'] if not m['is_ai']) >= 4:
         return jsonify({'error': 'Room is full'}), 400
 
-    existing = next((m for m in room['members'] if m['pid'] == pid), None)
-    if not existing:
-        room['members'].append({'pid': pid, 'name': name, 'is_ai': False, 'sid': None})
+    if not any(m['pid'] == pid for m in room['members']):
+        room['members'].append({'pid': pid, 'name': name, 'is_ai': False})
 
     push_state(code)
     return jsonify({'code': code})
@@ -232,47 +251,25 @@ def join_game():
 
 @app.route('/api/room/<code>')
 def get_room(code):
-    pid = get_pid()
+    pid = request.args.get('pid', '')
     room = rooms.get(code)
     if not room:
         return jsonify({'error': 'Not found'}), 404
     return jsonify(room_state(room, pid))
 
 
-# ── SocketIO events ────────────────────────────────────────────────────────────
-
-@socketio.on('subscribe')
-def on_subscribe(data):
-    code = data.get('code', '').lower()
-    pid = data.get('pid')
-    room = rooms.get(code)
-    if not room:
-        emit('error', {'msg': 'Room not found'})
-        return
-    join_room(code)
-    mem = next((m for m in room['members'] if m['pid'] == pid), None)
-    if mem:
-        mem['sid'] = request.sid
-    emit('state', room_state(room, pid))
-
-
-@socketio.on('start')
-def on_start(data):
-    code = data.get('code', '').lower()
+@app.route('/api/start', methods=['POST'])
+def start_game():
+    data = request.json or {}
+    code = (data.get('code') or '').lower()
     room = rooms.get(code)
     if not room or room['status'] != 'waiting':
-        return
+        return jsonify({'error': 'Cannot start'}), 400
     if len(room['members']) < 2:
-        emit('error', {'msg': 'Need at least 2 players'})
-        return
+        return jsonify({'error': 'Need at least 2 players'}), 400
 
-    players = []
-    for m in room['members']:
-        if m['is_ai']:
-            players.append(AIPlayer(m['name']))
-        else:
-            players.append(Player(m['name']))
-
+    players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
+               for m in room['members']]
     g = YanivGame(players)
     g.start_game()
     room['game'] = g
@@ -281,39 +278,42 @@ def on_start(data):
     room['last_turn'] = None
 
     push_state(code)
-    process_ai_turns(code)
+    # Run AI turns in a background thread so the HTTP response returns immediately
+    threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
+    return jsonify({'ok': True})
 
 
-@socketio.on('action')
-def on_action(data):
-    code = data.get('code', '').lower()
-    pid = data.get('pid')
+@app.route('/api/action', methods=['POST'])
+def do_action():
+    data = request.json or {}
+    code = (data.get('code') or '').lower()
+    pid = data.get('pid', '')
     room = rooms.get(code)
+
     if not room or room['status'] != 'playing':
-        return
+        return jsonify({'error': 'Game not active'}), 400
 
     g = room['game']
     current_player, draw_options = g.start_turn()
 
     mem = next((m for m in room['members'] if m['pid'] == pid), None)
     if not mem or current_player.name != mem['name']:
-        emit('error', {'msg': 'Not your turn'})
-        return
+        return jsonify({'error': 'Not your turn'}), 400
 
     if data.get('declare_yaniv'):
         if not g.can_declare_yaniv(current_player):
-            emit('error', {'msg': 'Cannot declare Yaniv'})
-            return
+            return jsonify({'error': 'Cannot declare Yaniv'}), 400
         update_info, eliminated, winner = g.declare_yaniv(current_player)
         room['last_round'] = format_round_result(update_info, eliminated, current_player.name)
+        room['last_turn'] = None
         if winner:
             room['status'] = 'finished'
             room['winner'] = winner.name
             push_state(code)
-            return
+            return jsonify({'ok': True})
         push_state(code)
-        process_ai_turns(code)
-        return
+        threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
+        return jsonify({'ok': True})
 
     card_ids = data.get('discard', [])
     draw = data.get('draw')
@@ -323,31 +323,29 @@ def on_action(data):
     for cid in card_ids:
         match = next((c for c in hand_copy if c._card == cid), None)
         if not match:
-            emit('error', {'msg': f'Card not in hand'})
-            return
+            return jsonify({'error': 'Card not in hand'}), 400
         discard_cards.append(match)
         hand_copy.remove(match)
 
     if not discard_cards:
-        emit('error', {'msg': 'Must discard at least one card'})
-        return
+        return jsonify({'error': 'Must discard at least one card'}), 400
 
     draw_action = 'deck' if draw == 'deck' else int(draw)
-    draw_opts_before = list(draw_options)  # captured before play_turn modifies state
+    draw_opts_before = list(draw_options)
 
     try:
         g.play_turn(current_player, {'discard': discard_cards, 'draw': draw_action})
     except ValueError as e:
-        emit('error', {'msg': str(e)})
-        return
+        return jsonify({'error': str(e)}), 400
 
     room['last_round'] = None
     room['last_turn'] = make_last_turn(
         current_player.name, discard_cards, draw_action, draw_opts_before
     )
     push_state(code)
-    process_ai_turns(code)
+    threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
+    return jsonify({'ok': True})
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5174, debug=True, allow_unsafe_werkzeug=True)
+    app.run(host='0.0.0.0', port=5174, debug=True, threaded=True)

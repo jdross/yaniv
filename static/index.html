@@ -60,13 +60,16 @@
   </div>
 
   <script>
+    // Stable player ID stored in localStorage
+    const pid = (() => {
+      let id = localStorage.getItem('yaniv_pid');
+      if (!id) { id = crypto.randomUUID(); localStorage.setItem('yaniv_pid', id); }
+      return id;
+    })();
+
     const aiCountEl = document.getElementById('ai-count');
     const aiLabelEl = document.getElementById('ai-label');
     aiCountEl.addEventListener('input', () => { aiLabelEl.textContent = aiCountEl.value; });
-
-    function saveSession(data) {
-      Object.entries(data).forEach(([k,v]) => sessionStorage.setItem(k, v));
-    }
 
     document.getElementById('create-btn').addEventListener('click', async () => {
       const name = document.getElementById('create-name').value.trim();
@@ -74,11 +77,10 @@
       const res = await fetch('/api/create', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, ai_count: parseInt(aiCountEl.value)})
+        body: JSON.stringify({name, ai_count: parseInt(aiCountEl.value), pid})
       });
       const data = await res.json();
       if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
-      saveSession({playerName: name});
       window.location.href = `/game/${data.code}`;
     });
 
@@ -90,11 +92,10 @@
       const res = await fetch('/api/join', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, code})
+        body: JSON.stringify({name, code, pid})
       });
       const data = await res.json();
       if (data.error) { document.getElementById('join-error').textContent = data.error; return; }
-      saveSession({playerName: name});
       window.location.href = `/game/${code}`;
     });
 
