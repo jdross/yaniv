@@ -178,8 +178,10 @@ def sse_stream(code_, pid):
     def generate():
         try:
             room = rooms.get(code_)
-            if room:
-                yield f"data: {json.dumps(room_state(room, pid))}\n\n"
+            if not room:
+                yield f"data: {json.dumps({'error': 'Room not found'})}\n\n"
+                return
+            yield f"data: {json.dumps(room_state(room, pid))}\n\n"
             while True:
                 try:
                     state = q.get(timeout=25)

@@ -49,7 +49,7 @@ setInterval(async () => {
   try {
     const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
     const data = await res.json();
-    if (!data.error) onState(data);
+    onState(data); // onState handles errors (redirects home)
   } catch (_) {}
 }, 1500);
 
@@ -72,6 +72,8 @@ async function post(url, body) {
 
 // ── State handler ─────────────────────────────────────────────────────────────
 function onState(s) {
+  if (s.error) { window.location.href = '/'; return; }
+
   state        = s;
   selectedCards = [];
   selectedDraw  = null;
