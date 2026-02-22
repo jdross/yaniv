@@ -317,6 +317,7 @@ input[type="range"] {
 .draw-choice:hover { opacity: 1; transform: scale(1.05); }
 .draw-choice.selected { opacity: 1; outline: 3px solid #f4d03f; border-radius: 8px; }
 .draw-choice.selected .card { outline: 3px solid #f4d03f; }
+.draw-choice.pile-inactive { opacity: 0.3; cursor: default; pointer-events: none; }
 .deck-choice .deck-icon {
   width: 60px;
   height: 88px;

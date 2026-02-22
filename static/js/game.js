@@ -22,7 +22,6 @@ const $scoreBar     = document.getElementById('score-bar');
 const $roundBanner  = document.getElementById('round-banner');
 const $lastAction   = document.getElementById('last-action');
 const $turnStatus   = document.getElementById('turn-status');
-const $discardPile  = document.getElementById('discard-pile');
 const $drawSection  = document.getElementById('draw-section');
 const $drawOptions  = document.getElementById('draw-options');
 const $deckBtn      = document.getElementById('deck-btn');
@@ -137,14 +136,11 @@ function showBoard(s) {
     ? 'Your turn — select cards to discard, then choose where to draw.'
     : `Waiting for ${esc(g.current_player_name)}…`;
 
-  // Discard pile
-  $discardPile.innerHTML = g.discard_top.map(c => cardHtml(c)).join('');
-
   // Draw section
   if (g.is_my_turn) {
     show($drawSection);
     $deckSizeLabel.textContent = `${g.deck_size} left`;
-    renderDrawOptions(g.draw_options);
+    renderDrawOptions(g.draw_options, g.discard_top);
   } else {
     hide($drawSection);
   }
@@ -179,17 +175,33 @@ function showBoard(s) {
   updatePlayBtn();
 }
 
-function renderDrawOptions(options) {
+function renderDrawOptions(options, discardTop) {
   $drawOptions.innerHTML = '';
 
-  $pileHint.textContent = options.length >= 2 ? '(run — pick an end card)'
-                        : options.length === 0 ? '(none)' : '';
+  // Distinguish single / set / run for the hint label
+  if (!discardTop || discardTop.length === 0 || options.length === 0) {
+    $pileHint.textContent = options.length === 0 ? '(none)' : '';
+  } else if (discardTop.length === 1) {
+    $pileHint.textContent = '';
+  } else if (discardTop.length > options.length) {
+    // run: fewer selectable options than cards discarded (only end cards)
+    $pileHint.textContent = '(run — pick an end card)';
+  } else {
+    // set: all discarded cards are selectable
+    $pileHint.textContent = '(set — choose 1 card)';
+  }
 
-  options.forEach((c, i) => {
+  // Show ALL discarded cards; only valid picks are clickable
+  (discardTop || []).forEach(c => {
+    const optionIndex = options.findIndex(o => o.id === c.id);
+    const isSelectable = optionIndex !== -1;
+
     const div = document.createElement('div');
-    div.className = 'draw-choice' + (selectedDraw === i ? ' selected' : '');
+    div.className = 'draw-choice'
+      + (isSelectable && selectedDraw === optionIndex ? ' selected' : '')
+      + (isSelectable ? '' : ' pile-inactive');
     div.innerHTML = `${cardHtml(c)}<span class="draw-label">${esc(c.rank)}${c.suit ? ' ' + suitSymbol(c.suit) : ''}</span>`;
-    div.addEventListener('click', () => selectDraw(i));
+    if (isSelectable) div.addEventListener('click', () => selectDraw(optionIndex));
     $drawOptions.appendChild(div);
   });
 
@@ -199,7 +211,7 @@ function renderDrawOptions(options) {
 
 function selectDraw(val) {
   selectedDraw = val;
-  renderDrawOptions(state.game.draw_options);
+  renderDrawOptions(state.game.draw_options, state.game.discard_top);
   updatePlayBtn();
 }
 
@@ -219,9 +231,48 @@ function toggleCard(id) {
   updatePlayBtn();
 }
 
+function isValidRun(cards) {
+  const nonJokers = cards.filter(c => c.rank !== 'Joker');
+  const jokerCount = cards.length - nonJokers.length;
+  if (nonJokers.length > 0 && new Set(nonJokers.map(c => c.suit)).size > 1) return false;
+  const ORDER = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+  const ranks = nonJokers.map(c => ORDER.indexOf(c.rank)).sort((a, b) => a - b);
+  let needed = 0;
+  for (let i = 0; i < ranks.length - 1; i++) needed += ranks[i + 1] - ranks[i] - 1;
+  return needed <= jokerCount;
+}
+
+function isValidDiscard(ids) {
+  const me = state?.game?.players?.find(p => p.is_self);
+  if (!me?.hand) return { valid: false };
+  const cards = ids.map(id => me.hand.find(c => c.id === id)).filter(Boolean);
+  if (cards.length === 0) return { valid: false };
+  if (cards.length === 1) return { valid: true };
+
+  // Set: all non-jokers share the same rank
+  const nonJokers = cards.filter(c => c.rank !== 'Joker');
+  if (nonJokers.length === 0 || new Set(nonJokers.map(c => c.rank)).size === 1) {
+    return { valid: true };
+  }
+
+  // Run: 3+ cards, same suit, consecutive (jokers fill gaps)
+  if (cards.length >= 3 && isValidRun(cards)) return { valid: true };
+
+  if (cards.length === 2) {
+    return { valid: false, reason: 'Two cards must share the same rank' };
+  }
+  return { valid: false, reason: 'Cards must form a set (same rank) or a run (3+ same suit, consecutive)' };
+}
+
 function updatePlayBtn() {
   const g = state && state.game;
-  $playBtn.disabled = !g || !g.is_my_turn || !selectedCards.length || selectedDraw === null;
+  if (!g || !g.is_my_turn) { $playBtn.disabled = true; return; }
+  if (!selectedCards.length) { $playBtn.disabled = true; clearError(); return; }
+
+  const { valid, reason } = isValidDiscard(selectedCards);
+  $playBtn.disabled = !valid || selectedDraw === null;
+  if (!valid && reason) showError(reason);
+  else clearError();
 }
 
 $playBtn.addEventListener('click', playTurn);

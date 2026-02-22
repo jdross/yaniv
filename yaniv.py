@@ -201,9 +201,28 @@ class YanivGame:
     def _next_turn(self):
         self.current_player_index = (self.current_player_index + 1) % len(self.players)
 
+    def _is_valid_discard(self, cards):
+        """Returns True if cards form a legal discard: single card, set (same rank), or run (3+ same suit, consecutive)."""
+        if len(cards) == 1:
+            return True
+        # Set: all non-joker cards share the same rank
+        non_jokers = [c for c in cards if c.rank != 'Joker']
+        if not non_jokers or len(set(c.rank for c in non_jokers)) == 1:
+            return True
+        # Run: 3+ cards, same suit, consecutive (jokers fill gaps)
+        if len(cards) >= 3 and self._return_run_if_valid(cards) is not False:
+            return True
+        return False
+
     def _discard_cards(self, player, cards):
         if not isinstance(cards, list):
             cards = [cards]
+
+        if not self._is_valid_discard(cards):
+            raise ValueError(
+                "Invalid discard: must be a single card, a set (same rank), "
+                "or a run (3 or more consecutive cards of the same suit)."
+            )
 
         # Update discards
         self.last_discard = []
