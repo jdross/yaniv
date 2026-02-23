@@ -104,9 +104,17 @@ async function post(url, body) {
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
 
+  // Only wipe the in-progress card selection when the turn actually changes.
+  // SSE/poll updates that arrive while it's still the player's turn (e.g. a
+  // redundant heartbeat or a late AI-turn push) must not clear what the player
+  // has already tapped.
+  const stillMyTurn = state?.game?.is_my_turn && s.game?.is_my_turn;
+  if (!stillMyTurn) {
+    selectedCards = [];
+    selectedDraw  = null;
+  }
+
   state          = s;
-  selectedCards  = [];
-  selectedDraw   = null;
   actionInFlight = false;
   clearError();
 
