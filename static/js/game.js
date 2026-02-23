@@ -52,17 +52,25 @@ const es = new EventSource(`/api/events/${code}/${pid}`);
 es.onmessage = e => onState(JSON.parse(e.data));
 es.onerror   = () => { /* reconnects automatically */ };
 
-// Polling fallback: if the hand isn't arriving via SSE (e.g. pid mismatch from
-// a cached page), fetch state over HTTP which always passes the correct pid.
-setInterval(async () => {
-  if (!state?.game) return;
-  if (state.game.players?.find(p => p.is_self)?.hand) return; // SSE working fine
+// Polling fallback — two cases:
+//  • Waiting phase: poll every 3 s so the lobby always reflects the latest
+//    member list (new joiners / leavers) even if an SSE update is missed.
+//  • Playing phase: poll every 1.5 s only when the hand isn't arriving via
+//    SSE (e.g. pid mismatch from a cached page reload).
+async function pollState() {
   try {
     const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
     const data = await res.json();
-    onState(data); // onState handles errors (redirects home)
+    onState(data);
   } catch (_) {}
-}, 1500);
+}
+setInterval(() => {
+  if (!state) return;
+  if (state.status === 'waiting') { pollState(); return; }
+  if (!state.game) return;
+  if (state.game.players?.find(p => p.is_self)?.hand) return; // SSE working fine
+  pollState();
+}, 3000);
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function post(url, body) {
@@ -129,8 +137,10 @@ $joinBtn.addEventListener('click', async () => {
     body:    JSON.stringify({ pid, code, name }),
   });
   const data = await res.json();
-  if (data.error) $joinError.textContent = data.error;
-  // On success the SSE delivers updated state → showLobby
+  if (data.error) { $joinError.textContent = data.error; return; }
+  // Fetch state immediately so the lobby appears without waiting for SSE.
+  // The SSE broadcast will also arrive and is harmlessly idempotent.
+  pollState();
 });
 
 $joinNameInput.addEventListener('keydown', e => {
