@@ -19,10 +19,25 @@ const pid  = (() => {
 let state         = null;
 let selectedCards = [];
 let selectedDraw  = null;
-let prevTurnKey   = null;   // fingerprint of the last rendered turn
-let prevRoundKey  = null;   // fingerprint of the last rendered round banner
+// ⚠️  DEDUP KEYS — canonical strings, NOT JSON.stringify()
+//
+// State arrives from two sources:
+//   • SSE  — serialised from the in-memory Python dict (insertion-order keys)
+//   • Poll — deserialised from a Postgres JSONB column (keys reordered
+//            alphabetically by the DB engine)
+//
+// JSON.stringify() is key-order-sensitive, so the same logical object
+// produces different strings depending on its source.  Every dedup key
+// below must therefore be built by extracting named fields in a fixed,
+// explicit order — never by stringifying the whole object.
+let prevTurnKey     = null; // fingerprint of the last rendered turn
+let prevRoundKey    = null; // fingerprint of the last rendered round banner
+let prevAnimTurnKey = null; // last_turn key we've already animated
+let prevYanivKey    = null; // last_round key we've already announced
+let prevHandKey     = null; // hand fingerprint we've already highlighted (same rule: poll re-delivers same hand, must not re-trigger blink)
+
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
-let newCardId     = null;   // id of the card just drawn (highlighted briefly)
+let newCardId      = null;  // id of the card just drawn (highlighted briefly)
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $joinScreen   = document.getElementById('join-screen');
@@ -60,33 +75,30 @@ const $finalScores  = document.getElementById('final-scores');
 const $playAgainBtn = document.getElementById('play-again-btn');
 
 // ── SSE connection ────────────────────────────────────────────────────────────
-let lastSseAt = 0;
+// State is delivered exclusively via SSE — no periodic polling.  Polling was
+// removed because it rebuilds DOM nodes on every tick, resetting CSS hover
+// states and causing duplicate-entry bugs (SSE delivers dicts in insertion
+// order; the poll REST endpoint returns JSONB with alphabetically-reordered
+// keys, so JSON.stringify-based dedup keys never matched).
+//
+// Recovery: when the EventSource fires onerror (network blip, server restart,
+// etc.) the browser automatically reconnects.  The server sends a fresh
+// snapshot as the very first message of every new SSE connection, so no
+// explicit recovery poll is needed.
 const es = new EventSource(`/api/events/${code}/${pid}`);
-es.onmessage = e => { lastSseAt = Date.now(); onState(JSON.parse(e.data)); };
-es.onerror   = () => { /* reconnects automatically */ };
+es.onmessage = e => { onState(JSON.parse(e.data)); };
+es.onerror   = () => { /* browser reconnects automatically; snapshot resent on reconnect */ };
 
-// Polling fallback:
-//  • Waiting phase: always poll every 3 s (member list must stay live).
-//  • Playing phase: only poll when SSE has been silent for >5 s — avoids
-//    clearing the player's in-progress card selection on every tick while
-//    SSE is healthy, but recovers reliably if a message is dropped.
-async function pollState() {
+// ── API helpers ───────────────────────────────────────────────────────────────
+// Fetch current state once (used only to reset actionInFlight after a POST error,
+// since SSE handles all normal state delivery).
+async function fetchState() {
   try {
     const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
     const data = await res.json();
     onState(data);
   } catch (_) {}
 }
-setInterval(() => {
-  if (!state) return;
-  if (state.status === 'waiting')  { pollState(); return; }
-  if (state.status === 'finished') { pollState(); return; } // catch next_room redirect
-  if (!state.game) return;
-  if (Date.now() - lastSseAt < 5000) return; // SSE is live — don't interfere
-  pollState();
-}, 3000);
-
-// ── API helpers ───────────────────────────────────────────────────────────────
 async function post(url, body) {
   clearError();
   try {
@@ -115,20 +127,53 @@ function onState(s) {
     const h = st?.game?.players?.find(p => p.is_self)?.hand;
     return h ? h.map(c => c.id).sort((a, b) => a - b).join(',') : null;
   };
-  const prevHandKey = handOf(state);
-  const newHandKey  = handOf(s);
-  if (prevHandKey !== null && prevHandKey !== newHandKey) {
-    // Hand actually changed — player just played their turn.
-    // Detect which card is new so we can highlight it.
-    const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
-    const drawn   = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id));
-    newCardId     = drawn ? drawn.id : null;
+  const oldHandKey = handOf(state);
+  const newHandKey = handOf(s);
+  let drawnCard = null;
+  if (newHandKey !== null && newHandKey !== prevHandKey) {
+    // Hand is genuinely new (not a repeat delivery of the same state).
+    if (oldHandKey !== null && oldHandKey !== newHandKey) {
+      // Hand actually changed — player just played their turn.
+      // Detect which card is new so we can highlight it.
+      const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
+      drawnCard     = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id)) ?? null;
+      newCardId     = drawnCard ? drawnCard.id : null;
+    } else {
+      // First hand received (round start) — no highlight, no pre-selection.
+      newCardId = null;
+    }
     selectedCards = [];
-  } else if (prevHandKey === null && newHandKey !== null) {
-    // First hand received (round start) — no highlight, no pre-selection.
-    newCardId     = null;
-    selectedCards = [];
+    prevHandKey   = newHandKey;
   }
+
+  // Draw animation — fires once per unique last_turn when drawn from deck or pile
+  if (s.last_turn && s.status === 'playing') {
+    const t = s.last_turn;
+    const animKey = [t.player, (t.discarded||[]).map(c=>c.id).sort((a,b)=>a-b).join(','), t.drawn_from, t.drawn_card?t.drawn_card.id:''].join('|');
+    if (animKey !== prevAnimTurnKey) {
+      const df = s.last_turn.drawn_from;
+      if (df === 'deck' || df === 'pile') {
+        const me = s.game?.players?.find(p => p.is_self);
+        const isMyDraw = !!(me && me.name === s.last_turn.player);
+        // Pile card is always face-up (server always reveals it in last_turn).
+        // Deck card is only known when it's our own draw.
+        const cardToShow = df === 'pile'
+          ? s.last_turn.drawn_card
+          : (isMyDraw ? drawnCard : null);
+        animateCardDraw(isMyDraw, cardToShow, df === 'pile');
+      }
+    }
+    prevAnimTurnKey = animKey;
+  }
+
+  // Yaniv / Assaf announcement animation — guard against first-load replay
+  if (s.last_round) {
+    const r = s.last_round;
+    const yanivKey = [r.declarer, (r.score_changes||[]).map(s=>s.name+':'+s.new_score).sort().join(',')].join('|');
+    if (yanivKey !== prevYanivKey && state !== null) animateYaniv(s.last_round);
+    prevYanivKey = yanivKey;
+  }
+
   // Clear draw-source selection whenever it's not our turn.
   if (!s.game?.is_my_turn) selectedDraw = null;
 
@@ -177,7 +222,7 @@ $joinBtn.addEventListener('click', async () => {
   if (data.error) { $joinError.textContent = data.error; return; }
   // Fetch state immediately so the lobby appears without waiting for SSE.
   // The SSE broadcast will also arrive and is harmlessly idempotent.
-  pollState();
+  fetchState();
 });
 
 $joinNameInput.addEventListener('keydown', e => {
@@ -404,9 +449,16 @@ $yanivBtn.addEventListener('click', async () => {
   if (actionInFlight) return;
   actionInFlight = true;
   const res = await post('/api/action', { code, pid, declare_yaniv: true });
-  // On error keep actionInFlight=true; pollState() → onState() will reset it
-  // once real server state is known, preventing a rapid-retry storm.
-  if (res?.error) pollState();
+  if (res?.error) {
+    // On error the SSE update won't arrive, so fetch current state to reset
+    // actionInFlight and show the real server state.
+    fetchState();
+  } else {
+    // Success: SSE will deliver the state update and call onState(), which
+    // resets actionInFlight.  Clear it here too as a safety net in case the
+    // SSE message is delayed, so the UI never freezes indefinitely.
+    actionInFlight = false;
+  }
 });
 
 async function playTurn() {
@@ -417,7 +469,11 @@ async function playTurn() {
   actionInFlight = true;
   updatePlayBtn();
   const res = await post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
-  if (res?.error) pollState();
+  if (res?.error) {
+    fetchState();
+  } else {
+    actionInFlight = false;
+  }
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
@@ -494,7 +550,7 @@ document.addEventListener('keydown', e => {
     if (me.can_yaniv && !actionInFlight) {
       actionInFlight = true;
       post('/api/action', { code, pid, declare_yaniv: true }).then(res => {
-        if (res?.error) pollState();
+        if (res?.error) fetchState(); else actionInFlight = false;
       });
     }
   }
@@ -504,6 +560,67 @@ document.addEventListener('keydown', e => {
 // c.id === c._card (numeric 0-53): Jokers first, then A♣..K♠ by rank then suit.
 function sortHand(hand) {
   return [...hand].sort((a, b) => a.id - b.id);
+}
+
+// ── Card draw animation ───────────────────────────────────────────────────────
+// Spawns a card that flies from the source (deck or pile) toward the hand
+// (my draw) or score bar (opponent's draw), fading out over 1 s.
+// drawnCard: card object to show face-up, or null for a face-down back.
+// fromPile:  true → source is the discard pile area; false → deck button.
+function animateCardDraw(isMyDraw, drawnCard, fromPile) {
+  const srcEl   = fromPile ? $drawOptions : $deckBtn;
+  const srcRect = srcEl.getBoundingClientRect();
+  if (!srcRect.width) return; // source not visible
+
+  const W = 60, H = 88;
+  const srcCX = srcRect.left + srcRect.width  / 2;
+  const srcCY = srcRect.top  + srcRect.height / 2;
+
+  let tgtCX, tgtCY;
+  if (isMyDraw) {
+    const handRect = $hand.getBoundingClientRect();
+    tgtCX = handRect.left + handRect.width  / 2;
+    tgtCY = handRect.top  + handRect.height / 2;
+  } else {
+    const scoreRect = $scoreBar.getBoundingClientRect();
+    tgtCX = scoreRect.left + scoreRect.width / 2;
+    tgtCY = scoreRect.top;
+  }
+
+  const flyEl = document.createElement('div');
+  if (drawnCard) {
+    flyEl.className = 'flying-card' + (cardColor(drawnCard) ? ' red' : '');
+    flyEl.innerHTML =
+      `<span class="card-rank">${esc(drawnCard.rank)}</span>` +
+      `<span class="card-suit">${drawnCard.suit ? suitSymbol(drawnCard.suit) : '🃏'}</span>` +
+      `<span class="card-rank-bot">${esc(drawnCard.rank)}</span>`;
+  } else {
+    flyEl.className = 'flying-card face-down';
+  }
+
+  flyEl.style.left = `${srcCX - W / 2}px`;
+  flyEl.style.top  = `${srcCY - H / 2}px`;
+  document.body.appendChild(flyEl);
+
+  // Force a reflow so the start position is painted before the transition kicks in
+  flyEl.getBoundingClientRect();
+  flyEl.style.transition = 'left 1s ease-in-out, top 1s ease-in-out, opacity 1s ease-in-out';
+  flyEl.style.left    = `${tgtCX - W / 2}px`;
+  flyEl.style.top     = `${tgtCY - H / 2}px`;
+  flyEl.style.opacity = '0';
+
+  setTimeout(() => flyEl.remove(), 1100);
+}
+
+// ── Yaniv / Assaf announcement animation ──────────────────────────────────────
+// Big text zooms out of the centre toward the viewer and fades over 1 s.
+function animateYaniv(round) {
+  const isAssaf = !!round.assaf;
+  const el = document.createElement('div');
+  el.className = 'yaniv-announce' + (isAssaf ? ' assaf' : '');
+  el.textContent = isAssaf ? '😱 Assaf!' : '🎉 Yaniv!';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
 }
 
 // ── Card rendering helpers ────────────────────────────────────────────────────
@@ -538,20 +655,33 @@ function cardColor(c) {
 
 // ── Turn log (last 3 plays with slide-in animation) ───────────────────────────
 function renderTurnLog(lastTurn, lastRound) {
-  // When a brand-new round starts, wipe the log so old turns don't linger
-  const roundKey = lastRound ? JSON.stringify(lastRound) : null;
+  // When a brand-new round starts, wipe the log so old turns don't linger.
+  // Use a canonical key (not JSON.stringify) so JSONB key-reordering from
+  // Postgres doesn't cause a false mismatch between SSE and poll responses.
+  const roundKey = lastRound
+    ? [lastRound.declarer, (lastRound.score_changes || []).map(s => s.name + ':' + s.new_score).sort().join(',')].join('|')
+    : null;
   if (roundKey !== prevRoundKey) {
     if (roundKey && !prevRoundKey) {
-      // New round just started — clear old turns
+      // New round just started — clear old turns from DOM
       $turnLog.innerHTML = '';
-      prevTurnKey = null;
     }
     prevRoundKey = roundKey;
   }
 
   if (!lastTurn) return;
 
-  const key = JSON.stringify(lastTurn);
+  // Build a canonical key from the fields that identify a turn in a fixed
+  // order. JSON.stringify is key-order-sensitive, and the poll endpoint
+  // returns JSONB from Postgres which may reorder keys vs the in-memory
+  // dict delivered via SSE, causing a spurious mismatch and duplicate entry.
+  const key = [
+    lastTurn.player,
+    (lastTurn.discarded || []).map(c => c.id).sort((a, b) => a - b).join(','),
+    lastTurn.drawn_from,
+    lastTurn.drawn_card ? lastTurn.drawn_card.id : '',
+    roundKey,
+  ].join('|');
   if (key === prevTurnKey) return; // already rendered this turn
   prevTurnKey = key;
 

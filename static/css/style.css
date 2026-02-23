@@ -250,8 +250,17 @@ input[type="range"] {
   border: 1px solid rgba(255,255,255,.2);
 }
 
-/* Turn log — last 3 plays stacked, newest on top */
-.turn-log { display: flex; flex-direction: column; gap: .25rem; }
+/* Turn log — last 3 plays stacked, newest on top.
+   Fixed height so adding/removing entries never shifts the deck/pile above. */
+.turn-log {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  min-height: 7rem;
+  max-height: 7rem;
+  overflow: hidden;
+  flex-shrink: 0;
+}
 
 @keyframes slide-down {
   from { opacity: 0; transform: translateY(-10px); }
@@ -306,7 +315,7 @@ input[type="range"] {
   opacity: .55;
   margin-bottom: .25rem;
 }
-.your-hand-label { margin-top: .3rem; }
+.your-hand-label { margin-top: .3rem; margin-bottom: 10px; }
 .hand-value { font-size: .8rem; opacity: .7; margin-left: .3rem; }
 
 /* Card rows */
@@ -343,13 +352,14 @@ input[type="range"] {
 .card .card-suit { font-size: 1.2rem; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
 .card .card-rank-bot { font-size: .85rem; line-height: 1; align-self: flex-end; transform: rotate(180deg); }
 
-/* Newly drawn card — pulsing gold outline that fades out */
+/* Newly drawn card — subtle gold glow that pulses 3× then stops */
 @keyframes card-new-glow {
-  0%   { outline: 3px solid rgba(244,208,63,1);  box-shadow: 0 0 14px 4px rgba(244,208,63,.6); }
-  65%  { outline: 3px solid rgba(244,208,63,.4);  box-shadow: 0 0 4px 0 rgba(244,208,63,.1); }
-  100% { outline: 3px solid rgba(244,208,63,0);  box-shadow: none; }
+  0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  50%       { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 11px 4px rgba(244,208,63,.55); }
 }
-.card.card-new { animation: card-new-glow 2.2s ease forwards; }
+.card.card-new { animation: card-new-glow 0.7s ease-in-out 3; }
+/* When selected, drop the glow and use normal selected styles */
+.hand-row .card.card-new.selected { animation: none; }
 
 /* Selectable hand cards */
 .hand-row .card {
@@ -359,7 +369,7 @@ input[type="range"] {
 .hand-row .card:hover { transform: translateY(-6px); box-shadow: 0 6px 14px rgba(0,0,0,.4); }
 .hand-row .card.selected {
   transform: translateY(-14px);
-  box-shadow: 0 8px 20px rgba(244,208,63,.6);
+  box-shadow: 0 10px 24px rgba(0,0,0,.55);
   outline: 3px solid #f4d03f;
 }
 .hand-row .card .card-num {
@@ -469,6 +479,64 @@ input[type="range"] {
   gap: .35rem;
 }
 
+/* ── Deck-draw flying card animation overlay ────────────────────────────────── */
+.flying-card {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  width: 60px;
+  height: 88px;
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 4px 5px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.55);
+  opacity: 1;
+}
+.flying-card.red { color: #d32f2f; }
+.flying-card .card-rank     { font-size: .85rem; line-height: 1; }
+.flying-card .card-suit     { font-size: 1.2rem; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
+.flying-card .card-rank-bot { font-size: .85rem; line-height: 1; align-self: flex-end; transform: rotate(180deg); }
+.flying-card.face-down {
+  background: linear-gradient(135deg, #1a3a6e, #0d2240);
+  color: rgba(255,255,255,.6);
+  justify-content: center;
+  align-items: center;
+  font-size: 2rem;
+  padding: 0;
+}
+
+/* ── Yaniv / Assaf announcement ─────────────────────────────────────────────── */
+@keyframes yaniv-zoom {
+  0%   { transform: translate(-50%, -50%) scale(0.25) rotate(-6deg); opacity: 0; }
+  25%  { transform: translate(-50%, -50%) scale(1.05) rotate(3deg);  opacity: 1; }
+  55%  { transform: translate(-50%, -50%) scale(1.3)  rotate(-1deg); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(3)    rotate(0deg);  opacity: 0; }
+}
+.yaniv-announce {
+  position: fixed;
+  z-index: 2000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.25);
+  white-space: nowrap;
+  font-size: 3.8rem;
+  font-weight: 900;
+  letter-spacing: .03em;
+  color: #f4d03f;
+  text-shadow: 0 0 40px rgba(244,208,63,.7), 0 4px 16px rgba(0,0,0,.7);
+  pointer-events: none;
+  animation: yaniv-zoom 1s ease-out forwards;
+}
+.yaniv-announce.assaf {
+  color: #ff6b4a;
+  text-shadow: 0 0 40px rgba(255,107,74,.7), 0 4px 16px rgba(0,0,0,.7);
+}
+
 /* Mobile: fix the hand panel to the bottom so it never shifts */
 @media (max-width: 600px) {
   .hand-panel {
@@ -487,6 +555,10 @@ input[type="range"] {
   .board {
     padding-bottom: 230px;
   }
+
+  /* Hide keyboard shortcut hints on mobile */
+  .key-hints { display: none; }
+  .hand-row .card .card-num { display: none; }
 }
 
 /* Mobile tweaks */
