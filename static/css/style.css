@@ -264,6 +264,9 @@ input[type="range"] {
 }
 .turn-log-item.new { animation: slide-down .28s ease; }
 
+/* Suit colours in the turn log — red suits stand out, black suits stay default */
+.log-red { color: #ff8a80; font-weight: 700; }
+
 /* Round-result banner enrichments */
 .round-headline { font-weight: 600; margin-bottom: .35rem; }
 .round-score-changes { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .25rem; }
@@ -330,6 +333,14 @@ input[type="range"] {
 .card .card-rank { font-size: .85rem; line-height: 1; }
 .card .card-suit { font-size: 1.2rem; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
 .card .card-rank-bot { font-size: .85rem; line-height: 1; align-self: flex-end; transform: rotate(180deg); }
+
+/* Newly drawn card — pulsing gold outline that fades out */
+@keyframes card-new-glow {
+  0%   { outline: 3px solid rgba(244,208,63,1);  box-shadow: 0 0 14px 4px rgba(244,208,63,.6); }
+  65%  { outline: 3px solid rgba(244,208,63,.4);  box-shadow: 0 0 4px 0 rgba(244,208,63,.1); }
+  100% { outline: 3px solid rgba(244,208,63,0);  box-shadow: none; }
+}
+.card.card-new { animation: card-new-glow 2.2s ease forwards; }
 
 /* Selectable hand cards */
 .hand-row .card {

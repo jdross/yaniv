@@ -22,6 +22,7 @@ let selectedDraw  = null;
 let prevTurnKey   = null;   // fingerprint of the last rendered turn
 let prevRoundKey  = null;   // fingerprint of the last rendered round banner
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
+let newCardId     = null;   // id of the card just drawn (highlighted briefly)
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $joinScreen   = document.getElementById('join-screen');
@@ -104,20 +105,29 @@ async function post(url, body) {
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
 
-  // Preserve the in-progress card selection only when it is unambiguously the
-  // same turn: my-turn flag is true in both old and new state AND my hand has
-  // not changed.  If SSE skips an intermediate "not my turn" update and jumps
-  // straight to the next "my turn" update, the hand will differ (cards were
-  // played + one drawn), so we still clear.  This prevents stale selected-card
-  // IDs from a previous turn being silently replayed.
-  const handOf = st => st?.game?.players?.find(p => p.is_self)?.hand
-                          ?.map(c => c._card).join(',') ?? null;
-  const stillMyTurn = state?.game?.is_my_turn && s.game?.is_my_turn
-                      && handOf(state) === handOf(s);
-  if (!stillMyTurn) {
+  // Compare hands using an order-independent fingerprint so server-side sorting
+  // (start_turn) doesn't falsely look like a hand change.  Only clear the
+  // pre-selection when the actual set of cards changes (cards played/drawn).
+  const handOf = st => {
+    const h = st?.game?.players?.find(p => p.is_self)?.hand;
+    return h ? h.map(c => c.id).sort((a, b) => a - b).join(',') : null;
+  };
+  const prevHandKey = handOf(state);
+  const newHandKey  = handOf(s);
+  if (prevHandKey !== null && prevHandKey !== newHandKey) {
+    // Hand actually changed — player just played their turn.
+    // Detect which card is new so we can highlight it.
+    const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
+    const drawn   = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id));
+    newCardId     = drawn ? drawn.id : null;
     selectedCards = [];
-    selectedDraw  = null;
+  } else if (prevHandKey === null && newHandKey !== null) {
+    // First hand received (round start) — no highlight, no pre-selection.
+    newCardId     = null;
+    selectedCards = [];
   }
+  // Clear draw-source selection whenever it's not our turn.
+  if (!s.game?.is_my_turn) selectedDraw = null;
 
   state          = s;
   actionInFlight = false;
@@ -248,25 +258,28 @@ function showBoard(s) {
     hide($drawSection);
   }
 
-  // Hand
+  // Hand — always sorted client-side; click handlers always attached for pre-selection
   if (me && me.hand) {
-    $hand.innerHTML = me.hand.map((c, i) =>
-      `<div class="card ${cardColor(c)} ${selectedCards.includes(c.id) ? 'selected' : ''}"
-            data-id="${c.id}">
+    const hand = sortHand(me.hand);
+    $hand.innerHTML = hand.map((c, i) => {
+      const classes = ['card', cardColor(c),
+        selectedCards.includes(c.id) ? 'selected' : '',
+        c.id === newCardId            ? 'card-new'  : '',
+      ].filter(Boolean).join(' ');
+      return `<div class="${classes}" data-id="${c.id}">
          <span class="card-num">${i+1}</span>
          <span class="card-rank">${esc(c.rank)}</span>
          <span class="card-suit">${c.suit ? suitSymbol(c.suit) : '🃏'}</span>
          <span class="card-rank-bot">${esc(c.rank)}</span>
-       </div>`
-    ).join('');
+       </div>`;
+    }).join('');
 
     $handValue.textContent = `(${me.hand.reduce((s, c) => s + c.value, 0)} pts)`;
 
-    if (g.is_my_turn) {
-      $hand.querySelectorAll('.card').forEach(el => {
-        el.onclick = () => toggleCard(parseInt(el.dataset.id));
-      });
-    }
+    // Always attach click handlers — cards can be pre-selected while waiting
+    $hand.querySelectorAll('.card').forEach(el => {
+      el.onclick = () => toggleCard(parseInt(el.dataset.id));
+    });
 
     (g.is_my_turn && me.can_yaniv) ? show($yanivBtn) : hide($yanivBtn);
   } else {
@@ -415,15 +428,22 @@ function showGameOver(s) {
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (!state?.game?.is_my_turn) return;
-  const me = state.game.players.find(p => p.is_self);
+  const g = state?.game;
+  if (!g) return;
+  const me = g.players.find(p => p.is_self);
   if (!me?.hand) return;
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
+  // Number keys: pre-select cards even while waiting for your turn
+  const hand = sortHand(me.hand);
   const n = parseInt(e.key);
-  if (n >= 1 && n <= me.hand.length) {
-    e.preventDefault(); toggleCard(me.hand[n - 1].id);
-  } else if (e.key === 'd' || e.key === 'D') {
+  if (n >= 1 && n <= hand.length) {
+    e.preventDefault(); toggleCard(hand[n - 1].id); return;
+  }
+
+  // Draw / play / Yaniv shortcuts: only on your turn
+  if (!g.is_my_turn) return;
+  if (e.key === 'd' || e.key === 'D') {
     // Cycle through all draw options: deck → pile-0 → pile-1 → … → deck
     e.preventDefault();
     const opts = state.game.draw_options;
@@ -449,6 +469,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ── Hand sorting ──────────────────────────────────────────────────────────────
+// c.id === c._card (numeric 0-53): Jokers first, then A♣..K♠ by rank then suit.
+function sortHand(hand) {
+  return [...hand].sort((a, b) => a.id - b.id);
+}
+
 // ── Card rendering helpers ────────────────────────────────────────────────────
 function cardHtml(c) {
   return `<div class="card ${cardColor(c)}">
@@ -460,6 +486,15 @@ function cardHtml(c) {
 
 function cardShort(c) {
   return c ? `${esc(c.rank)}${c.suit ? suitSymbol(c.suit) : ''}` : '?';
+}
+
+// Coloured version for the turn log: red suits in red, black suits unstyled.
+function cardShortHtml(c) {
+  if (!c) return '?';
+  const text = cardShort(c);
+  return (c.suit === 'Hearts' || c.suit === 'Diamonds')
+    ? `<span class="log-red">${text}</span>`
+    : text;
 }
 
 function suitSymbol(suit) {
@@ -546,9 +581,9 @@ function formatRoundBanner(r) {
 function formatLastTurn(t, me) {
   const isYou = me && me.name === t.player;
   const who   = isYou ? 'You' : esc(t.player);
-  const cards = t.discarded.map(cardShort).join(' ');
+  const cards = t.discarded.map(cardShortHtml).join(' ');
   const drew  = t.drawn_from === 'pile'
-    ? (t.drawn_card ? `<strong>${cardShort(t.drawn_card)}</strong> from pile` : 'from pile')
+    ? (t.drawn_card ? `<strong>${cardShortHtml(t.drawn_card)}</strong> from pile` : 'from pile')
     : (isYou ? 'from deck' : 'unknown card from deck');
   return `${who} discarded <strong>${cards}</strong> · drew ${drew}`;
 }
