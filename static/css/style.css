@@ -469,6 +469,37 @@ input[type="range"] {
   gap: .35rem;
 }
 
+/* ── Deck-draw flying card animation overlay ────────────────────────────────── */
+.flying-card {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  width: 60px;
+  height: 88px;
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 4px 5px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.55);
+  opacity: 1;
+}
+.flying-card.red { color: #d32f2f; }
+.flying-card .card-rank     { font-size: .85rem; line-height: 1; }
+.flying-card .card-suit     { font-size: 1.2rem; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
+.flying-card .card-rank-bot { font-size: .85rem; line-height: 1; align-self: flex-end; transform: rotate(180deg); }
+.flying-card.face-down {
+  background: linear-gradient(135deg, #1a3a6e, #0d2240);
+  color: rgba(255,255,255,.6);
+  justify-content: center;
+  align-items: center;
+  font-size: 2rem;
+  padding: 0;
+}
+
 /* Mobile: fix the hand panel to the bottom so it never shifts */
 @media (max-width: 600px) {
   .hand-panel {

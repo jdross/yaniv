@@ -23,6 +23,7 @@ let prevTurnKey   = null;   // fingerprint of the last rendered turn
 let prevRoundKey  = null;   // fingerprint of the last rendered round banner
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
 let newCardId     = null;   // id of the card just drawn (highlighted briefly)
+let prevAnimTurnKey = null; // last_turn key we've already animated
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $joinScreen   = document.getElementById('join-screen');
@@ -117,18 +118,31 @@ function onState(s) {
   };
   const prevHandKey = handOf(state);
   const newHandKey  = handOf(s);
+  let drawnCard = null;
   if (prevHandKey !== null && prevHandKey !== newHandKey) {
     // Hand actually changed — player just played their turn.
     // Detect which card is new so we can highlight it.
     const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
-    const drawn   = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id));
-    newCardId     = drawn ? drawn.id : null;
+    drawnCard     = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id)) ?? null;
+    newCardId     = drawnCard ? drawnCard.id : null;
     selectedCards = [];
   } else if (prevHandKey === null && newHandKey !== null) {
     // First hand received (round start) — no highlight, no pre-selection.
     newCardId     = null;
     selectedCards = [];
   }
+
+  // Deck draw animation — fires once per unique last_turn when drawn from deck
+  if (s.last_turn && s.status === 'playing') {
+    const animKey = JSON.stringify(s.last_turn);
+    if (animKey !== prevAnimTurnKey && s.last_turn.drawn_from === 'deck') {
+      const me = s.game?.players?.find(p => p.is_self);
+      const isMyDraw = !!(me && me.name === s.last_turn.player);
+      animateDeckDraw(isMyDraw, isMyDraw ? drawnCard : null);
+    }
+    prevAnimTurnKey = animKey;
+  }
+
   // Clear draw-source selection whenever it's not our turn.
   if (!s.game?.is_my_turn) selectedDraw = null;
 
@@ -504,6 +518,54 @@ document.addEventListener('keydown', e => {
 // c.id === c._card (numeric 0-53): Jokers first, then A♣..K♠ by rank then suit.
 function sortHand(hand) {
   return [...hand].sort((a, b) => a.id - b.id);
+}
+
+// ── Deck draw animation ───────────────────────────────────────────────────────
+// Spawns a card that flies from the deck to the hand (my draw, face-up with
+// the actual card) or toward the score bar (opponent's draw, face-down).
+// The element fades out over 0.6 s then removes itself.
+function animateDeckDraw(isMyDraw, drawnCard) {
+  const deckRect = $deckBtn.getBoundingClientRect();
+  if (!deckRect.width) return; // deck not visible
+
+  const W = 60, H = 88;
+  const srcCX = deckRect.left + deckRect.width  / 2;
+  const srcCY = deckRect.top  + deckRect.height / 2;
+
+  let tgtCX, tgtCY;
+  if (isMyDraw) {
+    const handRect = $hand.getBoundingClientRect();
+    tgtCX = handRect.left + handRect.width  / 2;
+    tgtCY = handRect.top  + handRect.height / 2;
+  } else {
+    const scoreRect = $scoreBar.getBoundingClientRect();
+    tgtCX = scoreRect.left + scoreRect.width / 2;
+    tgtCY = scoreRect.top;
+  }
+
+  const flyEl = document.createElement('div');
+  if (isMyDraw && drawnCard) {
+    flyEl.className = 'flying-card' + (cardColor(drawnCard) ? ' red' : '');
+    flyEl.innerHTML =
+      `<span class="card-rank">${esc(drawnCard.rank)}</span>` +
+      `<span class="card-suit">${drawnCard.suit ? suitSymbol(drawnCard.suit) : '🃏'}</span>` +
+      `<span class="card-rank-bot">${esc(drawnCard.rank)}</span>`;
+  } else {
+    flyEl.className = 'flying-card face-down';
+  }
+
+  flyEl.style.left = `${srcCX - W / 2}px`;
+  flyEl.style.top  = `${srcCY - H / 2}px`;
+  document.body.appendChild(flyEl);
+
+  // Force a reflow so the start position is painted before the transition kicks in
+  flyEl.getBoundingClientRect();
+  flyEl.style.transition = 'left 0.6s ease-in-out, top 0.6s ease-in-out, opacity 0.6s ease-in-out';
+  flyEl.style.left    = `${tgtCX - W / 2}px`;
+  flyEl.style.top     = `${tgtCY - H / 2}px`;
+  flyEl.style.opacity = '0';
+
+  setTimeout(() => flyEl.remove(), 700);
 }
 
 // ── Card rendering helpers ────────────────────────────────────────────────────
