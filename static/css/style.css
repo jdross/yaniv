@@ -224,7 +224,16 @@ input[type="range"] {
   background: rgba(255,255,255,.07);
   transition: background .3s;
 }
-.score-player.current { background: rgba(244,208,63,.2); border: 1px solid rgba(244,208,63,.5); }
+
+@keyframes pulse-current {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244,208,63,.5); }
+  50%       { box-shadow: 0 0 0 5px rgba(244,208,63,0); }
+}
+.score-player.current {
+  background: rgba(244,208,63,.2);
+  border: 1px solid rgba(244,208,63,.5);
+  animation: pulse-current 1.6s ease-in-out infinite;
+}
 .score-player .sp-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
 .score-player .sp-score { font-size: .95rem; font-weight: 800; color: #f4d03f; }
 .score-player .sp-cards { font-size: .7rem; opacity: .6; }
@@ -452,9 +461,38 @@ input[type="range"] {
 }
 .final-score-row.winner { background: rgba(244,208,63,.2); color: #f4d03f; }
 
+/* ── Hand panel ── */
+/* On desktop the hand panel sits naturally in the board flow */
+.hand-panel {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+/* Mobile: fix the hand panel to the bottom so it never shifts */
+@media (max-width: 600px) {
+  .hand-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #1a5c38;
+    border-top: 1px solid rgba(255,255,255,.15);
+    padding: .5rem .7rem env(safe-area-inset-bottom, 0px);
+    z-index: 100;
+    gap: .3rem;
+  }
+
+  /* Push board content up so it is not hidden behind the fixed panel */
+  .board {
+    padding-bottom: 230px;
+  }
+}
+
 /* Mobile tweaks */
 @media (max-width: 400px) {
   .card { width: 52px; height: 76px; }
   .deck-choice .deck-icon { width: 52px; height: 76px; font-size: 1.6rem; }
   .logo { font-size: 2.8rem; }
+  .board { padding-bottom: 210px; }
 }

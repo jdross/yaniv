@@ -61,8 +61,8 @@
     <!-- Turn status -->
     <div id="turn-status" class="turn-status"></div>
 
-    <!-- Draw options (only visible on your turn) -->
-    <div id="draw-section" class="draw-section hidden">
+    <!-- Draw section — always visible; interactive only on your turn -->
+    <div id="draw-section" class="draw-section">
       <div class="draw-section-inner">
         <div class="draw-group">
           <div class="section-label">Deck</div>
@@ -78,20 +78,23 @@
       </div>
     </div>
 
-    <!-- Your hand -->
-    <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
-    <div id="hand" class="card-row hand-row"></div>
+    <!-- Hand panel: fixed at bottom on mobile -->
+    <div class="hand-panel">
+      <!-- Your hand -->
+      <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
+      <div id="hand" class="card-row hand-row"></div>
 
-    <!-- Key hints -->
-    <div class="key-hints">Keys: <kbd>1</kbd>–<kbd>5</kbd> select cards &nbsp; <kbd>D</kbd> cycle draw &nbsp; <kbd>Enter</kbd> play &nbsp; <kbd>Y</kbd> Yaniv</div>
+      <!-- Key hints -->
+      <div class="key-hints">Keys: <kbd>1</kbd>–<kbd>5</kbd> select cards &nbsp; <kbd>D</kbd> cycle draw &nbsp; <kbd>Enter</kbd> play &nbsp; <kbd>Y</kbd> Yaniv</div>
 
-    <!-- Actions -->
-    <div class="action-bar">
-      <button id="yaniv-btn" class="btn btn-yaniv hidden">🎉 Yaniv!</button>
-      <button id="play-btn" class="btn btn-primary" disabled>Play turn</button>
+      <!-- Actions -->
+      <div class="action-bar">
+        <button id="yaniv-btn" class="btn btn-yaniv hidden">🎉 Yaniv!</button>
+        <button id="play-btn" class="btn btn-primary" disabled>Play turn</button>
+      </div>
+
+      <p id="game-error" class="error-msg"></p>
     </div>
-
-    <p id="game-error" class="error-msg"></p>
   </div>
 
   <!-- GAME OVER -->
@@ -100,7 +103,7 @@
       <h1>🏆 Game Over!</h1>
       <p id="winner-text" class="winner-text"></p>
       <div id="final-scores" class="final-scores"></div>
-      <a href="/" class="btn btn-primary">Play again</a>
+      <button id="play-again-btn" class="btn btn-primary">Play again</button>
     </div>
   </div>
 
