@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yaniv</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="game-page">
+
+  <!-- JOIN (shown when visiting a room you're not a member of) -->
+  <div id="join-screen" class="lobby hidden">
+    <div class="lobby-inner">
+      <h1 class="logo">Yaniv</h1>
+      <div class="room-code-box">
+        <span class="room-code-label">Room code</span>
+        <span id="join-code" class="room-code"></span>
+      </div>
+      <div id="join-players" class="lobby-players"></div>
+      <div id="join-form" class="">
+        <div class="form-group" style="text-align:left">
+          <label for="join-name-input">Your name</label>
+          <input id="join-name-input" type="text" maxlength="20" placeholder="Enter your name" autocomplete="off">
+        </div>
+        <button id="join-btn" class="btn btn-primary btn-large">Join Game</button>
+      </div>
+      <p id="join-full-msg" class="join-full-msg hidden">This room is full (4 players). You can watch but not join.</p>
+      <p id="join-started-msg" class="join-full-msg hidden">The game has already started. You can watch but not join.</p>
+      <p id="join-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- LOBBY -->
+  <div id="lobby" class="lobby hidden">
+    <div class="lobby-inner">
+      <h1 class="logo">Yaniv</h1>
+      <div class="room-code-box">
+        <span class="room-code-label">Room code</span>
+        <span id="lobby-code" class="room-code"></span>
+      </div>
+      <p class="share-hint">Share this link:
+        <span id="share-url" class="share-link" title="Click to copy" tabindex="0" role="button" aria-label="Copy link"></span>
+      </p>
+      <div id="lobby-players" class="lobby-players"></div>
+      <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
+      <p id="lobby-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- GAME BOARD -->
+  <div id="board" class="board hidden">
+    <!-- Scores -->
+    <div class="score-bar" id="score-bar"></div>
+
+    <!-- Round result banner (Yaniv/Assaf) -->
+    <div id="round-banner" class="round-banner hidden"></div>
+
+    <!-- Turn log (last 3 plays, animated) -->
+    <div id="turn-log" class="turn-log"></div>
+
+    <!-- Turn status -->
+    <div id="turn-status" class="turn-status"></div>
+
+    <!-- Draw section — always visible; interactive only on your turn -->
+    <div id="draw-section" class="draw-section">
+      <div class="draw-section-inner">
+        <div class="draw-group">
+          <div class="section-label">Deck</div>
+          <div id="deck-btn" class="draw-choice deck-choice" data-draw="deck">
+            <div class="deck-icon">🂠</div>
+            <span id="deck-size-label"></span>
+          </div>
+        </div>
+        <div class="draw-group" id="pile-draw-group">
+          <div class="section-label">From pile <span class="pile-hint" id="pile-hint"></span></div>
+          <div id="draw-options" class="card-row draw-row"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hand panel: fixed at bottom on mobile -->
+    <div class="hand-panel">
+      <!-- Your hand -->
+      <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
+      <div id="hand" class="card-row hand-row"></div>
+
+      <!-- Key hints -->
+      <div class="key-hints">Keys: <kbd>1</kbd>–<kbd>5</kbd> select cards &nbsp; <kbd>D</kbd> cycle draw &nbsp; <kbd>Enter</kbd> play &nbsp; <kbd>Y</kbd> Yaniv</div>
+
+      <!-- Actions -->
+      <div class="action-bar">
+        <button id="yaniv-btn" class="btn btn-yaniv hidden">🎉 Yaniv!</button>
+        <button id="play-btn" class="btn btn-primary" disabled>Play turn</button>
+      </div>
+
+      <p id="game-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="gameover" class="gameover hidden">
+    <div class="gameover-inner">
+      <h1>🏆 Game Over!</h1>
+      <p id="winner-text" class="winner-text"></p>
+      <div id="final-scores" class="final-scores"></div>
+      <button id="play-again-btn" class="btn btn-primary">Play again</button>
+    </div>
+  </div>
+
+  <script src="/js/game.js"></script>
+</body>
+</html>
