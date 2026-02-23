@@ -1,20 +1,6 @@
 // ── Identity ──────────────────────────────────────────────────────────────────
 const code = location.pathname.split('/').pop().toLowerCase();
-const pid  = (() => {
-  let id = localStorage.getItem('yaniv_pid');
-  if (!id) {
-    // crypto.randomUUID() requires a secure context (HTTPS or localhost).
-    // Fall back to a manual UUID v4 for plain-HTTP LAN access.
-    id = (typeof crypto.randomUUID === 'function')
-      ? crypto.randomUUID()
-      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-          const r = Math.random() * 16 | 0;
-          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        });
-    localStorage.setItem('yaniv_pid', id);
-  }
-  return id;
-})();
+const pid  = getYanivPid();
 
 let state         = null;
 let selectedCards = [];
@@ -254,10 +240,12 @@ function showLobby(s) {
     };
   });
 
-  // Show slamdown option only to the creator (first non-AI member)
+  // Show slamdown option only to the creator when there are no AIs
   const firstHuman = s.members.find(m => !m.is_ai);
   const hasAi = s.members.some(m => m.is_ai);
   if (firstHuman && firstHuman.pid === pid && !hasAi) {
+    const slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
+    if (slamdownsCheckbox) slamdownsCheckbox.checked = s.options?.slamdowns_allowed !== false;
     show($lobbyOptions);
   } else {
     hide($lobbyOptions);
@@ -469,33 +457,30 @@ function updatePlayBtn() {
   else clearError();
 }
 
-$playBtn.addEventListener('click', playTurn);
-$yanivBtn.addEventListener('click', async () => {
-  if (actionInFlight) return;
+async function submitAction(payload, { hideSlamdown = false } = {}) {
+  if (actionInFlight) return null;
   actionInFlight = true;
-  const res = await post('/api/action', { code, pid, declare_yaniv: true });
+  if (hideSlamdown) hide($slamdownBtn);
+
+  const res = await post('/api/action', { code, pid, ...payload });
   if (res?.error) {
     // On error the SSE update won't arrive, so fetch current state to reset
     // actionInFlight and show the real server state.
     fetchState();
   } else {
-    // Success: SSE will deliver the state update and call onState(), which
-    // resets actionInFlight.  Clear it here too as a safety net in case the
-    // SSE message is delayed, so the UI never freezes indefinitely.
+    // Success: SSE will deliver state and call onState(), which resets this too.
     actionInFlight = false;
   }
+  return res;
+}
+
+$playBtn.addEventListener('click', playTurn);
+$yanivBtn.addEventListener('click', async () => {
+  await submitAction({ declare_yaniv: true });
 });
 
 $slamdownBtn.addEventListener('click', async () => {
-  if (actionInFlight) return;
-  actionInFlight = true;
-  hide($slamdownBtn);
-  const res = await post('/api/action', { code, pid, declare_slamdown: true });
-  if (res?.error) {
-    fetchState();
-  } else {
-    actionInFlight = false;
-  }
+  await submitAction({ declare_slamdown: true }, { hideSlamdown: true });
 });
 
 async function playTurn() {
@@ -503,14 +488,8 @@ async function playTurn() {
   if (!state?.game?.is_my_turn) return;
   if (!selectedCards.length)  { showError('Select cards to discard'); return; }
   if (selectedDraw === null)  { showError('Choose where to draw from'); return; }
-  actionInFlight = true;
   updatePlayBtn();
-  const res = await post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
-  if (res?.error) {
-    fetchState();
-  } else {
-    actionInFlight = false;
-  }
+  await submitAction({ discard: selectedCards, draw: selectedDraw });
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
@@ -585,10 +564,7 @@ document.addEventListener('keydown', e => {
   } else if (e.key === 'y' || e.key === 'Y') {
     e.preventDefault();
     if (me.can_yaniv && !actionInFlight) {
-      actionInFlight = true;
-      post('/api/action', { code, pid, declare_yaniv: true }).then(res => {
-        if (res?.error) fetchState(); else actionInFlight = false;
-      });
+      submitAction({ declare_yaniv: true });
     }
   }
 });
