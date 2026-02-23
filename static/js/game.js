@@ -57,6 +57,7 @@ const $playBtn      = document.getElementById('play-btn');
 const $gameError    = document.getElementById('game-error');
 const $winnerText   = document.getElementById('winner-text');
 const $finalScores  = document.getElementById('final-scores');
+const $playAgainBtn = document.getElementById('play-again-btn');
 
 // ── SSE connection ────────────────────────────────────────────────────────────
 let lastSseAt = 0;
@@ -78,7 +79,8 @@ async function pollState() {
 }
 setInterval(() => {
   if (!state) return;
-  if (state.status === 'waiting') { pollState(); return; }
+  if (state.status === 'waiting')  { pollState(); return; }
+  if (state.status === 'finished') { pollState(); return; } // catch next_room redirect
   if (!state.game) return;
   if (Date.now() - lastSseAt < 5000) return; // SSE is live — don't interfere
   pollState();
@@ -104,6 +106,7 @@ async function post(url, body) {
 // ── State handler ─────────────────────────────────────────────────────────────
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
+  if (s.next_room) { window.location.href = `/game/${s.next_room}`; return; }
 
   // Compare hands using an order-independent fingerprint so server-side sorting
   // (start_turn) doesn't falsely look like a hand change.  Only clear the
@@ -242,20 +245,22 @@ function showBoard(s) {
   // Turn log (last 3 plays, animated)
   renderTurnLog(s.last_turn, s.last_round);
 
-  // Turn status
-  $turnStatus.textContent = g.is_my_turn
-    ? 'Your turn — select cards to discard, then choose where to draw.'
-    : `Waiting for ${esc(g.current_player_name)}…`;
-
-  // Draw section
+  // Turn status — only shown when it's your turn
   if (g.is_my_turn) {
-    // Default to deck on a fresh turn (onState resets selectedDraw to null)
-    if (selectedDraw === null) selectedDraw = 'deck';
-    show($drawSection);
-    $deckSizeLabel.textContent = `${g.deck_size} left`;
-    renderDrawOptions(g.draw_options, g.discard_top);
+    $turnStatus.textContent = 'Your turn — select cards to discard, then choose where to draw.';
+    show($turnStatus);
   } else {
-    hide($drawSection);
+    hide($turnStatus);
+  }
+
+  // Draw section — always visible; interactive only on your turn
+  show($drawSection);
+  $deckSizeLabel.textContent = `${g.deck_size} left`;
+  if (g.is_my_turn) {
+    if (selectedDraw === null) selectedDraw = 'deck';
+    renderDrawOptions(g.draw_options, g.discard_top, true);
+  } else {
+    renderDrawOptions([], g.discard_top, false);
   }
 
   // Hand — always sorted client-side; click handlers always attached for pre-selection
@@ -291,25 +296,25 @@ function showBoard(s) {
   updatePlayBtn();
 }
 
-function renderDrawOptions(options, discardTop) {
+function renderDrawOptions(options, discardTop, isMyTurn) {
   $drawOptions.innerHTML = '';
 
-  // Distinguish single / set / run for the hint label
-  if (!discardTop || discardTop.length === 0 || options.length === 0) {
-    $pileHint.textContent = options.length === 0 ? '(none)' : '';
+  // Pile hint — only meaningful on your turn
+  if (!isMyTurn || !discardTop || discardTop.length === 0) {
+    $pileHint.textContent = '';
+  } else if (options.length === 0) {
+    $pileHint.textContent = '';
   } else if (discardTop.length === 1) {
     $pileHint.textContent = '';
   } else if (discardTop.length > options.length) {
-    // run: fewer selectable options than cards discarded (only end cards)
     $pileHint.textContent = '(run — pick an end card)';
   } else {
-    // set: all discarded cards are selectable
     $pileHint.textContent = '(set — choose 1 card)';
   }
 
-  // Show ALL discarded cards; only valid picks are clickable
+  // Show ALL discarded cards; only valid picks are clickable (on your turn)
   (discardTop || []).forEach(c => {
-    const optionIndex = options.findIndex(o => o.id === c.id);
+    const optionIndex = isMyTurn ? options.findIndex(o => o.id === c.id) : -1;
     const isSelectable = optionIndex !== -1;
 
     const div = document.createElement('div');
@@ -321,13 +326,16 @@ function renderDrawOptions(options, discardTop) {
     $drawOptions.appendChild(div);
   });
 
-  $deckBtn.className = 'draw-choice deck-choice' + (selectedDraw === 'deck' ? ' selected' : '');
-  $deckBtn.onclick = () => selectDraw('deck');
+  // Deck — selectable only on your turn
+  $deckBtn.className = 'draw-choice deck-choice'
+    + (isMyTurn && selectedDraw === 'deck' ? ' selected' : '')
+    + (!isMyTurn ? ' pile-inactive' : '');
+  $deckBtn.onclick = isMyTurn ? () => selectDraw('deck') : null;
 }
 
 function selectDraw(val) {
   selectedDraw = val;
-  renderDrawOptions(state.game.draw_options, state.game.discard_top);
+  renderDrawOptions(state.game.draw_options, state.game.discard_top, state.game.is_my_turn);
   updatePlayBtn();
 }
 
@@ -425,6 +433,29 @@ function showGameOver(s) {
       .join('');
   }
 }
+
+// ── Play again ────────────────────────────────────────────────────────────────
+$playAgainBtn.addEventListener('click', async () => {
+  $playAgainBtn.disabled = true;
+  $playAgainBtn.textContent = 'Starting…';
+  try {
+    const res  = await fetch('/api/play_again', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code, pid }),
+    });
+    const data = await res.json();
+    if (data.next_room) {
+      window.location.href = `/game/${data.next_room}`;
+    } else {
+      $playAgainBtn.disabled = false;
+      $playAgainBtn.textContent = 'Play again';
+    }
+  } catch (_) {
+    $playAgainBtn.disabled = false;
+    $playAgainBtn.textContent = 'Play again';
+  }
+});
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {

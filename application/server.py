@@ -379,6 +379,7 @@ def room_state(room, pid=None):
         'winner':     room.get('winner'),
         'last_round': room.get('last_round'),
         'last_turn':  room.get('last_turn'),
+        'next_room':  room.get('next_room'),
     }
 
 
@@ -711,6 +712,51 @@ def do_action():
     push_state(code)
     threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
     return jsonify({'ok': True})
+
+
+@app.route('/api/play_again', methods=['POST'])
+def play_again():
+    data = request.json or {}
+    code = (data.get('code') or '').lower()
+    room = rooms.get(code)
+
+    if not room or room['status'] != 'finished':
+        return jsonify({'error': 'Game not finished'}), 400
+
+    # Idempotent: if a rematch room already exists, return it
+    if room.get('next_room'):
+        return jsonify({'next_room': room['next_room']})
+
+    # Create a new room with the same members (same PIDs preserved)
+    new_code = gen_code()
+    while new_code in rooms:
+        new_code = gen_code()
+
+    members = [dict(m) for m in room['members']]
+
+    players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
+               for m in members]
+    g = YanivGame(players)
+    g.start_game()
+
+    rooms[new_code] = {
+        'code':                    new_code,
+        'status':                  'playing',
+        'members':                 members,
+        'game':                    g,
+        'winner':                  None,
+        'last_round':              None,
+        'last_turn':               None,
+        'round_banner_turns_left': 0,
+    }
+    save_room(new_code)
+
+    # Mark old room so all polling/SSE clients redirect automatically
+    room['next_room'] = new_code
+    push_state(code)
+
+    threading.Thread(target=process_ai_turns, args=(new_code,), daemon=True).start()
+    return jsonify({'next_room': new_code})
 
 
 # ── Boot ───────────────────────────────────────────────────────────────────────
