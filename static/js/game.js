@@ -137,6 +137,8 @@ function showBoard(s) {
 
   // Draw section
   if (g.is_my_turn) {
+    // Default to deck on a fresh turn (onState resets selectedDraw to null)
+    if (selectedDraw === null) selectedDraw = 'deck';
     show($drawSection);
     $deckSizeLabel.textContent = `${g.deck_size} left`;
     renderDrawOptions(g.draw_options, g.discard_top);
@@ -311,15 +313,17 @@ document.addEventListener('keydown', e => {
   if (n >= 1 && n <= me.hand.length) {
     e.preventDefault(); toggleCard(me.hand[n - 1].id);
   } else if (e.key === 'd' || e.key === 'D') {
-    e.preventDefault(); selectDraw('deck');
-  } else if (e.key === 'p' || e.key === 'P') {
+    // Cycle through all draw options: deck → pile-0 → pile-1 → … → deck
     e.preventDefault();
     const opts = state.game.draw_options;
-    if (opts.length === 1) selectDraw(0);
-    else if (opts.length > 1) {
-      const next = (selectedDraw === null || selectedDraw === 'deck') ? 0
-                 : (selectedDraw + 1) % opts.length;
-      selectDraw(next);
+    if (opts.length === 0 || selectedDraw === null) {
+      selectDraw('deck');
+    } else if (selectedDraw === 'deck') {
+      selectDraw(0);
+    } else if (typeof selectedDraw === 'number' && selectedDraw < opts.length - 1) {
+      selectDraw(selectedDraw + 1);
+    } else {
+      selectDraw('deck');
     }
   } else if (e.key === 'Enter') {
     e.preventDefault(); if (!$playBtn.disabled) playTurn();

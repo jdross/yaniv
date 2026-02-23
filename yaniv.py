@@ -150,6 +150,9 @@ class YanivGame:
         eliminated_players = [p for p in self.players if p.score > 100]
         for p in eliminated_players:
             self.players.remove(p)
+        # After removing eliminated players the index may be out of range; clamp it.
+        if self.players:
+            self.current_player_index = self.current_player_index % len(self.players)
         winner = self._check_end_of_game()
 
         self._deal_new_hand()

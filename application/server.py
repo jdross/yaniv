@@ -305,43 +305,71 @@ def room_state(room, pid=None):
     game_out = None
     if room['game']:
         g = room['game']
-        current_player, draw_options = g.start_turn()
-        gplayers = []
-        for gp in g.players:
-            gpd = {
-                'name':       gp.name,
-                'score':      gp.score,
-                'hand_count': len(gp.hand),
-                'is_ai':      isinstance(gp, AIPlayer),
-                'is_current': gp is current_player,
+
+        if room['status'] == 'finished':
+            # Game over — only expose scores; calling start_turn() is unsafe
+            # (player list may have shrunk after elimination).
+            gplayers = [
+                {
+                    'name':       gp.name,
+                    'score':      gp.score,
+                    'hand_count': len(gp.hand),
+                    'is_ai':      isinstance(gp, AIPlayer),
+                    'is_current': False,
+                    'pid':        next(
+                        (m['pid'] for m in room['members']
+                         if m['name'] == gp.name and not m['is_ai']),
+                        None,
+                    ),
+                }
+                for gp in g.players
+            ]
+            game_out = {
+                'players':             gplayers,
+                'discard_top':         [],
+                'draw_options':        [],
+                'current_player_name': '',
+                'is_my_turn':          False,
+                'deck_size':           0,
             }
-            mem = next((m for m in room['members'] if m['name'] == gp.name and not m['is_ai']), None)
-            if mem:
-                gpd['pid'] = mem['pid']
-                if pid and mem['pid'] == pid:
-                    gpd['hand']      = [card_to_dict(c) for c in gp.hand]
-                    gpd['is_self']   = True
-                    gpd['can_yaniv'] = g.can_declare_yaniv(gp)
-            else:
-                gpd['pid'] = None
-            gplayers.append(gpd)
+        else:
+            current_player, draw_options = g.start_turn()
+            gplayers = []
+            for gp in g.players:
+                gpd = {
+                    'name':       gp.name,
+                    'score':      gp.score,
+                    'hand_count': len(gp.hand),
+                    'is_ai':      isinstance(gp, AIPlayer),
+                    'is_current': gp is current_player,
+                }
+                mem = next((m for m in room['members'] if m['name'] == gp.name and not m['is_ai']), None)
+                if mem:
+                    gpd['pid'] = mem['pid']
+                    if pid and mem['pid'] == pid:
+                        gpd['hand']      = [card_to_dict(c) for c in gp.hand]
+                        gpd['is_self']   = True
+                        gpd['can_yaniv'] = g.can_declare_yaniv(gp)
+                else:
+                    gpd['pid'] = None
+                gplayers.append(gpd)
 
-        is_my_turn     = False
-        my_draw_options = []
-        if pid:
-            cur_mem = next((m for m in room['members'] if m['pid'] == pid), None)
-            if cur_mem and current_player.name == cur_mem['name']:
-                is_my_turn      = True
-                my_draw_options = [card_to_dict(c) for c in draw_options]
+            is_my_turn      = False
+            my_draw_options = []
+            if pid:
+                cur_mem = next((m for m in room['members'] if m['pid'] == pid), None)
+                if cur_mem and current_player.name == cur_mem['name']:
+                    is_my_turn      = True
+                    my_draw_options = [card_to_dict(c) for c in draw_options]
 
-        game_out = {
-            'players':             gplayers,
-            'discard_top':         [card_to_dict(c) for c in g.last_discard],
-            'draw_options':        my_draw_options,
-            'current_player_name': current_player.name,
-            'is_my_turn':          is_my_turn,
-            'deck_size':           len(g.deck),
-        }
+            game_out = {
+                'players':             gplayers,
+                'discard_top':         [card_to_dict(c) for c in g.last_discard],
+                'draw_options':        my_draw_options,
+                'current_player_name': current_player.name,
+                'is_my_turn':          is_my_turn,
+                'deck_size':           len(g.deck),
+            }
 
     return {
         'code':       room['code'],
