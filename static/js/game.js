@@ -132,13 +132,21 @@ function onState(s) {
     selectedCards = [];
   }
 
-  // Deck draw animation — fires once per unique last_turn when drawn from deck
+  // Draw animation — fires once per unique last_turn when drawn from deck or pile
   if (s.last_turn && s.status === 'playing') {
     const animKey = JSON.stringify(s.last_turn);
-    if (animKey !== prevAnimTurnKey && s.last_turn.drawn_from === 'deck') {
-      const me = s.game?.players?.find(p => p.is_self);
-      const isMyDraw = !!(me && me.name === s.last_turn.player);
-      animateDeckDraw(isMyDraw, isMyDraw ? drawnCard : null);
+    if (animKey !== prevAnimTurnKey) {
+      const df = s.last_turn.drawn_from;
+      if (df === 'deck' || df === 'pile') {
+        const me = s.game?.players?.find(p => p.is_self);
+        const isMyDraw = !!(me && me.name === s.last_turn.player);
+        // Pile card is always face-up (server always reveals it in last_turn).
+        // Deck card is only known when it's our own draw.
+        const cardToShow = df === 'pile'
+          ? s.last_turn.drawn_card
+          : (isMyDraw ? drawnCard : null);
+        animateCardDraw(isMyDraw, cardToShow, df === 'pile');
+      }
     }
     prevAnimTurnKey = animKey;
   }
@@ -520,17 +528,19 @@ function sortHand(hand) {
   return [...hand].sort((a, b) => a.id - b.id);
 }
 
-// ── Deck draw animation ───────────────────────────────────────────────────────
-// Spawns a card that flies from the deck to the hand (my draw, face-up with
-// the actual card) or toward the score bar (opponent's draw, face-down).
-// The element fades out over 0.6 s then removes itself.
-function animateDeckDraw(isMyDraw, drawnCard) {
-  const deckRect = $deckBtn.getBoundingClientRect();
-  if (!deckRect.width) return; // deck not visible
+// ── Card draw animation ───────────────────────────────────────────────────────
+// Spawns a card that flies from the source (deck or pile) toward the hand
+// (my draw) or score bar (opponent's draw), fading out over 1 s.
+// drawnCard: card object to show face-up, or null for a face-down back.
+// fromPile:  true → source is the discard pile area; false → deck button.
+function animateCardDraw(isMyDraw, drawnCard, fromPile) {
+  const srcEl   = fromPile ? $drawOptions : $deckBtn;
+  const srcRect = srcEl.getBoundingClientRect();
+  if (!srcRect.width) return; // source not visible
 
   const W = 60, H = 88;
-  const srcCX = deckRect.left + deckRect.width  / 2;
-  const srcCY = deckRect.top  + deckRect.height / 2;
+  const srcCX = srcRect.left + srcRect.width  / 2;
+  const srcCY = srcRect.top  + srcRect.height / 2;
 
   let tgtCX, tgtCY;
   if (isMyDraw) {
@@ -544,7 +554,7 @@ function animateDeckDraw(isMyDraw, drawnCard) {
   }
 
   const flyEl = document.createElement('div');
-  if (isMyDraw && drawnCard) {
+  if (drawnCard) {
     flyEl.className = 'flying-card' + (cardColor(drawnCard) ? ' red' : '');
     flyEl.innerHTML =
       `<span class="card-rank">${esc(drawnCard.rank)}</span>` +
@@ -560,12 +570,12 @@ function animateDeckDraw(isMyDraw, drawnCard) {
 
   // Force a reflow so the start position is painted before the transition kicks in
   flyEl.getBoundingClientRect();
-  flyEl.style.transition = 'left 0.6s ease-in-out, top 0.6s ease-in-out, opacity 0.6s ease-in-out';
+  flyEl.style.transition = 'left 1s ease-in-out, top 1s ease-in-out, opacity 1s ease-in-out';
   flyEl.style.left    = `${tgtCX - W / 2}px`;
   flyEl.style.top     = `${tgtCY - H / 2}px`;
   flyEl.style.opacity = '0';
 
-  setTimeout(() => flyEl.remove(), 700);
+  setTimeout(() => flyEl.remove(), 1100);
 }
 
 // ── Card rendering helpers ────────────────────────────────────────────────────
