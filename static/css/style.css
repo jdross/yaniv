@@ -250,8 +250,17 @@ input[type="range"] {
   border: 1px solid rgba(255,255,255,.2);
 }
 
-/* Turn log — last 3 plays stacked, newest on top */
-.turn-log { display: flex; flex-direction: column; gap: .25rem; }
+/* Turn log — last 3 plays stacked, newest on top.
+   Fixed height so adding/removing entries never shifts the deck/pile above. */
+.turn-log {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  min-height: 7rem;
+  max-height: 7rem;
+  overflow: hidden;
+  flex-shrink: 0;
+}
 
 @keyframes slide-down {
   from { opacity: 0; transform: translateY(-10px); }
@@ -306,7 +315,7 @@ input[type="range"] {
   opacity: .55;
   margin-bottom: .25rem;
 }
-.your-hand-label { margin-top: .3rem; }
+.your-hand-label { margin-top: .3rem; margin-bottom: 10px; }
 .hand-value { font-size: .8rem; opacity: .7; margin-left: .3rem; }
 
 /* Card rows */
@@ -343,13 +352,14 @@ input[type="range"] {
 .card .card-suit { font-size: 1.2rem; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
 .card .card-rank-bot { font-size: .85rem; line-height: 1; align-self: flex-end; transform: rotate(180deg); }
 
-/* Newly drawn card — pulsing gold outline that fades out */
+/* Newly drawn card — subtle gold glow that pulses 3× then stops */
 @keyframes card-new-glow {
-  0%   { outline: 3px solid rgba(244,208,63,1);  box-shadow: 0 0 14px 4px rgba(244,208,63,.6); }
-  65%  { outline: 3px solid rgba(244,208,63,.4);  box-shadow: 0 0 4px 0 rgba(244,208,63,.1); }
-  100% { outline: 3px solid rgba(244,208,63,0);  box-shadow: none; }
+  0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  50%       { box-shadow: 0 2px 6px rgba(0,0,0,.35), 0 0 11px 4px rgba(244,208,63,.55); }
 }
-.card.card-new { animation: card-new-glow 2.2s ease forwards; }
+.card.card-new { animation: card-new-glow 0.7s ease-in-out 3; }
+/* When selected, drop the glow and use normal selected styles */
+.hand-row .card.card-new.selected { animation: none; }
 
 /* Selectable hand cards */
 .hand-row .card {
@@ -359,7 +369,7 @@ input[type="range"] {
 .hand-row .card:hover { transform: translateY(-6px); box-shadow: 0 6px 14px rgba(0,0,0,.4); }
 .hand-row .card.selected {
   transform: translateY(-14px);
-  box-shadow: 0 8px 20px rgba(244,208,63,.6);
+  box-shadow: 0 10px 24px rgba(0,0,0,.55);
   outline: 3px solid #f4d03f;
 }
 .hand-row .card .card-num {
