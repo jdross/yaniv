@@ -97,6 +97,29 @@ def _run_migrations():
                 cur.execute('UPDATE schema_version SET version = %s', (_SCHEMA_VERSION,))
 
 
+def _cleanup_stale_rooms():
+    """On startup: mark old playing rooms as finished; delete stale waiting rooms (and CASCADE)."""
+    with _get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE rooms
+                SET status = 'finished'
+                WHERE status = 'playing' AND created_at < now() - interval '7 days'
+                """
+            )
+            finished = cur.rowcount
+            cur.execute(
+                """
+                DELETE FROM rooms
+                WHERE status = 'waiting' AND created_at < now() - interval '12 hours'
+                """
+            )
+            deleted = cur.rowcount
+    if finished or deleted:
+        print(f'[DB] Cleanup: {finished} room(s) marked finished, {deleted} stale waiting room(s) deleted')
+
+
 def _init_db():
     """Connect to Postgres, migrate, and load existing rooms into memory."""
     global _pool
@@ -106,6 +129,7 @@ def _init_db():
     try:
         _pool = ThreadedConnectionPool(2, 10, DB_URL)
         _run_migrations()
+        _cleanup_stale_rooms()
         _load_rooms()
         print(f'[DB] Initialised — {len(rooms)} room(s) restored')
         # Resume any AI turns that were in progress when the server last stopped
@@ -248,10 +272,12 @@ def save_room(code):
 
 
 def _load_rooms():
-    """Rebuild the in-memory rooms dict from the database on startup."""
+    """Rebuild the in-memory rooms dict from the database on startup (only playing or waiting)."""
     with _get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT code, status, winner FROM rooms')
+            cur.execute(
+                "SELECT code, status, winner FROM rooms WHERE status IN ('playing', 'waiting')"
+            )
             for code, status, winner in cur.fetchall():
                 # Members
                 cur.execute(
