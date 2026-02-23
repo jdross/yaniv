@@ -487,6 +487,10 @@ input[type="range"] {
   .board {
     padding-bottom: 230px;
   }
+
+  /* Hide keyboard shortcut hints on mobile */
+  .key-hints { display: none; }
+  .hand-row .card .card-num { display: none; }
 }
 
 /* Mobile tweaks */
