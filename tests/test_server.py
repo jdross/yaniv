@@ -94,6 +94,53 @@ class TestServerApi(unittest.TestCase):
         self.assertIn(room["last_turn"]["player"], ["P1", "P2"])
         self.assertIn("discarded", room["last_turn"])
 
+    def test_waiting_room_options_persist_across_join_and_start(self):
+        create = self.client.post(
+            "/api/create",
+            json={"name": "P1", "pid": "pid-1", "ai_count": 0},
+        )
+        code = create.get_json()["code"]
+
+        opt = self.client.post(
+            "/api/options",
+            json={"code": code, "pid": "pid-1", "slamdowns_allowed": True},
+        )
+        self.assertEqual(opt.status_code, 200)
+        self.assertTrue(opt.get_json()["options"]["slamdowns_allowed"])
+
+        join = self.client.post(
+            "/api/join",
+            json={"name": "P2", "pid": "pid-2", "code": code},
+        )
+        self.assertEqual(join.status_code, 200)
+
+        state = self.client.get(f"/api/room/{code}?pid=pid-2").get_json()
+        self.assertTrue(state["options"]["slamdowns_allowed"])
+
+        start = self.client.post("/api/start", json={"code": code, "pid": "pid-1"})
+        self.assertEqual(start.status_code, 200)
+        self.assertTrue(server.rooms[code]["options"]["slamdowns_allowed"])
+
+    def test_only_creator_can_change_waiting_options(self):
+        create = self.client.post(
+            "/api/create",
+            json={"name": "P1", "pid": "pid-1", "ai_count": 0},
+        )
+        code = create.get_json()["code"]
+
+        join = self.client.post(
+            "/api/join",
+            json={"name": "P2", "pid": "pid-2", "code": code},
+        )
+        self.assertEqual(join.status_code, 200)
+
+        opt = self.client.post(
+            "/api/options",
+            json={"code": code, "pid": "pid-2", "slamdowns_allowed": True},
+        )
+        self.assertEqual(opt.status_code, 400)
+        self.assertIn("error", opt.get_json())
+
 
 if __name__ == "__main__":
     unittest.main()

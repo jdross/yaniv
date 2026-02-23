@@ -38,19 +38,17 @@
         <span class="room-code-label">Room code</span>
         <span id="lobby-code" class="room-code"></span>
       </div>
-      <p class="share-hint">Share this link:</p>
       <div class="share-link-row">
-        <span id="share-url" class="share-url-text"></span>
         <button id="share-btn" class="share-btn">Copy link</button>
       </div>
       <div id="lobby-players" class="lobby-players"></div>
+      <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
       <div id="lobby-options" class="lobby-options hidden">
         <label class="option-toggle">
           <input type="checkbox" id="slamdowns-checkbox">
           Allow Slamdowns
         </label>
       </div>
-      <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
       <p id="lobby-error" class="error-msg"></p>
     </div>
   </div>
@@ -117,6 +115,7 @@
   </div>
 
   <script src="/js/shared/pid.js"></script>
+  <script src="/js/shared/game-logic.js"></script>
   <script src="/js/game.js"></script>
 </body>
 </html>

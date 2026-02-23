@@ -1,6 +1,7 @@
 // ── Identity ──────────────────────────────────────────────────────────────────
 const code = location.pathname.split('/').pop().toLowerCase();
 const pid  = getYanivPid();
+const { sortHand, suitSymbol, cardColor, validateDiscard } = window.YanivGameLogic;
 
 let state         = null;
 let selectedCards = [];
@@ -39,10 +40,10 @@ const $lobby        = document.getElementById('lobby');
 const $board        = document.getElementById('board');
 const $gameover     = document.getElementById('gameover');
 const $lobbyCode    = document.getElementById('lobby-code');
-const $shareUrl     = document.getElementById('share-url');
 const $shareBtn     = document.getElementById('share-btn');
 const $lobbyPlayers = document.getElementById('lobby-players');
 const $startBtn     = document.getElementById('start-btn');
+const $slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
 const $scoreBar     = document.getElementById('score-bar');
 const $roundBanner  = document.getElementById('round-banner');
 const $turnLog      = document.getElementById('turn-log');
@@ -222,8 +223,7 @@ $joinNameInput.addEventListener('keydown', e => {
 function showLobby(s) {
   show($lobby); hide($joinScreen); hide($board); hide($gameover);
   $lobbyCode.textContent = s.code;
-  $shareUrl.textContent  = location.href;
-  $shareBtn.textContent  = navigator.share ? 'Share link' : 'Copy link';
+  $shareBtn.textContent  = getShareButtonLabel();
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
@@ -244,8 +244,7 @@ function showLobby(s) {
   const firstHuman = s.members.find(m => !m.is_ai);
   const hasAi = s.members.some(m => m.is_ai);
   if (firstHuman && firstHuman.pid === pid && !hasAi) {
-    const slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
-    if (slamdownsCheckbox) slamdownsCheckbox.checked = s.options?.slamdowns_allowed !== false;
+    if ($slamdownsCheckbox) $slamdownsCheckbox.checked = s.options?.slamdowns_allowed !== false;
     show($lobbyOptions);
   } else {
     hide($lobbyOptions);
@@ -253,26 +252,118 @@ function showLobby(s) {
 }
 
 // ── Share link ────────────────────────────────────────────────────────────────
-$shareBtn.addEventListener('click', () => {
-  if (navigator.share) {
-    navigator.share({ url: location.href }).catch(() => {});
-  } else {
-    navigator.clipboard.writeText(location.href).then(() => {
-      $shareBtn.textContent = 'Copied!';
-      $shareBtn.classList.add('copied');
-      setTimeout(() => {
-        $shareBtn.textContent = 'Copy link';
-        $shareBtn.classList.remove('copied');
-      }, 2000);
-    }).catch(() => {});
+function isMobileDevice() {
+  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
+    return navigator.userAgentData.mobile;
+  }
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua)) return true;
+  // iPadOS can report as Mac; touch points disambiguate.
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
+function canUseNativeShareSheet() {
+  return isMobileDevice() && typeof navigator.share === 'function';
+}
+
+function getShareButtonLabel() {
+  return canUseNativeShareSheet() ? 'Share link' : 'Copy link';
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      // Fall back to execCommand below.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch (_) {
+    ok = false;
+  }
+  document.body.removeChild(textarea);
+  return ok;
+}
+
+$shareBtn.addEventListener('click', async () => {
+  if (canUseNativeShareSheet()) {
+    try {
+      await navigator.share({
+        title: 'Yaniv',
+        text: 'Join my Yaniv game',
+        url: location.href,
+      });
+      return;
+    } catch (err) {
+      // If share is cancelled, do nothing. Otherwise fall back to copy.
+      if (err && err.name === 'AbortError') return;
+    }
+  }
+
+  const copied = await copyTextToClipboard(location.href);
+  if (copied) {
+    $shareBtn.textContent = 'Copied!';
+    $shareBtn.classList.add('copied');
+    setTimeout(() => {
+      $shareBtn.textContent = getShareButtonLabel();
+      $shareBtn.classList.remove('copied');
+    }, 2000);
   }
 });
 
 $startBtn.addEventListener('click', () => {
-  const slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
-  const slamdowns_allowed = slamdownsCheckbox ? slamdownsCheckbox.checked : false;
+  const slamdowns_allowed = $slamdownsCheckbox ? $slamdownsCheckbox.checked : false;
   post('/api/start', { code, pid, slamdowns_allowed });
 });
+
+if ($slamdownsCheckbox) {
+  $slamdownsCheckbox.addEventListener('change', async () => {
+    if (!state || state.status !== 'waiting') return;
+
+    const firstHuman = state.members.find(m => !m.is_ai);
+    const hasAi = state.members.some(m => m.is_ai);
+    const canEdit = !!firstHuman && firstHuman.pid === pid && !hasAi;
+    if (!canEdit) {
+      $slamdownsCheckbox.checked = false;
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          pid,
+          slamdowns_allowed: $slamdownsCheckbox.checked,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        fetchState();
+        return;
+      }
+      if (data.options) {
+        $slamdownsCheckbox.checked = !!data.options.slamdowns_allowed;
+      }
+    } catch (_) {
+      fetchState();
+    }
+  });
+}
 
 // ── Board ─────────────────────────────────────────────────────────────────────
 function showBoard(s) {
@@ -413,37 +504,11 @@ function toggleCard(id) {
   updatePlayBtn();
 }
 
-function isValidRun(cards) {
-  const nonJokers = cards.filter(c => c.rank !== 'Joker');
-  const jokerCount = cards.length - nonJokers.length;
-  if (nonJokers.length > 0 && new Set(nonJokers.map(c => c.suit)).size > 1) return false;
-  const ORDER = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
-  const ranks = nonJokers.map(c => ORDER.indexOf(c.rank)).sort((a, b) => a - b);
-  let needed = 0;
-  for (let i = 0; i < ranks.length - 1; i++) needed += ranks[i + 1] - ranks[i] - 1;
-  return needed <= jokerCount;
-}
-
 function isValidDiscard(ids) {
   const me = state?.game?.players?.find(p => p.is_self);
   if (!me?.hand) return { valid: false };
   const cards = ids.map(id => me.hand.find(c => c.id === id)).filter(Boolean);
-  if (cards.length === 0) return { valid: false };
-  if (cards.length === 1) return { valid: true };
-
-  // Set: all non-jokers share the same rank
-  const nonJokers = cards.filter(c => c.rank !== 'Joker');
-  if (nonJokers.length === 0 || new Set(nonJokers.map(c => c.rank)).size === 1) {
-    return { valid: true };
-  }
-
-  // Run: 3+ cards, same suit, consecutive (jokers fill gaps)
-  if (cards.length >= 3 && isValidRun(cards)) return { valid: true };
-
-  if (cards.length === 2) {
-    return { valid: false, reason: 'Two cards must share the same rank' };
-  }
-  return { valid: false, reason: 'Cards must form a set (same rank) or a run (3+ same suit, consecutive)' };
+  return validateDiscard(cards);
 }
 
 function updatePlayBtn() {
@@ -569,12 +634,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── Hand sorting ──────────────────────────────────────────────────────────────
-// c.id === c._card (numeric 0-53): Jokers first, then A♣..K♠ by rank then suit.
-function sortHand(hand) {
-  return [...hand].sort((a, b) => a.id - b.id);
-}
-
 // ── Card draw animation ───────────────────────────────────────────────────────
 // Spawns a card that flies from the source (deck or pile) toward the hand
 // (my draw) or score bar (opponent's draw), fading out over 1 s.
@@ -656,14 +715,6 @@ function cardShortHtml(c) {
   return (c.suit === 'Hearts' || c.suit === 'Diamonds')
     ? `<span class="log-red">${text}</span>`
     : text;
-}
-
-function suitSymbol(suit) {
-  return { Clubs: '♣', Diamonds: '♦', Hearts: '♥', Spades: '♠' }[suit] || '';
-}
-
-function cardColor(c) {
-  return (c.suit === 'Hearts' || c.suit === 'Diamonds') ? 'red' : '';
 }
 
 // ── Turn log (last 3 plays with slide-in animation) ───────────────────────────

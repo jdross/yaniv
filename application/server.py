@@ -707,6 +707,38 @@ def get_room(code):
     return jsonify(state)
 
 
+@app.route('/api/options', methods=['POST'])
+def update_waiting_options():
+    data = request.json or {}
+    code = (data.get('code') or '').lower()
+    pid = data.get('pid', '')
+    requested = bool(data.get('slamdowns_allowed', False))
+
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return error_response('Room not found', 404)
+        if room['status'] != 'waiting':
+            return error_response('Options can only be changed while waiting')
+
+        member = next((m for m in room['members'] if m['pid'] == pid), None)
+        if not member:
+            return error_response('Not a member of this game')
+
+        first_human = next((m for m in room['members'] if not m['is_ai']), None)
+        if not first_human or first_human['pid'] != pid:
+            return error_response('Only the room creator can change options')
+
+        has_ai = any(m['is_ai'] for m in room['members'])
+        room_options = dict(room.get('options', {}))
+        room_options['slamdowns_allowed'] = requested and not has_ai
+        room['options'] = room_options
+        updated_options = dict(room_options)
+
+    push_state(code)
+    return jsonify({'ok': True, 'options': updated_options})
+
+
 @app.route('/api/start', methods=['POST'])
 def start_game():
     data = request.json or {}
@@ -719,10 +751,13 @@ def start_game():
             return error_response('Need at least 2 players')
 
         has_ai = any(m['is_ai'] for m in room['members'])
-        room['options'] = {
-            # Slamdowns are only allowed in human-only games
-            'slamdowns_allowed': bool(data.get('slamdowns_allowed', False)) and not has_ai,
-        }
+        room_options = dict(room.get('options', {}))
+        # Keep waiting-room selection unless explicitly overridden by client.
+        selected = room_options.get('slamdowns_allowed', False)
+        if 'slamdowns_allowed' in data:
+            selected = bool(data.get('slamdowns_allowed', False))
+        room_options['slamdowns_allowed'] = bool(selected) and not has_ai
+        room['options'] = room_options
 
         players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
                    for m in room['members']]

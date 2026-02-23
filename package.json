@@ -1,0 +1,11 @@
+{
+  "name": "yaniv",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:frontend",
+    "test:frontend": "node --test tests/frontend/*.test.js",
+    "test:python": "python3 -m unittest discover -s tests -v",
+    "test:db": "python3 -m unittest tests.test_db_integration -v"
+  }
+}

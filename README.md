@@ -14,3 +14,32 @@ A game engine and simple "AI" player for the Yaniv card game
 
 ### Future plans:
 - Make the AI smarter
+
+### Running tests
+
+Frontend unit tests (Node built-in test runner):
+
+```bash
+npm test
+# or
+npm run test:frontend
+```
+
+Python test suite:
+
+```bash
+npm run test:python
+# or
+python3 -m unittest discover -s tests -v
+```
+
+Database integration tests (runs against a real Postgres database):
+
+```bash
+export YANIV_DB_TEST_URL=postgresql://jdross@localhost/yaniv
+npm run test:db
+# or
+YANIV_DB_TEST_URL=postgresql://jdross@localhost/yaniv python3 -m unittest tests.test_db_integration -v
+```
+
+DB integration tests automatically skip when `YANIV_DB_TEST_URL` (or `DATABASE_URL`) is not set or cannot be reached.
