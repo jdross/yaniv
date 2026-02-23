@@ -586,6 +586,23 @@ def join_game():
     return jsonify({'code': code, 'pid': pid})
 
 
+@app.route('/api/leave', methods=['POST'])
+def leave_game():
+    data = request.json or {}
+    pid  = data.get('pid', '')
+    code = (data.get('code') or '').strip().lower()
+
+    room = rooms.get(code)
+    if not room:
+        return jsonify({'error': 'Room not found'}), 404
+    if room['status'] != 'waiting':
+        return jsonify({'error': 'Cannot leave after game has started'}), 400
+
+    room['members'] = [m for m in room['members'] if m['pid'] != pid]
+    push_state(code)
+    return jsonify({'ok': True})
+
+
 @app.route('/api/room/<code>')
 def get_room(code):
     pid  = request.args.get('pid', '')

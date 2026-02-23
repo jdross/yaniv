@@ -140,7 +140,31 @@ input[type="range"] {
 .room-code { font-size: 2.8rem; font-weight: 900; letter-spacing: .35em; color: #f4d03f; }
 
 .share-hint { font-size: .8rem; opacity: .6; margin-bottom: 1.5rem; }
-.share-link { color: #f4d03f; word-break: break-all; }
+.share-link {
+  color: #f4d03f;
+  word-break: break-all;
+  cursor: pointer;
+  position: relative;
+  text-decoration: underline dotted rgba(244,208,63,.5);
+}
+.share-link:hover::after {
+  content: 'click to copy';
+  position: absolute;
+  bottom: 120%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.75);
+  color: #fff;
+  font-size: .7rem;
+  padding: .2rem .45rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.share-link.copied::after {
+  content: 'copied!';
+  background: #27ae60;
+}
 
 .lobby-players { margin-bottom: 1.5rem; }
 .lobby-player {
@@ -153,7 +177,21 @@ input[type="range"] {
   margin-bottom: .4rem;
   font-size: .95rem;
 }
+.lobby-player .player-name { flex: 1; }
+.btn-leave {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.25);
+  color: rgba(255,255,255,.55);
+  font-size: .72rem;
+  padding: .18rem .45rem;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.btn-leave:hover { background: rgba(231,76,60,.25); border-color: rgba(231,76,60,.5); color: #ff9a9a; }
 .player-icon { font-size: 1.2rem; }
+
+.join-full-msg { color: rgba(255,255,255,.65); font-size: .85rem; margin-top: .8rem; }
 
 /* ── Game Board ── */
 .game-page { background: #1a5c38; }

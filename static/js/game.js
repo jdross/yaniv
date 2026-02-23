@@ -14,6 +14,15 @@ let prevRoundKey  = null;   // fingerprint of the last rendered round banner
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
+const $joinScreen   = document.getElementById('join-screen');
+const $joinCode     = document.getElementById('join-code');
+const $joinPlayers  = document.getElementById('join-players');
+const $joinForm     = document.getElementById('join-form');
+const $joinBtn      = document.getElementById('join-btn');
+const $joinNameInput = document.getElementById('join-name-input');
+const $joinFullMsg  = document.getElementById('join-full-msg');
+const $joinStartedMsg = document.getElementById('join-started-msg');
+const $joinError    = document.getElementById('join-error');
 const $lobby        = document.getElementById('lobby');
 const $board        = document.getElementById('board');
 const $gameover     = document.getElementById('gameover');
@@ -82,24 +91,81 @@ function onState(s) {
   actionInFlight = false;
   clearError();
 
+  const isMember = s.members.some(m => m.pid === pid);
+  if (!isMember) { showJoin(s); return; }
+
   if (s.status === 'waiting')        showLobby(s);
   else if (s.status === 'finished')  showGameOver(s);
   else                               showBoard(s);
 }
 
+// ── Join screen (visitor not yet in room) ────────────────────────────────────
+function showJoin(s) {
+  show($joinScreen); hide($lobby); hide($board); hide($gameover);
+  $joinCode.textContent = s.code;
+
+  $joinPlayers.innerHTML = s.members.map(m =>
+    `<div class="lobby-player">
+       <span class="player-icon">${m.is_ai ? '🤖' : '👤'}</span>
+       <span class="player-name">${esc(m.name)}</span>
+     </div>`
+  ).join('');
+
+  const humanCount = s.members.filter(m => !m.is_ai).length;
+  if (s.status !== 'waiting') {
+    hide($joinForm); hide($joinFullMsg); show($joinStartedMsg);
+  } else if (humanCount >= 4) {
+    hide($joinForm); show($joinFullMsg); hide($joinStartedMsg);
+  } else {
+    show($joinForm); hide($joinFullMsg); hide($joinStartedMsg);
+  }
+}
+
+$joinBtn.addEventListener('click', async () => {
+  const name = $joinNameInput.value.trim() || 'Player';
+  const res  = await fetch('/api/join', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ pid, code, name }),
+  });
+  const data = await res.json();
+  if (data.error) $joinError.textContent = data.error;
+  // On success the SSE delivers updated state → showLobby
+});
+
+$joinNameInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') $joinBtn.click();
+});
+
 // ── Lobby ─────────────────────────────────────────────────────────────────────
 function showLobby(s) {
-  show($lobby); hide($board); hide($gameover);
+  show($lobby); hide($joinScreen); hide($board); hide($gameover);
   $lobbyCode.textContent = s.code;
   $shareUrl.textContent  = location.href;
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
        <span class="player-icon">${m.is_ai ? '🤖' : '👤'}</span>
-       <span>${esc(m.name)}${m.pid === pid ? ' (you)' : ''}</span>
+       <span class="player-name">${esc(m.name)}${m.pid === pid ? ' (you)' : ''}</span>
+       ${m.pid === pid ? '<button class="btn-leave">Leave</button>' : ''}
      </div>`
   ).join('');
+
+  $lobbyPlayers.querySelectorAll('.btn-leave').forEach(btn => {
+    btn.onclick = async () => {
+      const res = await post('/api/leave', { pid, code });
+      if (!res?.error) window.location.href = '/';
+    };
+  });
 }
+
+// ── Share link copy-to-clipboard ─────────────────────────────────────────────
+$shareUrl.addEventListener('click', () => {
+  navigator.clipboard.writeText(location.href).then(() => {
+    $shareUrl.classList.add('copied');
+    setTimeout(() => $shareUrl.classList.remove('copied'), 2000);
+  }).catch(() => {});
+});
 
 $startBtn.addEventListener('click', () => {
   post('/api/start', { code, pid });
@@ -107,7 +173,7 @@ $startBtn.addEventListener('click', () => {
 
 // ── Board ─────────────────────────────────────────────────────────────────────
 function showBoard(s) {
-  hide($lobby); show($board); hide($gameover);
+  hide($joinScreen); hide($lobby); show($board); hide($gameover);
 
   const g  = s.game;
   const me = g.players.find(p => p.is_self);
@@ -299,7 +365,7 @@ async function playTurn() {
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
 function showGameOver(s) {
-  hide($lobby); hide($board); show($gameover);
+  hide($joinScreen); hide($lobby); hide($board); show($gameover);
   $winnerText.textContent = `${esc(s.winner)} wins!`;
   if (s.game) {
     $finalScores.innerHTML = s.game.players

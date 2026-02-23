@@ -8,6 +8,28 @@
 </head>
 <body class="game-page">
 
+  <!-- JOIN (shown when visiting a room you're not a member of) -->
+  <div id="join-screen" class="lobby hidden">
+    <div class="lobby-inner">
+      <h1 class="logo">Yaniv</h1>
+      <div class="room-code-box">
+        <span class="room-code-label">Room code</span>
+        <span id="join-code" class="room-code"></span>
+      </div>
+      <div id="join-players" class="lobby-players"></div>
+      <div id="join-form" class="">
+        <div class="form-group" style="text-align:left">
+          <label for="join-name-input">Your name</label>
+          <input id="join-name-input" type="text" maxlength="20" placeholder="Enter your name" autocomplete="off">
+        </div>
+        <button id="join-btn" class="btn btn-primary btn-large">Join Game</button>
+      </div>
+      <p id="join-full-msg" class="join-full-msg hidden">This room is full (4 players). You can watch but not join.</p>
+      <p id="join-started-msg" class="join-full-msg hidden">The game has already started. You can watch but not join.</p>
+      <p id="join-error" class="error-msg"></p>
+    </div>
+  </div>
+
   <!-- LOBBY -->
   <div id="lobby" class="lobby hidden">
     <div class="lobby-inner">
@@ -16,7 +38,9 @@
         <span class="room-code-label">Room code</span>
         <span id="lobby-code" class="room-code"></span>
       </div>
-      <p class="share-hint">Share this link: <span id="share-url" class="share-link"></span></p>
+      <p class="share-hint">Share this link:
+        <span id="share-url" class="share-link" title="Click to copy" tabindex="0" role="button" aria-label="Copy link"></span>
+      </p>
       <div id="lobby-players" class="lobby-players"></div>
       <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
       <p id="lobby-error" class="error-msg"></p>
