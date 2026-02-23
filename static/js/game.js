@@ -2,7 +2,17 @@
 const code = location.pathname.split('/').pop().toLowerCase();
 const pid  = (() => {
   let id = localStorage.getItem('yaniv_pid');
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem('yaniv_pid', id); }
+  if (!id) {
+    // crypto.randomUUID() requires a secure context (HTTPS or localhost).
+    // Fall back to a manual UUID v4 for plain-HTTP LAN access.
+    id = (typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = Math.random() * 16 | 0;
+          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    localStorage.setItem('yaniv_pid', id);
+  }
   return id;
 })();
 
