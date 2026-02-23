@@ -6,11 +6,12 @@ const pid  = (() => {
   return id;
 })();
 
-let state        = null;
+let state         = null;
 let selectedCards = [];
 let selectedDraw  = null;
-let prevTurnKey  = null;   // fingerprint of the last rendered turn
-let prevRoundKey = null;   // fingerprint of the last rendered round banner
+let prevTurnKey   = null;   // fingerprint of the last rendered turn
+let prevRoundKey  = null;   // fingerprint of the last rendered round banner
+let actionInFlight = false; // true while a play/yaniv POST is in-flight
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $lobby        = document.getElementById('lobby');
@@ -75,9 +76,10 @@ async function post(url, body) {
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
 
-  state        = s;
-  selectedCards = [];
-  selectedDraw  = null;
+  state          = s;
+  selectedCards  = [];
+  selectedDraw   = null;
+  actionInFlight = false;
   clearError();
 
   if (s.status === 'waiting')        showLobby(s);
@@ -267,7 +269,7 @@ function isValidDiscard(ids) {
 
 function updatePlayBtn() {
   const g = state && state.game;
-  if (!g || !g.is_my_turn) { $playBtn.disabled = true; return; }
+  if (!g || !g.is_my_turn || actionInFlight) { $playBtn.disabled = true; return; }
   if (!selectedCards.length) { $playBtn.disabled = true; clearError(); return; }
 
   const { valid, reason } = isValidDiscard(selectedCards);
@@ -277,15 +279,22 @@ function updatePlayBtn() {
 }
 
 $playBtn.addEventListener('click', playTurn);
-$yanivBtn.addEventListener('click', () => {
-  post('/api/action', { code, pid, declare_yaniv: true });
+$yanivBtn.addEventListener('click', async () => {
+  if (actionInFlight) return;
+  actionInFlight = true;
+  const res = await post('/api/action', { code, pid, declare_yaniv: true });
+  if (res?.error) { actionInFlight = false; updatePlayBtn(); }
 });
 
 async function playTurn() {
+  if (actionInFlight) return;
   if (!state?.game?.is_my_turn) return;
   if (!selectedCards.length)  { showError('Select cards to discard'); return; }
   if (selectedDraw === null)  { showError('Choose where to draw from'); return; }
-  post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
+  actionInFlight = true;
+  updatePlayBtn();
+  const res = await post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
+  if (res?.error) { actionInFlight = false; updatePlayBtn(); }
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
@@ -329,7 +338,12 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); if (!$playBtn.disabled) playTurn();
   } else if (e.key === 'y' || e.key === 'Y') {
     e.preventDefault();
-    if (me.can_yaniv) post('/api/action', { code, pid, declare_yaniv: true });
+    if (me.can_yaniv && !actionInFlight) {
+      actionInFlight = true;
+      post('/api/action', { code, pid, declare_yaniv: true }).then(res => {
+        if (res?.error) { actionInFlight = false; updatePlayBtn(); }
+      });
+    }
   }
 });
 
