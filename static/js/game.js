@@ -54,6 +54,7 @@ const $board        = document.getElementById('board');
 const $gameover     = document.getElementById('gameover');
 const $lobbyCode    = document.getElementById('lobby-code');
 const $shareUrl     = document.getElementById('share-url');
+const $shareBtn     = document.getElementById('share-btn');
 const $lobbyPlayers = document.getElementById('lobby-players');
 const $startBtn     = document.getElementById('start-btn');
 const $scoreBar     = document.getElementById('score-bar');
@@ -234,6 +235,7 @@ function showLobby(s) {
   show($lobby); hide($joinScreen); hide($board); hide($gameover);
   $lobbyCode.textContent = s.code;
   $shareUrl.textContent  = location.href;
+  $shareBtn.textContent  = navigator.share ? 'Share link' : 'Copy link';
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
@@ -251,12 +253,20 @@ function showLobby(s) {
   });
 }
 
-// ── Share link copy-to-clipboard ─────────────────────────────────────────────
-$shareUrl.addEventListener('click', () => {
-  navigator.clipboard.writeText(location.href).then(() => {
-    $shareUrl.classList.add('copied');
-    setTimeout(() => $shareUrl.classList.remove('copied'), 2000);
-  }).catch(() => {});
+// ── Share link ────────────────────────────────────────────────────────────────
+$shareBtn.addEventListener('click', () => {
+  if (navigator.share) {
+    navigator.share({ url: location.href }).catch(() => {});
+  } else {
+    navigator.clipboard.writeText(location.href).then(() => {
+      $shareBtn.textContent = 'Copied!';
+      $shareBtn.classList.add('copied');
+      setTimeout(() => {
+        $shareBtn.textContent = 'Copy link';
+        $shareBtn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => {});
+  }
 });
 
 $startBtn.addEventListener('click', () => {
