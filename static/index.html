@@ -65,6 +65,13 @@
   <script>
     const pid = getYanivPid();
 
+    // Pre-fill name from last used (per PID); user can still change it
+    const lastName = localStorage.getItem('yaniv_name');
+    if (lastName) {
+      document.getElementById('create-name').value = lastName;
+      document.getElementById('join-name').value = lastName;
+    }
+
     const aiCountEl = document.getElementById('ai-count');
     const aiLabelEl = document.getElementById('ai-label');
     aiCountEl.addEventListener('input', () => { aiLabelEl.textContent = aiCountEl.value; });
@@ -80,6 +87,7 @@
       const data = await res.json();
       if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
       if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
+      localStorage.setItem('yaniv_name', name);
       window.location.href = `/game/${data.code}`;
     });
 
@@ -96,6 +104,7 @@
       const data = await res.json();
       if (data.error) { document.getElementById('join-error').textContent = data.error; return; }
       if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
+      localStorage.setItem('yaniv_name', name);
       window.location.href = `/game/${code}`;
     });
 
