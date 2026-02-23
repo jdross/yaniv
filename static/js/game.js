@@ -19,12 +19,25 @@ const pid  = (() => {
 let state         = null;
 let selectedCards = [];
 let selectedDraw  = null;
-let prevTurnKey   = null;   // fingerprint of the last rendered turn
-let prevRoundKey  = null;   // fingerprint of the last rendered round banner
-let actionInFlight = false; // true while a play/yaniv POST is in-flight
-let newCardId     = null;   // id of the card just drawn (highlighted briefly)
+// ⚠️  DEDUP KEYS — canonical strings, NOT JSON.stringify()
+//
+// State arrives from two sources:
+//   • SSE  — serialised from the in-memory Python dict (insertion-order keys)
+//   • Poll — deserialised from a Postgres JSONB column (keys reordered
+//            alphabetically by the DB engine)
+//
+// JSON.stringify() is key-order-sensitive, so the same logical object
+// produces different strings depending on its source.  Every dedup key
+// below must therefore be built by extracting named fields in a fixed,
+// explicit order — never by stringifying the whole object.
+let prevTurnKey     = null; // fingerprint of the last rendered turn
+let prevRoundKey    = null; // fingerprint of the last rendered round banner
 let prevAnimTurnKey = null; // last_turn key we've already animated
-let prevYanivKey  = null;   // last_round key we've already announced
+let prevYanivKey    = null; // last_round key we've already announced
+let prevHandKey     = null; // hand fingerprint we've already highlighted (same rule: poll re-delivers same hand, must not re-trigger blink)
+
+let actionInFlight = false; // true while a play/yaniv POST is in-flight
+let newCardId      = null;  // id of the card just drawn (highlighted briefly)
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $joinScreen   = document.getElementById('join-screen');
@@ -62,33 +75,30 @@ const $finalScores  = document.getElementById('final-scores');
 const $playAgainBtn = document.getElementById('play-again-btn');
 
 // ── SSE connection ────────────────────────────────────────────────────────────
-let lastSseAt = 0;
+// State is delivered exclusively via SSE — no periodic polling.  Polling was
+// removed because it rebuilds DOM nodes on every tick, resetting CSS hover
+// states and causing duplicate-entry bugs (SSE delivers dicts in insertion
+// order; the poll REST endpoint returns JSONB with alphabetically-reordered
+// keys, so JSON.stringify-based dedup keys never matched).
+//
+// Recovery: when the EventSource fires onerror (network blip, server restart,
+// etc.) the browser automatically reconnects.  The server sends a fresh
+// snapshot as the very first message of every new SSE connection, so no
+// explicit recovery poll is needed.
 const es = new EventSource(`/api/events/${code}/${pid}`);
-es.onmessage = e => { lastSseAt = Date.now(); onState(JSON.parse(e.data)); };
-es.onerror   = () => { /* reconnects automatically */ };
+es.onmessage = e => { onState(JSON.parse(e.data)); };
+es.onerror   = () => { /* browser reconnects automatically; snapshot resent on reconnect */ };
 
-// Polling fallback:
-//  • Waiting phase: always poll every 3 s (member list must stay live).
-//  • Playing phase: only poll when SSE has been silent for >5 s — avoids
-//    clearing the player's in-progress card selection on every tick while
-//    SSE is healthy, but recovers reliably if a message is dropped.
-async function pollState() {
+// ── API helpers ───────────────────────────────────────────────────────────────
+// Fetch current state once (used only to reset actionInFlight after a POST error,
+// since SSE handles all normal state delivery).
+async function fetchState() {
   try {
     const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
     const data = await res.json();
     onState(data);
   } catch (_) {}
 }
-setInterval(() => {
-  if (!state) return;
-  if (state.status === 'waiting')  { pollState(); return; }
-  if (state.status === 'finished') { pollState(); return; } // catch next_room redirect
-  if (!state.game) return;
-  if (Date.now() - lastSseAt < 5000) return; // SSE is live — don't interfere
-  pollState();
-}, 3000);
-
-// ── API helpers ───────────────────────────────────────────────────────────────
 async function post(url, body) {
   clearError();
   try {
@@ -117,25 +127,29 @@ function onState(s) {
     const h = st?.game?.players?.find(p => p.is_self)?.hand;
     return h ? h.map(c => c.id).sort((a, b) => a - b).join(',') : null;
   };
-  const prevHandKey = handOf(state);
-  const newHandKey  = handOf(s);
+  const oldHandKey = handOf(state);
+  const newHandKey = handOf(s);
   let drawnCard = null;
-  if (prevHandKey !== null && prevHandKey !== newHandKey) {
-    // Hand actually changed — player just played their turn.
-    // Detect which card is new so we can highlight it.
-    const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
-    drawnCard     = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id)) ?? null;
-    newCardId     = drawnCard ? drawnCard.id : null;
+  if (newHandKey !== null && newHandKey !== prevHandKey) {
+    // Hand is genuinely new (not a repeat delivery of the same state).
+    if (oldHandKey !== null && oldHandKey !== newHandKey) {
+      // Hand actually changed — player just played their turn.
+      // Detect which card is new so we can highlight it.
+      const prevIds = new Set((state.game?.players?.find(p => p.is_self)?.hand ?? []).map(c => c.id));
+      drawnCard     = (s.game?.players?.find(p => p.is_self)?.hand ?? []).find(c => !prevIds.has(c.id)) ?? null;
+      newCardId     = drawnCard ? drawnCard.id : null;
+    } else {
+      // First hand received (round start) — no highlight, no pre-selection.
+      newCardId = null;
+    }
     selectedCards = [];
-  } else if (prevHandKey === null && newHandKey !== null) {
-    // First hand received (round start) — no highlight, no pre-selection.
-    newCardId     = null;
-    selectedCards = [];
+    prevHandKey   = newHandKey;
   }
 
   // Draw animation — fires once per unique last_turn when drawn from deck or pile
   if (s.last_turn && s.status === 'playing') {
-    const animKey = JSON.stringify(s.last_turn);
+    const t = s.last_turn;
+    const animKey = [t.player, (t.discarded||[]).map(c=>c.id).sort((a,b)=>a-b).join(','), t.drawn_from, t.drawn_card?t.drawn_card.id:''].join('|');
     if (animKey !== prevAnimTurnKey) {
       const df = s.last_turn.drawn_from;
       if (df === 'deck' || df === 'pile') {
@@ -154,7 +168,8 @@ function onState(s) {
 
   // Yaniv / Assaf announcement animation — guard against first-load replay
   if (s.last_round) {
-    const yanivKey = JSON.stringify(s.last_round);
+    const r = s.last_round;
+    const yanivKey = [r.declarer, (r.score_changes||[]).map(s=>s.name+':'+s.new_score).sort().join(',')].join('|');
     if (yanivKey !== prevYanivKey && state !== null) animateYaniv(s.last_round);
     prevYanivKey = yanivKey;
   }
@@ -207,7 +222,7 @@ $joinBtn.addEventListener('click', async () => {
   if (data.error) { $joinError.textContent = data.error; return; }
   // Fetch state immediately so the lobby appears without waiting for SSE.
   // The SSE broadcast will also arrive and is harmlessly idempotent.
-  pollState();
+  fetchState();
 });
 
 $joinNameInput.addEventListener('keydown', e => {
@@ -434,9 +449,16 @@ $yanivBtn.addEventListener('click', async () => {
   if (actionInFlight) return;
   actionInFlight = true;
   const res = await post('/api/action', { code, pid, declare_yaniv: true });
-  // On error keep actionInFlight=true; pollState() → onState() will reset it
-  // once real server state is known, preventing a rapid-retry storm.
-  if (res?.error) pollState();
+  if (res?.error) {
+    // On error the SSE update won't arrive, so fetch current state to reset
+    // actionInFlight and show the real server state.
+    fetchState();
+  } else {
+    // Success: SSE will deliver the state update and call onState(), which
+    // resets actionInFlight.  Clear it here too as a safety net in case the
+    // SSE message is delayed, so the UI never freezes indefinitely.
+    actionInFlight = false;
+  }
 });
 
 async function playTurn() {
@@ -447,7 +469,11 @@ async function playTurn() {
   actionInFlight = true;
   updatePlayBtn();
   const res = await post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
-  if (res?.error) pollState();
+  if (res?.error) {
+    fetchState();
+  } else {
+    actionInFlight = false;
+  }
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
@@ -524,7 +550,7 @@ document.addEventListener('keydown', e => {
     if (me.can_yaniv && !actionInFlight) {
       actionInFlight = true;
       post('/api/action', { code, pid, declare_yaniv: true }).then(res => {
-        if (res?.error) pollState();
+        if (res?.error) fetchState(); else actionInFlight = false;
       });
     }
   }
@@ -629,20 +655,33 @@ function cardColor(c) {
 
 // ── Turn log (last 3 plays with slide-in animation) ───────────────────────────
 function renderTurnLog(lastTurn, lastRound) {
-  // When a brand-new round starts, wipe the log so old turns don't linger
-  const roundKey = lastRound ? JSON.stringify(lastRound) : null;
+  // When a brand-new round starts, wipe the log so old turns don't linger.
+  // Use a canonical key (not JSON.stringify) so JSONB key-reordering from
+  // Postgres doesn't cause a false mismatch between SSE and poll responses.
+  const roundKey = lastRound
+    ? [lastRound.declarer, (lastRound.score_changes || []).map(s => s.name + ':' + s.new_score).sort().join(',')].join('|')
+    : null;
   if (roundKey !== prevRoundKey) {
     if (roundKey && !prevRoundKey) {
-      // New round just started — clear old turns
+      // New round just started — clear old turns from DOM
       $turnLog.innerHTML = '';
-      prevTurnKey = null;
     }
     prevRoundKey = roundKey;
   }
 
   if (!lastTurn) return;
 
-  const key = JSON.stringify(lastTurn);
+  // Build a canonical key from the fields that identify a turn in a fixed
+  // order. JSON.stringify is key-order-sensitive, and the poll endpoint
+  // returns JSONB from Postgres which may reorder keys vs the in-memory
+  // dict delivered via SSE, causing a spurious mismatch and duplicate entry.
+  const key = [
+    lastTurn.player,
+    (lastTurn.discarded || []).map(c => c.id).sort((a, b) => a - b).join(','),
+    lastTurn.drawn_from,
+    lastTurn.drawn_card ? lastTurn.drawn_card.id : '',
+    roundKey,
+  ].join('|');
   if (key === prevTurnKey) return; // already rendered this turn
   prevTurnKey = key;
 
