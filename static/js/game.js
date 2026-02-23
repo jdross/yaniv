@@ -48,15 +48,16 @@ const $winnerText   = document.getElementById('winner-text');
 const $finalScores  = document.getElementById('final-scores');
 
 // ── SSE connection ────────────────────────────────────────────────────────────
+let lastSseAt = 0;
 const es = new EventSource(`/api/events/${code}/${pid}`);
-es.onmessage = e => onState(JSON.parse(e.data));
+es.onmessage = e => { lastSseAt = Date.now(); onState(JSON.parse(e.data)); };
 es.onerror   = () => { /* reconnects automatically */ };
 
-// Polling fallback — two cases:
-//  • Waiting phase: poll every 3 s so the lobby always reflects the latest
-//    member list (new joiners / leavers) even if an SSE update is missed.
-//  • Playing phase: poll every 1.5 s only when the hand isn't arriving via
-//    SSE (e.g. pid mismatch from a cached page reload).
+// Polling fallback:
+//  • Waiting phase: always poll every 3 s (member list must stay live).
+//  • Playing phase: only poll when SSE has been silent for >5 s — avoids
+//    clearing the player's in-progress card selection on every tick while
+//    SSE is healthy, but recovers reliably if a message is dropped.
 async function pollState() {
   try {
     const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
@@ -68,7 +69,7 @@ setInterval(() => {
   if (!state) return;
   if (state.status === 'waiting') { pollState(); return; }
   if (!state.game) return;
-  if (state.game.players?.find(p => p.is_self)?.hand) return; // SSE working fine
+  if (Date.now() - lastSseAt < 5000) return; // SSE is live — don't interfere
   pollState();
 }, 3000);
 
