@@ -44,6 +44,13 @@
         <button id="share-btn" class="share-btn">Copy link</button>
       </div>
       <div id="lobby-players" class="lobby-players"></div>
+      <div id="lobby-options" class="lobby-options hidden">
+        <label class="option-toggle">
+          <input type="checkbox" id="slamdowns-checkbox">
+          Allow Slamdowns
+        </label>
+        <span class="option-hint">(human-only games)</span>
+      </div>
       <button id="start-btn" class="btn btn-primary btn-large">Start Game</button>
       <p id="lobby-error" class="error-msg"></p>
     </div>
@@ -92,6 +99,7 @@
       <!-- Actions -->
       <div class="action-bar">
         <button id="yaniv-btn" class="btn btn-yaniv hidden">🎉 Yaniv!</button>
+        <button id="slamdown-btn" class="btn btn-slamdown hidden">💥 Slamdown!</button>
         <button id="play-btn" class="btn btn-primary" disabled>Play turn</button>
       </div>
 

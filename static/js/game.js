@@ -69,7 +69,9 @@ const $pileHint     = document.getElementById('pile-hint');
 const $hand         = document.getElementById('hand');
 const $handValue    = document.getElementById('hand-value');
 const $yanivBtn     = document.getElementById('yaniv-btn');
+const $slamdownBtn  = document.getElementById('slamdown-btn');
 const $playBtn      = document.getElementById('play-btn');
+const $lobbyOptions = document.getElementById('lobby-options');
 const $gameError    = document.getElementById('game-error');
 const $winnerText   = document.getElementById('winner-text');
 const $finalScores  = document.getElementById('final-scores');
@@ -251,6 +253,15 @@ function showLobby(s) {
       if (!res?.error) window.location.href = '/';
     };
   });
+
+  // Show slamdown option only to the creator (first non-AI member)
+  const firstHuman = s.members.find(m => !m.is_ai);
+  const hasAi = s.members.some(m => m.is_ai);
+  if (firstHuman && firstHuman.pid === pid && !hasAi) {
+    show($lobbyOptions);
+  } else {
+    hide($lobbyOptions);
+  }
 }
 
 // ── Share link ────────────────────────────────────────────────────────────────
@@ -270,7 +281,9 @@ $shareBtn.addEventListener('click', () => {
 });
 
 $startBtn.addEventListener('click', () => {
-  post('/api/start', { code, pid });
+  const slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
+  const slamdowns_allowed = slamdownsCheckbox ? slamdownsCheckbox.checked : false;
+  post('/api/start', { code, pid, slamdowns_allowed });
 });
 
 // ── Board ─────────────────────────────────────────────────────────────────────
@@ -342,10 +355,12 @@ function showBoard(s) {
     });
 
     (g.is_my_turn && me.can_yaniv) ? show($yanivBtn) : hide($yanivBtn);
+    (g.slamdowns_allowed && g.can_slamdown && !g.is_my_turn) ? show($slamdownBtn) : hide($slamdownBtn);
   } else {
     $hand.innerHTML = '<span style="opacity:.5;font-size:.85rem">Waiting for your hand…</span>';
     $handValue.textContent = '';
     hide($yanivBtn);
+    hide($slamdownBtn);
   }
 
   updatePlayBtn();
@@ -467,6 +482,18 @@ $yanivBtn.addEventListener('click', async () => {
     // Success: SSE will deliver the state update and call onState(), which
     // resets actionInFlight.  Clear it here too as a safety net in case the
     // SSE message is delayed, so the UI never freezes indefinitely.
+    actionInFlight = false;
+  }
+});
+
+$slamdownBtn.addEventListener('click', async () => {
+  if (actionInFlight) return;
+  actionInFlight = true;
+  hide($slamdownBtn);
+  const res = await post('/api/action', { code, pid, declare_slamdown: true });
+  if (res?.error) {
+    fetchState();
+  } else {
     actionInFlight = false;
   }
 });
@@ -752,6 +779,10 @@ function formatRoundBanner(r) {
 function formatLastTurn(t, me) {
   const isYou = me && me.name === t.player;
   const who   = isYou ? 'You' : esc(t.player);
+  if (t.is_slamdown) {
+    const card = t.discarded[0];
+    return `💥 ${who} slammed down <strong>${cardShortHtml(card)}</strong>`;
+  }
   const cards = t.discarded.map(cardShortHtml).join(' ');
   const drew  = t.drawn_from === 'pile'
     ? (t.drawn_card ? `<strong>${cardShortHtml(t.drawn_card)}</strong> from pile` : 'from pile')
