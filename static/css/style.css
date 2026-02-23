@@ -139,32 +139,35 @@ input[type="range"] {
 .room-code-label { font-size: .75rem; opacity: .6; display: block; text-transform: uppercase; letter-spacing: .1em; }
 .room-code { font-size: 2.8rem; font-weight: 900; letter-spacing: .35em; color: #f4d03f; }
 
-.share-hint { font-size: .8rem; opacity: .6; margin-bottom: 1.5rem; }
-.share-link {
+.share-hint { font-size: .8rem; opacity: .6; margin-bottom: .4rem; }
+.share-link-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.share-url-text {
   color: #f4d03f;
   word-break: break-all;
+  flex: 1;
+  font-size: .8rem;
+}
+.share-btn {
+  background: rgba(244,208,63,.15);
+  color: #f4d03f;
+  border: 1px solid rgba(244,208,63,.4);
+  border-radius: 6px;
+  padding: .3rem .7rem;
+  font-size: .8rem;
+  font-weight: 600;
   cursor: pointer;
-  position: relative;
-  text-decoration: underline dotted rgba(244,208,63,.5);
-}
-.share-link:hover::after {
-  content: 'click to copy';
-  position: absolute;
-  bottom: 120%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0,0,0,.75);
-  color: #fff;
-  font-size: .7rem;
-  padding: .2rem .45rem;
-  border-radius: 4px;
   white-space: nowrap;
-  pointer-events: none;
+  flex-shrink: 0;
+  transition: background .15s;
 }
-.share-link.copied::after {
-  content: 'copied!';
-  background: #27ae60;
-}
+.share-btn:hover { background: rgba(244,208,63,.25); }
+.share-btn.copied { background: #27ae60; color: #fff; border-color: #27ae60; }
 
 .lobby-players { margin-bottom: 1.5rem; }
 .lobby-player {
