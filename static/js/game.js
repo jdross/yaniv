@@ -104,11 +104,16 @@ async function post(url, body) {
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
 
-  // Only wipe the in-progress card selection when the turn actually changes.
-  // SSE/poll updates that arrive while it's still the player's turn (e.g. a
-  // redundant heartbeat or a late AI-turn push) must not clear what the player
-  // has already tapped.
-  const stillMyTurn = state?.game?.is_my_turn && s.game?.is_my_turn;
+  // Preserve the in-progress card selection only when it is unambiguously the
+  // same turn: my-turn flag is true in both old and new state AND my hand has
+  // not changed.  If SSE skips an intermediate "not my turn" update and jumps
+  // straight to the next "my turn" update, the hand will differ (cards were
+  // played + one drawn), so we still clear.  This prevents stale selected-card
+  // IDs from a previous turn being silently replayed.
+  const handOf = st => st?.game?.players?.find(p => p.is_self)?.hand
+                          ?.map(c => c._card).join(',') ?? null;
+  const stillMyTurn = state?.game?.is_my_turn && s.game?.is_my_turn
+                      && handOf(state) === handOf(s);
   if (!stillMyTurn) {
     selectedCards = [];
     selectedDraw  = null;
@@ -378,7 +383,9 @@ $yanivBtn.addEventListener('click', async () => {
   if (actionInFlight) return;
   actionInFlight = true;
   const res = await post('/api/action', { code, pid, declare_yaniv: true });
-  if (res?.error) { actionInFlight = false; updatePlayBtn(); }
+  // On error keep actionInFlight=true; pollState() → onState() will reset it
+  // once real server state is known, preventing a rapid-retry storm.
+  if (res?.error) pollState();
 });
 
 async function playTurn() {
@@ -389,7 +396,7 @@ async function playTurn() {
   actionInFlight = true;
   updatePlayBtn();
   const res = await post('/api/action', { code, pid, discard: selectedCards, draw: selectedDraw });
-  if (res?.error) { actionInFlight = false; updatePlayBtn(); }
+  if (res?.error) pollState();
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
@@ -436,7 +443,7 @@ document.addEventListener('keydown', e => {
     if (me.can_yaniv && !actionInFlight) {
       actionInFlight = true;
       post('/api/action', { code, pid, declare_yaniv: true }).then(res => {
-        if (res?.error) { actionInFlight = false; updatePlayBtn(); }
+        if (res?.error) pollState();
       });
     }
   }
