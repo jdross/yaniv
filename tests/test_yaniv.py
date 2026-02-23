@@ -255,6 +255,28 @@ class TestYanivGame(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.game.play_turn(current_player, {'discard': [], 'draw': len(discard_options)})
 
+    def test_slamdown_allowed_after_deck_draw(self):
+        self.player1.hand = [Card('7', 'Hearts'), Card('3', 'Clubs'), Card('4', 'Diamonds')]
+        self.game.discard_pile = [Card('K', 'Spades')]
+        self.game.last_discard = [Card('K', 'Spades')]
+        self.game.deck = [Card('7', 'Spades')]
+
+        self.game.play_turn(self.player1, {'discard': [self.player1.hand[0]], 'draw': 'deck'})
+
+        self.assertEqual(self.game.slamdown_player, self.player1.name)
+        self.assertEqual(self.game.slamdown_card, Card('7', 'Spades'))
+
+    def test_slamdown_not_allowed_after_pile_draw(self):
+        self.player1.hand = [Card('7', 'Hearts'), Card('3', 'Clubs'), Card('4', 'Diamonds')]
+        self.game.discard_pile = [Card('2', 'Hearts'), Card('7', 'Spades')]
+        self.game.last_discard = [Card('7', 'Spades')]
+        self.game.deck = [Card('A', 'Clubs')]
+
+        self.game.play_turn(self.player1, {'discard': [self.player1.hand[0]], 'draw': 0})
+
+        self.assertIsNone(self.game.slamdown_player)
+        self.assertIsNone(self.game.slamdown_card)
+
     def test_declare_yaniv(self):
         self.game.start_game()
         current_player, discard_options = self.game.start_turn()

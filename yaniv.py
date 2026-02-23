@@ -153,7 +153,8 @@ class YanivGame:
         self._discard_cards(player, action['discard'])
 
         # Check if a slamdown is possible before advancing the turn
-        self._check_slamdown(player, action['discard'], newly_drawn)
+        drew_from_deck = action['draw'] == 'deck'
+        self._check_slamdown(player, action['discard'], newly_drawn, drew_from_deck)
 
         # Inform AIPlayers what happened
         for other_player in self.players:
@@ -293,13 +294,17 @@ class YanivGame:
             self.discard_pile.append(card)
             self.last_discard.append(card)
     
-    def _check_slamdown(self, player, discarded_cards, drawn_card):
+    def _check_slamdown(self, player, discarded_cards, drawn_card, drew_from_deck):
         """After a turn, determine if the player can slamdown their drawn card."""
         self.slamdown_player = None
         self.slamdown_card = None
 
         # AI players can't slamdown (handled at room level, but guard here too)
         if isinstance(player, AIPlayer):
+            return
+
+        # Slamdowns are only eligible on deck draws.
+        if not drew_from_deck:
             return
 
         # No card drawn, or player only has 1 card left (can't slam their last card)
