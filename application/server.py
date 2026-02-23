@@ -2,6 +2,9 @@ import sys, os, uuid, random, string, queue, threading, json
 from contextlib import contextmanager
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 
 try:
