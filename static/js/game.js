@@ -24,6 +24,7 @@ let prevRoundKey  = null;   // fingerprint of the last rendered round banner
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
 let newCardId     = null;   // id of the card just drawn (highlighted briefly)
 let prevAnimTurnKey = null; // last_turn key we've already animated
+let prevYanivKey  = null;   // last_round key we've already announced
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $joinScreen   = document.getElementById('join-screen');
@@ -149,6 +150,13 @@ function onState(s) {
       }
     }
     prevAnimTurnKey = animKey;
+  }
+
+  // Yaniv / Assaf announcement animation — guard against first-load replay
+  if (s.last_round) {
+    const yanivKey = JSON.stringify(s.last_round);
+    if (yanivKey !== prevYanivKey && state !== null) animateYaniv(s.last_round);
+    prevYanivKey = yanivKey;
   }
 
   // Clear draw-source selection whenever it's not our turn.
@@ -576,6 +584,17 @@ function animateCardDraw(isMyDraw, drawnCard, fromPile) {
   flyEl.style.opacity = '0';
 
   setTimeout(() => flyEl.remove(), 1100);
+}
+
+// ── Yaniv / Assaf announcement animation ──────────────────────────────────────
+// Big text zooms out of the centre toward the viewer and fades over 1 s.
+function animateYaniv(round) {
+  const isAssaf = !!round.assaf;
+  const el = document.createElement('div');
+  el.className = 'yaniv-announce' + (isAssaf ? ' assaf' : '');
+  el.textContent = isAssaf ? '😱 Assaf!' : '🎉 Yaniv!';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
 }
 
 // ── Card rendering helpers ────────────────────────────────────────────────────

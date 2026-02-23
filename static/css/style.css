@@ -500,6 +500,33 @@ input[type="range"] {
   padding: 0;
 }
 
+/* ── Yaniv / Assaf announcement ─────────────────────────────────────────────── */
+@keyframes yaniv-zoom {
+  0%   { transform: translate(-50%, -50%) scale(0.25) rotate(-6deg); opacity: 0; }
+  25%  { transform: translate(-50%, -50%) scale(1.05) rotate(3deg);  opacity: 1; }
+  55%  { transform: translate(-50%, -50%) scale(1.3)  rotate(-1deg); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(3)    rotate(0deg);  opacity: 0; }
+}
+.yaniv-announce {
+  position: fixed;
+  z-index: 2000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.25);
+  white-space: nowrap;
+  font-size: 3.8rem;
+  font-weight: 900;
+  letter-spacing: .03em;
+  color: #f4d03f;
+  text-shadow: 0 0 40px rgba(244,208,63,.7), 0 4px 16px rgba(0,0,0,.7);
+  pointer-events: none;
+  animation: yaniv-zoom 1s ease-out forwards;
+}
+.yaniv-announce.assaf {
+  color: #ff6b4a;
+  text-shadow: 0 0 40px rgba(255,107,74,.7), 0 4px 16px rgba(0,0,0,.7);
+}
+
 /* Mobile: fix the hand panel to the bottom so it never shifts */
 @media (max-width: 600px) {
   .hand-panel {
