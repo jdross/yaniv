@@ -1,5 +1,9 @@
-import random, uuid
-from aiplayer import *
+import random
+import uuid
+
+from aiplayer import AIPlayer
+from player import Player
+from card import Card
 
 class YanivGame:
     def __init__(self, players=None):
@@ -9,6 +13,8 @@ class YanivGame:
         self.last_discard = []  # Track the most recent discarded cards separately
         self.slamdown_player = None  # name of player eligible to slamdown
         self.slamdown_card = None    # Card object that can be slammed down
+        self.previous_scores = []
+        self.current_player_index = 0
         self.players = players if players else []
         if players:
             self._create_players(players)
@@ -20,8 +26,17 @@ class YanivGame:
         return {
             'game_id': self.game_id,
             'discard_pile': [card.serialize() for card in self.discard_pile],
-            'players': [player.to_dict() for player in self.players],
+            'players': [
+                {
+                    'name': player.name,
+                    'score': player.score,
+                    'hand': [card.serialize() for card in player.hand],
+                    'is_ai': isinstance(player, AIPlayer),
+                }
+                for player in self.players
+            ],
             'current_player_index': self.current_player_index,
+            'previous_scores': list(self.previous_scores),
             'last_discard_size': len(self.last_discard),
             'slamdown_player': self.slamdown_player,
             'slamdown_card': self.slamdown_card._card if self.slamdown_card else None,
@@ -29,22 +44,42 @@ class YanivGame:
     
     @classmethod
     def from_dict(cls, data):
-        # Create a method to construct a game from a dictionary
         game = cls()
-        game.game_id = data['game_id']
-        game.players = [Player.from_dict(player_data) for player_data in data['players']]
-        game.current_player_index = data['current_player_index']
-        game.discard_pile = [Card.deserialize(card_data) for card_data in data['discard_pile']]
-        game.last_discard = game.discard_pile[-data['last_discard_size']:]
-        
+
+        game.game_id = data.get('game_id', str(uuid.uuid4()))
+
+        players = []
+        for player_data in data.get('players', []):
+            is_ai = bool(player_data.get('is_ai', False))
+            player = AIPlayer(player_data['name']) if is_ai else Player(player_data['name'])
+            player.score = player_data.get('score', 0)
+            player.hand = [Card.deserialize(card_data) for card_data in player_data.get('hand', [])]
+            players.append(player)
+
+        game._create_players(players)
+        game.current_player_index = data.get('current_player_index', 0)
+        game.previous_scores = data.get(
+            'previous_scores',
+            [player.score for player in game.players],
+        )
+        game.discard_pile = [Card.deserialize(card_data) for card_data in data.get('discard_pile', [])]
+        game.last_discard = game.discard_pile[-data.get('last_discard_size', 0):]
+
         game._create_deck()
-        for card in game.discard_pile + [card for player in game.players for card in player.hand]:
-            game.deck.remove(card)
+        used_ids = {card._card for card in game.discard_pile}
+        used_ids |= {card._card for player in game.players for card in player.hand}
+        game.deck = [card for card in game.deck if card._card not in used_ids]
         game._shuffle_deck()
 
         game.slamdown_player = data.get('slamdown_player')
         sdc = data.get('slamdown_card')
         game.slamdown_card = Card(sdc) if sdc is not None else None
+
+        # Rehydrate AI observations used for turn decisions.
+        round_info = [{"name": p.name, "score": p.score} for p in game.players]
+        for player in game.players:
+            if isinstance(player, AIPlayer):
+                player.observe_round(round_info)
 
         return game
 
@@ -188,7 +223,7 @@ class YanivGame:
     def _create_players(self, players):
         self.players = players
         self.previous_scores = [0 for _ in players]  # Track previous scores to implement reset rule
-        self.current_player_index = random.randint(0, len(players) - 1)  # Choose random first player
+        self.current_player_index = random.randint(0, len(players) - 1) if players else 0
 
     def _create_deck(self):
         self.deck = Card.create_deck()

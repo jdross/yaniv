@@ -10,10 +10,36 @@ A game engine and simple "AI" player for the Yaniv card game
 - Resets of -50 points landing at multiples of 50
 - 5 or fewer points to declare Yaniv
 - Assaf'ed players get 30 points & everyone else gets 0 points
-- No slapdowns (because not implemented yet)
+- Optional slamdowns in human-only games
 
 ### Future plans:
-- Implement a basic game server for creating games and loading game states from a short serialized string
-- Implement a basic web UI
-- Implement slapdowns
 - Make the AI smarter
+
+### Running tests
+
+Frontend unit tests (Node built-in test runner):
+
+```bash
+npm test
+# or
+npm run test:frontend
+```
+
+Python test suite:
+
+```bash
+npm run test:python
+# or
+python3 -m unittest discover -s tests -v
+```
+
+Database integration tests (runs against a real Postgres database):
+
+```bash
+export YANIV_DB_TEST_URL=postgresql://jdross@localhost/yaniv
+npm run test:db
+# or
+YANIV_DB_TEST_URL=postgresql://jdross@localhost/yaniv python3 -m unittest tests.test_db_integration -v
+```
+
+DB integration tests automatically skip when `YANIV_DB_TEST_URL` (or `DATABASE_URL`) is not set or cannot be reached.

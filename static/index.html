@@ -61,23 +61,16 @@
     </div>
   </div>
 
+  <script src="/js/shared/pid.js"></script>
   <script>
-    // Stable player ID stored in localStorage
-    const pid = (() => {
-      let id = localStorage.getItem('yaniv_pid');
-      if (!id) {
-        // crypto.randomUUID() requires a secure context (HTTPS or localhost).
-        // Fall back to a manual UUID v4 for plain-HTTP LAN access.
-        id = (typeof crypto.randomUUID === 'function')
-          ? crypto.randomUUID()
-          : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-              const r = Math.random() * 16 | 0;
-              return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-            });
-        localStorage.setItem('yaniv_pid', id);
-      }
-      return id;
-    })();
+    const pid = getYanivPid();
+
+    // Pre-fill name from last used (per PID); user can still change it
+    const lastName = localStorage.getItem('yaniv_name');
+    if (lastName) {
+      document.getElementById('create-name').value = lastName;
+      document.getElementById('join-name').value = lastName;
+    }
 
     const aiCountEl = document.getElementById('ai-count');
     const aiLabelEl = document.getElementById('ai-label');
@@ -94,6 +87,7 @@
       const data = await res.json();
       if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
       if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
+      localStorage.setItem('yaniv_name', name);
       window.location.href = `/game/${data.code}`;
     });
 
@@ -110,6 +104,7 @@
       const data = await res.json();
       if (data.error) { document.getElementById('join-error').textContent = data.error; return; }
       if (data.pid) localStorage.setItem('yaniv_pid', data.pid); // sync with server
+      localStorage.setItem('yaniv_name', name);
       window.location.href = `/game/${code}`;
     });
 

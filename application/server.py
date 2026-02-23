@@ -17,7 +17,6 @@ except ImportError:
 from yaniv import YanivGame
 from player import Player
 from aiplayer import AIPlayer
-from card import Card
 
 app = Flask(__name__,
             static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'),
@@ -27,6 +26,32 @@ app.secret_key = 'yaniv-secret-key-change-in-prod'
 rooms = {}
 sse_clients = {}   # code -> {pid: queue.Queue}
 sse_lock = threading.Lock()
+room_locks = {}    # code -> threading.RLock
+room_locks_guard = threading.Lock()
+rooms_guard = threading.Lock()
+
+
+def error_response(message, status=400):
+    return jsonify({'error': message}), status
+
+
+def _get_room_lock(code):
+    with room_locks_guard:
+        lock = room_locks.get(code)
+        if lock is None:
+            lock = threading.RLock()
+            room_locks[code] = lock
+        return lock
+
+
+@contextmanager
+def _with_room_lock(code):
+    lock = _get_room_lock(code)
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
 
 # ── Database ───────────────────────────────────────────────────────────────────
 
@@ -137,9 +162,7 @@ def _init_db():
             if room['status'] == 'playing' and room['game']:
                 cp = room['game']._get_player()
                 if isinstance(cp, AIPlayer):
-                    threading.Thread(
-                        target=process_ai_turns, args=(code,), daemon=True
-                    ).start()
+                    start_ai_worker(code)
     except Exception as exc:
         print(f'[DB] Init failed — running without persistence: {exc}')
         _pool = None
@@ -147,60 +170,12 @@ def _init_db():
 
 # ── Serialisation helpers ──────────────────────────────────────────────────────
 
-def game_to_json(g):
-    """Serialise a YanivGame to a plain dict (JSON-safe)."""
-    return {
-        'current_player_index': g.current_player_index,
-        'discard_pile':         [c._card for c in g.discard_pile],
-        'last_discard_size':    len(g.last_discard),
-        'slamdown_player':      g.slamdown_player,
-        'slamdown_card':        g.slamdown_card._card if g.slamdown_card else None,
-        'players': [
-            {
-                'name':  p.name,
-                'score': p.score,
-                'hand':  [c._card for c in p.hand],
-                'is_ai': isinstance(p, AIPlayer),
-            }
-            for p in g.players
-        ],
-    }
+def game_to_json(game):
+    return game.to_dict()
 
 
 def game_from_json(data):
-    """Rebuild a YanivGame from a serialised dict."""
-    players = []
-    for pd in data['players']:
-        p = AIPlayer(pd['name']) if pd['is_ai'] else Player(pd['name'])
-        p.score = pd['score']
-        p.hand  = [Card(c) for c in pd['hand']]
-        players.append(p)
-
-    g = YanivGame()
-    g._create_players(players)
-    g.current_player_index = data['current_player_index']
-    g.discard_pile  = [Card(c) for c in data['discard_pile']]
-    last_n          = data.get('last_discard_size', 0)
-    g.last_discard  = g.discard_pile[-last_n:] if last_n > 0 else []
-
-    # Restore slamdown state
-    g.slamdown_player = data.get('slamdown_player')
-    sdc = data.get('slamdown_card')
-    g.slamdown_card = Card(sdc) if sdc is not None else None
-
-    # Rebuild the deck from cards not in any hand or the discard pile
-    used   = set(c._card for c in g.discard_pile)
-    used  |= {c._card for p in g.players for c in p.hand}
-    g.deck = [Card(i) for i in range(54) if i not in used]
-    random.shuffle(g.deck)
-
-    # Give AI players their round context
-    round_info = [{'name': p.name, 'score': p.score} for p in players]
-    for p in g.players:
-        if isinstance(p, AIPlayer):
-            p.observe_round(round_info)
-
-    return g
+    return YanivGame.from_dict(data)
 
 
 # ── Persistence helpers ────────────────────────────────────────────────────────
@@ -210,65 +185,87 @@ def _as_json(val):
     return json.dumps(val) if val is not None else None
 
 
+def _parse_jsonish(val):
+    if val is None:
+        return None
+    return val if isinstance(val, (dict, list)) else json.loads(val)
+
+
+def _new_room(code, status, members, game=None, winner=None, options=None):
+    return {
+        'code':                    code,
+        'status':                  status,
+        'members':                 members,
+        'game':                    game,
+        'winner':                  winner,
+        'last_round':              None,
+        'last_turn':               None,
+        'round_banner_turns_left': 0,
+        'options':                 options or {'slamdowns_allowed': False},
+        'ai_worker_active':        False,
+    }
+
+
 def save_room(code):
     """Write the current in-memory room state to the database."""
     if _pool is None:
         return
-    room = rooms.get(code)
-    if not room:
-        return
-    try:
-        with _get_db() as conn:
-            with conn.cursor() as cur:
-                # Upsert room row
-                cur.execute(
-                    """
-                    INSERT INTO rooms (code, status, winner)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (code) DO UPDATE SET
-                        status = EXCLUDED.status,
-                        winner = EXCLUDED.winner
-                    """,
-                    (code, room['status'], room.get('winner')),
-                )
-
-                # Insert any new members (existing rows are left untouched)
-                for m in room['members']:
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return
+        try:
+            with _get_db() as conn:
+                with conn.cursor() as cur:
+                    # Upsert room row
                     cur.execute(
                         """
-                        INSERT INTO members (code, pid, name, is_ai)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (code, pid) DO NOTHING
+                        INSERT INTO rooms (code, status, winner)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (code) DO UPDATE SET
+                            status = EXCLUDED.status,
+                            winner = EXCLUDED.winner
                         """,
-                        (code, m['pid'], m['name'], m['is_ai']),
+                        (code, room['status'], room.get('winner')),
                     )
 
-                # Upsert game state
-                game_json = _as_json(game_to_json(room['game'])) if room['game'] else None
-                cur.execute(
-                    """
-                    INSERT INTO game_state
-                        (code, game_json, last_round, last_turn, round_banner_turns_left, options, updated_at)
-                    VALUES (%s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb, now())
-                    ON CONFLICT (code) DO UPDATE SET
-                        game_json               = EXCLUDED.game_json,
-                        last_round              = EXCLUDED.last_round,
-                        last_turn               = EXCLUDED.last_turn,
-                        round_banner_turns_left = EXCLUDED.round_banner_turns_left,
-                        options                 = EXCLUDED.options,
-                        updated_at              = now()
-                    """,
-                    (
-                        code,
-                        game_json,
-                        _as_json(room.get('last_round')),
-                        _as_json(room.get('last_turn')),
-                        room.get('round_banner_turns_left', 0),
-                        _as_json(room.get('options', {})),
-                    ),
-                )
-    except Exception as exc:
-        print(f'[DB] save_room error for {code}: {exc}')
+                    # Insert any new members (existing rows are left untouched)
+                    for m in room['members']:
+                        cur.execute(
+                            """
+                            INSERT INTO members (code, pid, name, is_ai)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (code, pid) DO NOTHING
+                            """,
+                            (code, m['pid'], m['name'], m['is_ai']),
+                        )
+
+                    # Upsert game state
+                    game_json = _as_json(game_to_json(room['game'])) if room['game'] else None
+                    cur.execute(
+                        """
+                        INSERT INTO game_state
+                            (code, game_json, last_round, last_turn, round_banner_turns_left, options, updated_at)
+                        VALUES (%s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb, now())
+                        ON CONFLICT (code) DO UPDATE SET
+                            game_json               = EXCLUDED.game_json,
+                            last_round              = EXCLUDED.last_round,
+                            last_turn               = EXCLUDED.last_turn,
+                            round_banner_turns_left = EXCLUDED.round_banner_turns_left,
+                            options                 = EXCLUDED.options,
+                            updated_at              = now()
+                        """,
+                        (
+                            code,
+                            game_json,
+                            _as_json(room.get('last_round')),
+                            _as_json(room.get('last_turn')),
+                            room.get('round_banner_turns_left', 0),
+                            _as_json(room.get('options', {})),
+                        ),
+                    )
+        except Exception as exc:
+            print(f'[DB] save_room error for {code}: {exc}')
 
 
 def _load_rooms():
@@ -301,28 +298,21 @@ def _load_rooms():
                 game = None
                 if gs and gs[0] is not None:
                     try:
-                        raw = gs[0]
-                        data = raw if isinstance(raw, dict) else json.loads(raw)
-                        game = game_from_json(data)
+                        game = game_from_json(_parse_jsonish(gs[0]))
                     except Exception as exc:
                         print(f'[DB] Could not restore game {code}: {exc}')
-
-                def _parse(val):
-                    if val is None:
-                        return None
-                    return val if isinstance(val, (dict, list)) else json.loads(val)
-
-                rooms[code] = {
-                    'code':                    code,
-                    'status':                  status,
-                    'members':                 members,
-                    'game':                    game,
-                    'winner':                  winner,
-                    'last_round':              _parse(gs[1]) if gs else None,
-                    'last_turn':               _parse(gs[2]) if gs else None,
-                    'round_banner_turns_left': gs[3] if gs else 0,
-                    'options':                 _parse(gs[4]) if gs and gs[4] else {'slamdowns_allowed': False},
-                }
+                room = _new_room(
+                    code=code,
+                    status=status,
+                    members=members,
+                    game=game,
+                    winner=winner,
+                    options=_parse_jsonish(gs[4]) if gs and gs[4] else {'slamdowns_allowed': False},
+                )
+                room['last_round'] = _parse_jsonish(gs[1]) if gs else None
+                room['last_turn'] = _parse_jsonish(gs[2]) if gs else None
+                room['round_banner_turns_left'] = gs[3] if gs else 0
+                rooms[code] = room
 
 
 # ── Misc helpers ───────────────────────────────────────────────────────────────
@@ -437,16 +427,17 @@ def room_state(room, pid=None):
 
 def push_state(code):
     """Broadcast current room state to all SSE clients and persist to DB."""
-    room = rooms.get(code)
-    if not room:
-        return
-    with sse_lock:
-        clients = sse_clients.get(code, {})
-        for pid, q in list(clients.items()):
-            try:
-                q.put_nowait(room_state(room, pid))
-            except queue.Full:
-                pass
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return
+        with sse_lock:
+            clients = sse_clients.get(code, {})
+            for pid, q in list(clients.items()):
+                try:
+                    q.put_nowait(room_state(room, pid))
+                except queue.Full:
+                    pass
     save_room(code)
 
 
@@ -511,45 +502,83 @@ def make_last_turn_slamdown(player_name, slammed_card):
     }
 
 
-def process_ai_turns(code):
-    room = rooms.get(code)
-    if not room or room['status'] != 'playing':
-        return
-    g = room['game']
-    while True:
-        current_player, draw_opts_before = g.start_turn()
-        if not isinstance(current_player, AIPlayer):
-            break
-        if g.can_declare_yaniv(current_player) and current_player.should_declare_yaniv():
-            hand_val      = sum(c.value for c in current_player.hand)
-            all_before    = list(g.players)
-            scores_before = {p.name: p.score for p in g.players}
-            update_info, eliminated, winner = g.declare_yaniv(current_player)
-            room['last_round'] = format_round_result(
-                update_info, eliminated, current_player.name,
-                all_before, scores_before, hand_val,
-            )
-            room['round_banner_turns_left'] = len(g.players)
-            room['last_turn'] = None
-            if winner:
-                room['status'] = 'finished'
-                room['winner'] = winner.name
-                push_state(code)
-                return
-            push_state(code)
-            continue
-        action = g.play_turn(current_player)
-        left = room.get('round_banner_turns_left', 0)
-        if left > 0:
-            room['round_banner_turns_left'] = left - 1
-            if left - 1 == 0:
-                room['last_round'] = None
-        else:
+def _advance_round_banner(room):
+    left = room.get('round_banner_turns_left', 0)
+    if left > 0:
+        room['round_banner_turns_left'] = left - 1
+        if left - 1 == 0:
             room['last_round'] = None
-        room['last_turn'] = make_last_turn(
-            current_player.name, action['discard'], action['draw'], draw_opts_before
-        )
-        push_state(code)
+    else:
+        room['last_round'] = None
+
+
+def _apply_turn_outcome(room, player_name, discard_cards, draw_action, draw_opts_before):
+    _advance_round_banner(room)
+    room['last_turn'] = make_last_turn(player_name, discard_cards, draw_action, draw_opts_before)
+
+
+def _apply_yaniv_outcome(room, game, declarer):
+    hand_val = sum(c.value for c in declarer.hand)
+    all_before = list(game.players)
+    scores_before = {p.name: p.score for p in game.players}
+    update_info, eliminated, winner = game.declare_yaniv(declarer)
+    room['last_round'] = format_round_result(
+        update_info, eliminated, declarer.name, all_before, scores_before, hand_val
+    )
+    room['round_banner_turns_left'] = len(game.players)
+    room['last_turn'] = None
+    if winner:
+        room['status'] = 'finished'
+        room['winner'] = winner.name
+    return winner
+
+
+def _ai_worker_loop(code):
+    try:
+        process_ai_turns(code)
+    finally:
+        with _with_room_lock(code):
+            room = rooms.get(code)
+            if room is not None:
+                room['ai_worker_active'] = False
+
+
+def start_ai_worker(code):
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room or room.get('ai_worker_active'):
+            return
+        room['ai_worker_active'] = True
+    threading.Thread(target=_ai_worker_loop, args=(code,), daemon=True).start()
+
+
+def process_ai_turns(code):
+    while True:
+        with _with_room_lock(code):
+            room = rooms.get(code)
+            if not room or room['status'] != 'playing' or not room.get('game'):
+                return
+            game = room['game']
+            current_player, draw_opts_before = game.start_turn()
+            if not isinstance(current_player, AIPlayer):
+                return
+
+            if game.can_declare_yaniv(current_player) and current_player.should_declare_yaniv():
+                winner = _apply_yaniv_outcome(room, game, current_player)
+                push_state(code)
+                if winner:
+                    return
+                continue
+
+            action = game.play_turn(current_player)
+            _apply_turn_outcome(
+                room,
+                current_player.name,
+                action['discard'],
+                action['draw'],
+                draw_opts_before,
+            )
+            push_state(code)
 
 
 # ── Static pages ───────────────────────────────────────────────────────────────
@@ -574,11 +603,13 @@ def sse_stream(code_, pid):
 
     def generate():
         try:
-            room = rooms.get(code_)
-            if not room:
-                yield f"data: {json.dumps({'error': 'Room not found'})}\n\n"
-                return
-            yield f"data: {json.dumps(room_state(room, pid))}\n\n"
+            with _with_room_lock(code_):
+                room = rooms.get(code_)
+                if not room:
+                    yield f"data: {json.dumps({'error': 'Room not found'})}\n\n"
+                    return
+                snapshot = room_state(room, pid)
+            yield f"data: {json.dumps(snapshot)}\n\n"
             while True:
                 try:
                     state = q.get(timeout=25)
@@ -604,27 +635,21 @@ def create_game():
     data     = request.json or {}
     pid      = data.get('pid') or str(uuid.uuid4())
     name     = (data.get('name') or 'Player').strip()[:20] or 'Player'
-    ai_count = max(0, min(3, int(data.get('ai_count', 0))))
-
-    code = gen_code()
-    while code in rooms:
-        code = gen_code()
+    try:
+        ai_count = max(0, min(3, int(data.get('ai_count', 0))))
+    except (TypeError, ValueError):
+        return error_response('Invalid AI player count')
 
     members = [{'pid': pid, 'name': name, 'is_ai': False}]
     for i in range(ai_count):
         members.append({'pid': f'ai-{i}', 'name': f'AI {i+1}', 'is_ai': True})
 
-    rooms[code] = {
-        'code':                    code,
-        'status':                  'waiting',
-        'members':                 members,
-        'game':                    None,
-        'winner':                  None,
-        'last_round':              None,
-        'last_turn':               None,
-        'round_banner_turns_left': 0,
-        'options':                 {'slamdowns_allowed': False},
-    }
+    with rooms_guard:
+        code = gen_code()
+        while code in rooms:
+            code = gen_code()
+        rooms[code] = _new_room(code=code, status='waiting', members=members)
+
     save_room(code)   # persist immediately (no SSE clients yet)
     return jsonify({'code': code, 'pid': pid})
 
@@ -636,16 +661,17 @@ def join_game():
     code = (data.get('code') or '').strip().lower()
     name = (data.get('name') or 'Player').strip()[:20] or 'Player'
 
-    room = rooms.get(code)
-    if not room:
-        return jsonify({'error': 'Room not found'}), 404
-    if room['status'] != 'waiting':
-        return jsonify({'error': 'Game already started'}), 400
-    if sum(1 for m in room['members'] if not m['is_ai']) >= 4:
-        return jsonify({'error': 'Room is full'}), 400
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return error_response('Room not found', 404)
+        if room['status'] != 'waiting':
+            return error_response('Game already started')
+        if sum(1 for m in room['members'] if not m['is_ai']) >= 4:
+            return error_response('Room is full')
 
-    if not any(m['pid'] == pid for m in room['members']):
-        room['members'].append({'pid': pid, 'name': name, 'is_ai': False})
+        if not any(m['pid'] == pid for m in room['members']):
+            room['members'].append({'pid': pid, 'name': name, 'is_ai': False})
 
     push_state(code)   # broadcasts and saves
     return jsonify({'code': code, 'pid': pid})
@@ -657,13 +683,15 @@ def leave_game():
     pid  = data.get('pid', '')
     code = (data.get('code') or '').strip().lower()
 
-    room = rooms.get(code)
-    if not room:
-        return jsonify({'error': 'Room not found'}), 404
-    if room['status'] != 'waiting':
-        return jsonify({'error': 'Cannot leave after game has started'}), 400
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return error_response('Room not found', 404)
+        if room['status'] != 'waiting':
+            return error_response('Cannot leave after game has started')
 
-    room['members'] = [m for m in room['members'] if m['pid'] != pid]
+        room['members'] = [m for m in room['members'] if m['pid'] != pid]
+
     push_state(code)
     return jsonify({'ok': True})
 
@@ -671,39 +699,77 @@ def leave_game():
 @app.route('/api/room/<code>')
 def get_room(code):
     pid  = request.args.get('pid', '')
-    room = rooms.get(code)
-    if not room:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(room_state(room, pid))
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return error_response('Not found', 404)
+        state = room_state(room, pid)
+    return jsonify(state)
+
+
+@app.route('/api/options', methods=['POST'])
+def update_waiting_options():
+    data = request.json or {}
+    code = (data.get('code') or '').lower()
+    pid = data.get('pid', '')
+    requested = bool(data.get('slamdowns_allowed', False))
+
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room:
+            return error_response('Room not found', 404)
+        if room['status'] != 'waiting':
+            return error_response('Options can only be changed while waiting')
+
+        member = next((m for m in room['members'] if m['pid'] == pid), None)
+        if not member:
+            return error_response('Not a member of this game')
+
+        first_human = next((m for m in room['members'] if not m['is_ai']), None)
+        if not first_human or first_human['pid'] != pid:
+            return error_response('Only the room creator can change options')
+
+        has_ai = any(m['is_ai'] for m in room['members'])
+        room_options = dict(room.get('options', {}))
+        room_options['slamdowns_allowed'] = requested and not has_ai
+        room['options'] = room_options
+        updated_options = dict(room_options)
+
+    push_state(code)
+    return jsonify({'ok': True, 'options': updated_options})
 
 
 @app.route('/api/start', methods=['POST'])
 def start_game():
     data = request.json or {}
     code = (data.get('code') or '').lower()
-    room = rooms.get(code)
-    if not room or room['status'] != 'waiting':
-        return jsonify({'error': 'Cannot start'}), 400
-    if len(room['members']) < 2:
-        return jsonify({'error': 'Need at least 2 players'}), 400
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room or room['status'] != 'waiting':
+            return error_response('Cannot start')
+        if len(room['members']) < 2:
+            return error_response('Need at least 2 players')
 
-    has_ai = any(m['is_ai'] for m in room['members'])
-    room['options'] = {
-        # Slamdowns are only allowed in human-only games
-        'slamdowns_allowed': bool(data.get('slamdowns_allowed', False)) and not has_ai,
-    }
+        has_ai = any(m['is_ai'] for m in room['members'])
+        room_options = dict(room.get('options', {}))
+        # Keep waiting-room selection unless explicitly overridden by client.
+        selected = room_options.get('slamdowns_allowed', False)
+        if 'slamdowns_allowed' in data:
+            selected = bool(data.get('slamdowns_allowed', False))
+        room_options['slamdowns_allowed'] = bool(selected) and not has_ai
+        room['options'] = room_options
 
-    players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
-               for m in room['members']]
-    g = YanivGame(players)
-    g.start_game()
-    room['game']       = g
-    room['status']     = 'playing'
-    room['last_round'] = None
-    room['last_turn']  = None
+        players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
+                   for m in room['members']]
+        game = YanivGame(players)
+        game.start_game()
+        room['game'] = game
+        room['status'] = 'playing'
+        room['last_round'] = None
+        room['last_turn'] = None
 
     push_state(code)
-    threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
+    start_ai_worker(code)
     return jsonify({'ok': True})
 
 
@@ -712,97 +778,93 @@ def do_action():
     data = request.json or {}
     code = (data.get('code') or '').lower()
     pid  = data.get('pid', '')
-    room = rooms.get(code)
+    kick_ai = False
 
-    if not room or room['status'] != 'playing':
-        return jsonify({'error': 'Game not active'}), 400
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room or room['status'] != 'playing':
+            return error_response('Game not active')
 
-    g = room['game']
-    current_player, draw_options = g.start_turn()
+        game = room['game']
+        current_player, draw_options = game.start_turn()
 
-    mem = next((m for m in room['members'] if m['pid'] == pid), None)
-    if not mem:
-        return jsonify({'error': 'Not a member of this game'}), 400
+        mem = next((m for m in room['members'] if m['pid'] == pid), None)
+        if not mem:
+            return error_response('Not a member of this game')
 
-    # Slamdown — handled before the "not your turn" check since the slammer
-    # is not the current player (turn has already advanced to the next player).
-    if data.get('declare_slamdown'):
-        if not room.get('options', {}).get('slamdowns_allowed'):
-            return jsonify({'error': 'Slamdowns not enabled in this game'}), 400
-        if g.slamdown_player != mem['name']:
-            return jsonify({'error': 'Slamdown no longer available'}), 400
-        # Find the slammer's player object
-        slammer = next((p for p in g.players if p.name == mem['name']), None)
-        if not slammer:
-            return jsonify({'error': 'Player not found'}), 400
-        try:
-            slammed_card = g.perform_slamdown(slammer)
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
-        room['last_turn'] = make_last_turn_slamdown(mem['name'], slammed_card)
-        push_state(code)
-        return jsonify({'ok': True})
+        # Slamdown — handled before the "not your turn" check since the slammer
+        # is not the current player (turn has already advanced to the next player).
+        if data.get('declare_slamdown'):
+            if not room.get('options', {}).get('slamdowns_allowed'):
+                return error_response('Slamdowns not enabled in this game')
+            if game.slamdown_player != mem['name']:
+                return error_response('Slamdown no longer available')
 
-    if current_player.name != mem['name']:
-        return jsonify({'error': 'Not your turn'}), 400
-
-    if data.get('declare_yaniv'):
-        if not g.can_declare_yaniv(current_player):
-            return jsonify({'error': 'Cannot declare Yaniv'}), 400
-        hand_val      = sum(c.value for c in current_player.hand)
-        all_before    = list(g.players)
-        scores_before = {p.name: p.score for p in g.players}
-        update_info, eliminated, winner = g.declare_yaniv(current_player)
-        room['last_round'] = format_round_result(
-            update_info, eliminated, current_player.name,
-            all_before, scores_before, hand_val,
-        )
-        room['round_banner_turns_left'] = len(g.players)
-        room['last_turn'] = None
-        if winner:
-            room['status'] = 'finished'
-            room['winner'] = winner.name
+            slammer = next((p for p in game.players if p.name == mem['name']), None)
+            if not slammer:
+                return error_response('Player not found')
+            try:
+                slammed_card = game.perform_slamdown(slammer)
+            except ValueError as e:
+                return error_response(str(e))
+            room['last_turn'] = make_last_turn_slamdown(mem['name'], slammed_card)
             push_state(code)
             return jsonify({'ok': True})
-        push_state(code)
-        threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
-        return jsonify({'ok': True})
 
-    card_ids = data.get('discard', [])
-    draw     = data.get('draw')
+        if current_player.name != mem['name']:
+            return error_response('Not your turn')
 
-    discard_cards = []
-    hand_copy     = list(current_player.hand)
-    for cid in card_ids:
-        match = next((c for c in hand_copy if c._card == cid), None)
-        if not match:
-            return jsonify({'error': 'Card not in hand'}), 400
-        discard_cards.append(match)
-        hand_copy.remove(match)
+        if data.get('declare_yaniv'):
+            if not game.can_declare_yaniv(current_player):
+                return error_response('Cannot declare Yaniv')
+            winner = _apply_yaniv_outcome(room, game, current_player)
+            push_state(code)
+            if not winner:
+                kick_ai = True
+        else:
+            card_ids = data.get('discard', [])
+            if not isinstance(card_ids, list):
+                return error_response('Discard must be a list of card IDs')
 
-    if not discard_cards:
-        return jsonify({'error': 'Must discard at least one card'}), 400
+            discard_cards = []
+            hand_copy = list(current_player.hand)
+            for cid in card_ids:
+                match = next((c for c in hand_copy if c._card == cid), None)
+                if not match:
+                    return error_response('Card not in hand')
+                discard_cards.append(match)
+                hand_copy.remove(match)
 
-    draw_action    = 'deck' if draw == 'deck' else int(draw)
-    draw_opts_before = list(draw_options)
+            if not discard_cards:
+                return error_response('Must discard at least one card')
 
-    try:
-        g.play_turn(current_player, {'discard': discard_cards, 'draw': draw_action})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+            draw = data.get('draw')
+            if draw == 'deck':
+                draw_action = 'deck'
+            else:
+                try:
+                    draw_action = int(draw)
+                except (TypeError, ValueError):
+                    return error_response("Invalid 'draw' action. Must be 'deck' or a valid index of a card in discard pile.")
 
-    left = room.get('round_banner_turns_left', 0)
-    if left > 0:
-        room['round_banner_turns_left'] = left - 1
-        if left - 1 == 0:
-            room['last_round'] = None
-    else:
-        room['last_round'] = None
-    room['last_turn'] = make_last_turn(
-        current_player.name, discard_cards, draw_action, draw_opts_before
-    )
-    push_state(code)
-    threading.Thread(target=process_ai_turns, args=(code,), daemon=True).start()
+            draw_opts_before = list(draw_options)
+            try:
+                game.play_turn(current_player, {'discard': discard_cards, 'draw': draw_action})
+            except ValueError as e:
+                return error_response(str(e))
+
+            _apply_turn_outcome(
+                room,
+                current_player.name,
+                discard_cards,
+                draw_action,
+                draw_opts_before,
+            )
+            push_state(code)
+            kick_ai = True
+
+    if kick_ai:
+        start_ai_worker(code)
     return jsonify({'ok': True})
 
 
@@ -810,45 +872,40 @@ def do_action():
 def play_again():
     data = request.json or {}
     code = (data.get('code') or '').lower()
-    room = rooms.get(code)
+    with _with_room_lock(code):
+        room = rooms.get(code)
+        if not room or room['status'] != 'finished':
+            return error_response('Game not finished')
 
-    if not room or room['status'] != 'finished':
-        return jsonify({'error': 'Game not finished'}), 400
+        # Idempotent: if a rematch room already exists, return it
+        if room.get('next_room'):
+            return jsonify({'next_room': room['next_room']})
 
-    # Idempotent: if a rematch room already exists, return it
-    if room.get('next_room'):
-        return jsonify({'next_room': room['next_room']})
+        members = [dict(m) for m in room['members']]
+        options = dict(room.get('options', {'slamdowns_allowed': False}))
 
-    # Create a new room with the same members (same PIDs preserved)
-    new_code = gen_code()
-    while new_code in rooms:
-        new_code = gen_code()
+        players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name']) for m in members]
+        game = YanivGame(players)
+        game.start_game()
 
-    members = [dict(m) for m in room['members']]
+        with rooms_guard:
+            new_code = gen_code()
+            while new_code in rooms:
+                new_code = gen_code()
+            rooms[new_code] = _new_room(
+                code=new_code,
+                status='playing',
+                members=members,
+                game=game,
+                options=options,
+            )
 
-    players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
-               for m in members]
-    g = YanivGame(players)
-    g.start_game()
+        # Mark old room so all polling/SSE clients redirect automatically
+        room['next_room'] = new_code
 
-    rooms[new_code] = {
-        'code':                    new_code,
-        'status':                  'playing',
-        'members':                 members,
-        'game':                    g,
-        'winner':                  None,
-        'last_round':              None,
-        'last_turn':               None,
-        'round_banner_turns_left': 0,
-        'options':                 dict(room.get('options', {'slamdowns_allowed': False})),
-    }
     save_room(new_code)
-
-    # Mark old room so all polling/SSE clients redirect automatically
-    room['next_room'] = new_code
     push_state(code)
-
-    threading.Thread(target=process_ai_turns, args=(new_code,), daemon=True).start()
+    start_ai_worker(new_code)
     return jsonify({'next_room': new_code})
 
 
