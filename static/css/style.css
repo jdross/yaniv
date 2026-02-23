@@ -116,6 +116,8 @@ input[type="range"] {
 .btn-large { font-size: 1.15rem; padding: .9rem 2rem; }
 .btn-yaniv { background: #e74c3c; color: #fff; margin-right: .5rem; }
 .btn-yaniv:hover { background: #c0392b; }
+.btn-slamdown { background: #e67e22; color: #fff; margin-right: .5rem; }
+.btn-slamdown:hover { background: #ca6f1e; }
 
 /* ── Lobby ── */
 .lobby {
@@ -169,7 +171,24 @@ input[type="range"] {
 .share-btn:hover { background: rgba(244,208,63,.25); }
 .share-btn.copied { background: #27ae60; color: #fff; border-color: #27ae60; }
 
-.lobby-players { margin-bottom: 1.5rem; }
+.lobby-players { margin-bottom: 1rem; }
+.lobby-options {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: 1.2rem;
+  font-size: .9rem;
+}
+.option-toggle {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  cursor: pointer;
+}
+.option-hint {
+  opacity: .55;
+  font-size: .8rem;
+}
 .lobby-player {
   display: flex;
   align-items: center;
@@ -438,6 +457,7 @@ input[type="range"] {
 }
 .action-bar .btn { flex: 1; }
 .action-bar .btn-yaniv { flex: 0 0 auto; }
+.action-bar .btn-slamdown { flex: 0 0 auto; }
 
 .key-hints {
   font-size: .72rem;

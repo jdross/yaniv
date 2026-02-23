@@ -2,6 +2,9 @@ import sys, os, uuid, random, string, queue, threading, json
 from contextlib import contextmanager
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 
 try:
@@ -57,11 +60,14 @@ CREATE TABLE IF NOT EXISTS game_state (
     last_round              JSONB,
     last_turn               JSONB,
     round_banner_turns_left INTEGER NOT NULL DEFAULT 0,
+    options                 JSONB NOT NULL DEFAULT '{}',
     updated_at              TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE game_state ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';
 """
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 @contextmanager
@@ -91,6 +97,29 @@ def _run_migrations():
                 cur.execute('UPDATE schema_version SET version = %s', (_SCHEMA_VERSION,))
 
 
+def _cleanup_stale_rooms():
+    """On startup: mark old playing rooms as finished; delete stale waiting rooms (and CASCADE)."""
+    with _get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE rooms
+                SET status = 'finished'
+                WHERE status = 'playing' AND created_at < now() - interval '7 days'
+                """
+            )
+            finished = cur.rowcount
+            cur.execute(
+                """
+                DELETE FROM rooms
+                WHERE status = 'waiting' AND created_at < now() - interval '12 hours'
+                """
+            )
+            deleted = cur.rowcount
+    if finished or deleted:
+        print(f'[DB] Cleanup: {finished} room(s) marked finished, {deleted} stale waiting room(s) deleted')
+
+
 def _init_db():
     """Connect to Postgres, migrate, and load existing rooms into memory."""
     global _pool
@@ -100,6 +129,7 @@ def _init_db():
     try:
         _pool = ThreadedConnectionPool(2, 10, DB_URL)
         _run_migrations()
+        _cleanup_stale_rooms()
         _load_rooms()
         print(f'[DB] Initialised — {len(rooms)} room(s) restored')
         # Resume any AI turns that were in progress when the server last stopped
@@ -123,6 +153,8 @@ def game_to_json(g):
         'current_player_index': g.current_player_index,
         'discard_pile':         [c._card for c in g.discard_pile],
         'last_discard_size':    len(g.last_discard),
+        'slamdown_player':      g.slamdown_player,
+        'slamdown_card':        g.slamdown_card._card if g.slamdown_card else None,
         'players': [
             {
                 'name':  p.name,
@@ -150,6 +182,11 @@ def game_from_json(data):
     g.discard_pile  = [Card(c) for c in data['discard_pile']]
     last_n          = data.get('last_discard_size', 0)
     g.last_discard  = g.discard_pile[-last_n:] if last_n > 0 else []
+
+    # Restore slamdown state
+    g.slamdown_player = data.get('slamdown_player')
+    sdc = data.get('slamdown_card')
+    g.slamdown_card = Card(sdc) if sdc is not None else None
 
     # Rebuild the deck from cards not in any hand or the discard pile
     used   = set(c._card for c in g.discard_pile)
@@ -211,13 +248,14 @@ def save_room(code):
                 cur.execute(
                     """
                     INSERT INTO game_state
-                        (code, game_json, last_round, last_turn, round_banner_turns_left, updated_at)
-                    VALUES (%s, %s::jsonb, %s::jsonb, %s::jsonb, %s, now())
+                        (code, game_json, last_round, last_turn, round_banner_turns_left, options, updated_at)
+                    VALUES (%s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb, now())
                     ON CONFLICT (code) DO UPDATE SET
                         game_json               = EXCLUDED.game_json,
                         last_round              = EXCLUDED.last_round,
                         last_turn               = EXCLUDED.last_turn,
                         round_banner_turns_left = EXCLUDED.round_banner_turns_left,
+                        options                 = EXCLUDED.options,
                         updated_at              = now()
                     """,
                     (
@@ -226,6 +264,7 @@ def save_room(code):
                         _as_json(room.get('last_round')),
                         _as_json(room.get('last_turn')),
                         room.get('round_banner_turns_left', 0),
+                        _as_json(room.get('options', {})),
                     ),
                 )
     except Exception as exc:
@@ -233,10 +272,12 @@ def save_room(code):
 
 
 def _load_rooms():
-    """Rebuild the in-memory rooms dict from the database on startup."""
+    """Rebuild the in-memory rooms dict from the database on startup (only playing or waiting)."""
     with _get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT code, status, winner FROM rooms')
+            cur.execute(
+                "SELECT code, status, winner FROM rooms WHERE status IN ('playing', 'waiting')"
+            )
             for code, status, winner in cur.fetchall():
                 # Members
                 cur.execute(
@@ -250,7 +291,7 @@ def _load_rooms():
                 # Game state
                 cur.execute(
                     """
-                    SELECT game_json, last_round, last_turn, round_banner_turns_left
+                    SELECT game_json, last_round, last_turn, round_banner_turns_left, options
                     FROM game_state WHERE code = %s
                     """,
                     (code,),
@@ -280,6 +321,7 @@ def _load_rooms():
                     'last_round':              _parse(gs[1]) if gs else None,
                     'last_turn':               _parse(gs[2]) if gs else None,
                     'round_banner_turns_left': gs[3] if gs else 0,
+                    'options':                 _parse(gs[4]) if gs and gs[4] else {'slamdowns_allowed': False},
                 }
 
 
@@ -331,6 +373,9 @@ def room_state(room, pid=None):
                 'current_player_name': '',
                 'is_my_turn':          False,
                 'deck_size':           0,
+                'can_slamdown':        False,
+                'slamdown_card':       None,
+                'slamdowns_allowed':   room.get('options', {}).get('slamdowns_allowed', False),
             }
         else:
             current_player, draw_options = g.start_turn()
@@ -356,11 +401,14 @@ def room_state(room, pid=None):
 
             is_my_turn      = False
             my_draw_options = []
+            my_slamdown_card = None
             if pid:
                 cur_mem = next((m for m in room['members'] if m['pid'] == pid), None)
                 if cur_mem and current_player.name == cur_mem['name']:
                     is_my_turn      = True
                     my_draw_options = [card_to_dict(c) for c in draw_options]
+                if cur_mem and g.slamdown_player == cur_mem['name'] and g.slamdown_card:
+                    my_slamdown_card = card_to_dict(g.slamdown_card)
 
             game_out = {
                 'players':             gplayers,
@@ -369,6 +417,9 @@ def room_state(room, pid=None):
                 'current_player_name': current_player.name,
                 'is_my_turn':          is_my_turn,
                 'deck_size':           len(g.deck),
+                'can_slamdown':        my_slamdown_card is not None,
+                'slamdown_card':       my_slamdown_card,
+                'slamdowns_allowed':   room.get('options', {}).get('slamdowns_allowed', False),
             }
 
     return {
@@ -380,6 +431,7 @@ def room_state(room, pid=None):
         'last_round': room.get('last_round'),
         'last_turn':  room.get('last_turn'),
         'next_room':  room.get('next_room'),
+        'options':    room.get('options', {'slamdowns_allowed': False}),
     }
 
 
@@ -441,10 +493,21 @@ def make_last_turn(player_name, discard_cards, draw_action, draw_opts_before):
         if draw_action < len(draw_opts_before):
             drawn_card = card_to_dict(draw_opts_before[draw_action])
     return {
-        'player':     player_name,
-        'discarded':  [card_to_dict(c) for c in discard_cards],
-        'drawn_from': drawn_from,
-        'drawn_card': drawn_card,
+        'player':      player_name,
+        'discarded':   [card_to_dict(c) for c in discard_cards],
+        'drawn_from':  drawn_from,
+        'drawn_card':  drawn_card,
+        'is_slamdown': False,
+    }
+
+
+def make_last_turn_slamdown(player_name, slammed_card):
+    return {
+        'player':      player_name,
+        'discarded':   [card_to_dict(slammed_card)],
+        'drawn_from':  'slamdown',
+        'drawn_card':  None,
+        'is_slamdown': True,
     }
 
 
@@ -560,6 +623,7 @@ def create_game():
         'last_round':              None,
         'last_turn':               None,
         'round_banner_turns_left': 0,
+        'options':                 {'slamdowns_allowed': False},
     }
     save_room(code)   # persist immediately (no SSE clients yet)
     return jsonify({'code': code, 'pid': pid})
@@ -623,6 +687,12 @@ def start_game():
     if len(room['members']) < 2:
         return jsonify({'error': 'Need at least 2 players'}), 400
 
+    has_ai = any(m['is_ai'] for m in room['members'])
+    room['options'] = {
+        # Slamdowns are only allowed in human-only games
+        'slamdowns_allowed': bool(data.get('slamdowns_allowed', False)) and not has_ai,
+    }
+
     players = [AIPlayer(m['name']) if m['is_ai'] else Player(m['name'])
                for m in room['members']]
     g = YanivGame(players)
@@ -651,7 +721,29 @@ def do_action():
     current_player, draw_options = g.start_turn()
 
     mem = next((m for m in room['members'] if m['pid'] == pid), None)
-    if not mem or current_player.name != mem['name']:
+    if not mem:
+        return jsonify({'error': 'Not a member of this game'}), 400
+
+    # Slamdown — handled before the "not your turn" check since the slammer
+    # is not the current player (turn has already advanced to the next player).
+    if data.get('declare_slamdown'):
+        if not room.get('options', {}).get('slamdowns_allowed'):
+            return jsonify({'error': 'Slamdowns not enabled in this game'}), 400
+        if g.slamdown_player != mem['name']:
+            return jsonify({'error': 'Slamdown no longer available'}), 400
+        # Find the slammer's player object
+        slammer = next((p for p in g.players if p.name == mem['name']), None)
+        if not slammer:
+            return jsonify({'error': 'Player not found'}), 400
+        try:
+            slammed_card = g.perform_slamdown(slammer)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        room['last_turn'] = make_last_turn_slamdown(mem['name'], slammed_card)
+        push_state(code)
+        return jsonify({'ok': True})
+
+    if current_player.name != mem['name']:
         return jsonify({'error': 'Not your turn'}), 400
 
     if data.get('declare_yaniv'):
@@ -748,6 +840,7 @@ def play_again():
         'last_round':              None,
         'last_turn':               None,
         'round_banner_turns_left': 0,
+        'options':                 dict(room.get('options', {'slamdowns_allowed': False})),
     }
     save_room(new_code)
 

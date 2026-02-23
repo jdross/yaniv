@@ -7,6 +7,8 @@ class YanivGame:
         self.deck = []
         self.discard_pile = []
         self.last_discard = []  # Track the most recent discarded cards separately
+        self.slamdown_player = None  # name of player eligible to slamdown
+        self.slamdown_card = None    # Card object that can be slammed down
         self.players = players if players else []
         if players:
             self._create_players(players)
@@ -21,6 +23,8 @@ class YanivGame:
             'players': [player.to_dict() for player in self.players],
             'current_player_index': self.current_player_index,
             'last_discard_size': len(self.last_discard),
+            'slamdown_player': self.slamdown_player,
+            'slamdown_card': self.slamdown_card._card if self.slamdown_card else None,
         }
     
     @classmethod
@@ -37,6 +41,10 @@ class YanivGame:
         for card in game.discard_pile + [card for player in game.players for card in player.hand]:
             game.deck.remove(card)
         game._shuffle_deck()
+
+        game.slamdown_player = data.get('slamdown_player')
+        sdc = data.get('slamdown_card')
+        game.slamdown_card = Card(sdc) if sdc is not None else None
 
         return game
 
@@ -89,7 +97,10 @@ class YanivGame:
 
         if not isinstance(action['discard'], list):
             raise ValueError("Invalid 'discard' action. Must be a list of cards.")
-        
+
+        # Capture hand identity before draw to detect the newly drawn card
+        hand_before_ids = set(id(c) for c in player.hand)
+
         if action['draw'] == 'deck':
             self._draw_card(player)
         elif isinstance(action['draw'], int) and action['draw'] >= 0:
@@ -101,10 +112,15 @@ class YanivGame:
         else:
             raise ValueError("Invalid 'draw' action. Must be 'deck' or a valid index of a card in discard pile.")
 
+        # Identify the newly drawn card (for slamdown check and AI observation)
+        newly_drawn = next((c for c in player.hand if id(c) not in hand_before_ids), None)
         drawn_card = self.last_discard[action['draw']] if action['draw'] != 'deck' else None
         self._discard_cards(player, action['discard'])
-        
-        # Inform AIPlayers what happened   
+
+        # Check if a slamdown is possible before advancing the turn
+        self._check_slamdown(player, action['discard'], newly_drawn)
+
+        # Inform AIPlayers what happened
         for other_player in self.players:
             if isinstance(other_player, AIPlayer) and other_player != player:
                 turn_info = {
@@ -115,7 +131,7 @@ class YanivGame:
                     "drawn_card": drawn_card
                 }
                 other_player.observe_turn(turn_info, self.discard_pile, self._get_draw_options())
-        
+
         self._next_turn()
         return action
 
@@ -143,7 +159,11 @@ class YanivGame:
         """
         if sum(card.value for card in player.hand) > 5:
             raise ValueError("Cannot declare Yaniv with more than 5 points.")
-        
+
+        # Clear any pending slamdown
+        self.slamdown_player = None
+        self.slamdown_card = None
+
         self.previous_scores = [player.score for player in self.players]  # Update previous scores
         
         update_info = self._update_scores(player)
@@ -227,6 +247,10 @@ class YanivGame:
                 "or a run (3 or more consecutive cards of the same suit)."
             )
 
+        # A new discard clears any pending slamdown from the previous turn
+        self.slamdown_player = None
+        self.slamdown_card = None
+
         # Update discards
         self.last_discard = []
         for card in cards:
@@ -234,6 +258,61 @@ class YanivGame:
             self.discard_pile.append(card)
             self.last_discard.append(card)
     
+    def _check_slamdown(self, player, discarded_cards, drawn_card):
+        """After a turn, determine if the player can slamdown their drawn card."""
+        self.slamdown_player = None
+        self.slamdown_card = None
+
+        # AI players can't slamdown (handled at room level, but guard here too)
+        if isinstance(player, AIPlayer):
+            return
+
+        # No card drawn, or player only has 1 card left (can't slam their last card)
+        if drawn_card is None or len(player.hand) <= 1:
+            return
+
+        non_jokers_discarded = [c for c in discarded_cards if c.rank != 'Joker']
+
+        # Case 1: Rank match — drawn card same rank as discarded set
+        if non_jokers_discarded and drawn_card.rank == non_jokers_discarded[0].rank:
+            self.slamdown_player = player.name
+            self.slamdown_card = drawn_card
+            return
+
+        # Case 2: Run extension — drawn card extends the discarded run on either end
+        run = self._return_run_if_valid(discarded_cards)
+        if run:
+            non_joker_run = [c for c in run if c.rank != 'Joker']
+            if non_joker_run and drawn_card.rank != 'Joker':
+                # Check same suit as the run
+                run_suit = non_joker_run[0].suit
+                if drawn_card.suit == run_suit:
+                    low_rank = min(c.rank_index() for c in non_joker_run)
+                    high_rank = max(c.rank_index() for c in non_joker_run)
+                    drawn_rank = drawn_card.rank_index()
+                    if drawn_rank == low_rank - 1 or drawn_rank == high_rank + 1:
+                        self.slamdown_player = player.name
+                        self.slamdown_card = drawn_card
+
+    def perform_slamdown(self, player):
+        """Execute a slamdown: remove the card from hand and append to the pile."""
+        if self.slamdown_player != player.name:
+            raise ValueError("No slamdown available for this player.")
+        if self.slamdown_card not in player.hand:
+            raise ValueError("Slamdown card not in hand.")
+        if len(player.hand) <= 1:
+            raise ValueError("Cannot slamdown your last card.")
+
+        card = self.slamdown_card
+        player.hand.remove(card)
+        self.discard_pile.append(card)
+        self.last_discard.append(card)
+
+        self.slamdown_player = None
+        self.slamdown_card = None
+
+        return card
+
     def _return_run_if_valid(self, cards):
         # Extract all the non-joker cards
         non_joker_cards = [card for card in cards if card.rank != 'Joker']
