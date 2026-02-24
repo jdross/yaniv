@@ -8,7 +8,7 @@ from player import Player, Card
 class AIPlayer(Player):
     def __init__(self, name, policy='v2', rollout_samples=24):
         super().__init__(name)
-        self.policy = policy if policy in ('v1', 'v2') else 'v1'
+        self.policy = policy if policy in ('v1', 'v2') else 'v2'
         self.rollout_samples = max(4, int(rollout_samples))
         self.other_players = {}
         self.draw_options = []

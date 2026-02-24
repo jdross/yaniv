@@ -75,15 +75,7 @@ def _build_players(scenario, total_players, rollout_samples):
     players = []
     label_by_name = {}
 
-    if scenario == 'v1_vs_random':
-        ai = TimedAIPlayer('AI-v1', policy='v1', rollout_samples=rollout_samples)
-        players.append(ai)
-        label_by_name[ai.name] = 'v1'
-    elif scenario == 'v2_vs_random':
-        ai = TimedAIPlayer('AI-v2', policy='v2', rollout_samples=rollout_samples)
-        players.append(ai)
-        label_by_name[ai.name] = 'v2'
-    elif scenario == 'v2_vs_v1':
+    if scenario == 'v2_vs_v1':
         ai_v2 = TimedAIPlayer('AI-v2', policy='v2', rollout_samples=rollout_samples)
         ai_v1 = TimedAIPlayer('AI-v1', policy='v1', rollout_samples=rollout_samples)
         players.extend([ai_v2, ai_v1])
@@ -222,7 +214,7 @@ def _summarize_results(raw_games):
 
 
 def run_benchmarks(games, players, max_turns, seed, rollout_samples):
-    scenarios = ['v1_vs_random', 'v2_vs_random', 'v2_vs_v1']
+    scenarios = ['v2_vs_v1']
     out = {}
 
     for scenario in scenarios:
