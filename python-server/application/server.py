@@ -1,6 +1,8 @@
 import sys, os, uuid, random, string, queue, threading, json
 from contextlib import contextmanager
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PYTHON_SERVER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(PYTHON_SERVER_ROOT)
+sys.path.insert(0, PYTHON_SERVER_ROOT)
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -19,7 +21,7 @@ from player import Player
 from aiplayer import AIPlayer
 
 app = Flask(__name__,
-            static_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'),
+            static_folder=os.path.join(PROJECT_ROOT, 'static'),
             static_url_path='')
 app.secret_key = 'yaniv-secret-key-change-in-prod'
 

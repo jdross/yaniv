@@ -12,8 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+PYTHON_SERVER_ROOT = ROOT / "python-server"
+if str(PYTHON_SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(PYTHON_SERVER_ROOT))
 
 from yaniv import YanivGame
 from player import Player

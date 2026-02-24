@@ -3,7 +3,10 @@ import sys
 import os
 import queue
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PYTHON_SERVER_ROOT = os.path.join(ROOT, "python-server")
+if PYTHON_SERVER_ROOT not in sys.path:
+    sys.path.insert(0, PYTHON_SERVER_ROOT)
 
 from application import server
 from card import Card

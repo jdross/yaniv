@@ -1,17 +1,17 @@
-# Node Server (API-compatible migration target)
+# Server (Node.js implementation)
 
 This folder contains a lightweight Node.js port of the Python game server and core game logic.
 
 ## Install
 
 ```bash
-npm run node-server:install
+npm run server:node:install
 ```
 
 ## Run
 
 ```bash
-npm run node-server:dev
+npm run server:node:dev
 ```
 
 The Node server reads the same environment variables as the Python server:

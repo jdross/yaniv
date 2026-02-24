@@ -560,6 +560,7 @@ function _apply_yaniv_outcome(room, game, declarer) {
   if (winner) {
     room.status = 'finished';
     room.winner = winner.name;
+    console.log(`[Server] Game won code=${room.code} winner=${winner.name}`);
   }
 
   return winner;
@@ -713,6 +714,9 @@ app.post('/api/create', async (req, res) => {
   rooms[code] = _new_room(code, 'waiting', members);
 
   await save_room(code);
+  console.log(
+    `[Server] Game created code=${code} creator=${name} players=${members.length} ai=${ai_count}`,
+  );
   return res.json({ code, pid });
 });
 
@@ -834,6 +838,9 @@ app.post('/api/start', async (req, res) => {
   room.status = 'playing';
   room.last_round = null;
   room.last_turn = null;
+  console.log(
+    `[Server] Game started code=${code} players=${room.members.map((m) => m.name).join(',')} slamdowns=${room.options.slamdowns_allowed}`,
+  );
 
   await push_state(code);
   start_ai_worker(code);
@@ -989,6 +996,9 @@ app.post('/api/play_again', async (req, res) => {
 
   rooms[new_code] = _new_room(new_code, 'playing', members, game, null, options);
   room.next_room = new_code;
+  console.log(
+    `[Server] Game started code=${new_code} rematch_of=${code} players=${members.map((m) => m.name).join(',')} slamdowns=${options.slamdowns_allowed}`,
+  );
 
   await save_room(new_code);
   await push_state(code);
@@ -1033,7 +1043,7 @@ async function startServer(port = 5174) {
 
   return new Promise((resolve) => {
     const server = app.listen(port, '0.0.0.0', () => {
-      console.log(`[NodeServer] Listening on 0.0.0.0:${port}`);
+      console.log(`[Server] Listening on 0.0.0.0:${port}`);
       resolve(server);
     });
   });
