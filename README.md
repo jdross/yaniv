@@ -47,6 +47,8 @@ Run seeded head-to-head benchmarks for `v1` and `v2`:
 
 ```bash
 python3 scripts/benchmark_ai.py --games 250 --players 3
+# Parallelize across CPU cores (deterministic wins/turns; latency timings remain machine/load dependent):
+python3 scripts/benchmark_ai.py --games 250 --players 3 --jobs 8
 ```
 
 Results are written to `metrics/ai_benchmark_<timestamp>.json` by default.

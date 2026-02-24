@@ -6,6 +6,30 @@ class TestAIPlayer(unittest.TestCase):
     def setUp(self):
         self.aiplayer = AIPlayer("AI")
 
+    def test_level_one_strategy_selection(self):
+        ai = AIPlayer("AI-L1", level=1)
+        ai.observe_round([
+            {'name': 'AI-L1', 'score': 0},
+            {'name': 'P2', 'score': 0},
+            {'name': 'P3', 'score': 0},
+        ])
+        self.assertEqual(ai._strategy_for_level(), 'v1')
+
+    def test_level_two_strategy_selection_by_player_count(self):
+        ai = AIPlayer("AI-L2", level=2)
+        ai.observe_round([
+            {'name': 'AI-L2', 'score': 0},
+            {'name': 'P2', 'score': 0},
+        ])
+        self.assertEqual(ai._strategy_for_level(), 'v2')
+
+        ai.observe_round([
+            {'name': 'AI-L2', 'score': 0},
+            {'name': 'P2', 'score': 0},
+            {'name': 'P3', 'score': 0},
+        ])
+        self.assertEqual(ai._strategy_for_level(), 'v3')
+
     # Testing discard options validation
 
     def test_get_discard_options_run(self):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import concurrent.futures
 import json
 import math
 import random
@@ -14,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aiplayer import AIPlayer
-from player import Player
 from yaniv import YanivGame
+from player import Player
+from aiplayer import AIPlayer
 
 
 class RandomPolicyPlayer(Player):
@@ -24,8 +25,8 @@ class RandomPolicyPlayer(Player):
 
 
 class TimedAIPlayer(AIPlayer):
-    def __init__(self, name, policy='v1', rollout_samples=24):
-        super().__init__(name=name, policy=policy, rollout_samples=rollout_samples)
+    def __init__(self, name, level=1, rollout_samples=24):
+        super().__init__(name=name, level=level, rollout_samples=rollout_samples)
         self.decision_times_ms = []
 
     def decide_action(self):
@@ -75,12 +76,14 @@ def _build_players(scenario, total_players, rollout_samples):
     players = []
     label_by_name = {}
 
-    if scenario == 'v2_vs_v1':
-        ai_v2 = TimedAIPlayer('AI-v2', policy='v2', rollout_samples=rollout_samples)
-        ai_v1 = TimedAIPlayer('AI-v1', policy='v1', rollout_samples=rollout_samples)
-        players.extend([ai_v2, ai_v1])
-        label_by_name[ai_v2.name] = 'v2'
-        label_by_name[ai_v1.name] = 'v1'
+    if scenario == 'level2_vs_level1':
+        ai_l2 = TimedAIPlayer('AI-L2', level=2,
+                              rollout_samples=rollout_samples)
+        ai_l1 = TimedAIPlayer('AI-L1', level=1,
+                              rollout_samples=rollout_samples)
+        players.extend([ai_l2, ai_l1])
+        label_by_name[ai_l2.name] = 'level2'
+        label_by_name[ai_l1.name] = 'level1'
     else:
         raise ValueError(f'Unsupported scenario: {scenario}')
 
@@ -95,8 +98,10 @@ def _build_players(scenario, total_players, rollout_samples):
 
 def _run_single_game(scenario, total_players, max_turns, seed, rollout_samples):
     rng = random.Random(seed)
-    players, label_by_name = _build_players(scenario, total_players, rollout_samples)
-    game = YanivGame(players)
+    game_rng = random.Random(seed + 1)
+    players, label_by_name = _build_players(
+        scenario, total_players, rollout_samples)
+    game = YanivGame(players, rng=game_rng)
 
     try:
         game.start_game()
@@ -131,10 +136,12 @@ def _run_single_game(scenario, total_players, max_turns, seed, rollout_samples):
                 if isinstance(current_player, AIPlayer):
                     should_declare = current_player.should_declare_yaniv()
                 else:
-                    should_declare = _random_should_declare(current_player, rng)
+                    should_declare = _random_should_declare(
+                        current_player, rng)
 
                 if should_declare:
-                    _update_info, _eliminated, winner = game.declare_yaniv(current_player)
+                    _update_info, _eliminated, winner = game.declare_yaniv(
+                        current_player)
                     if winner is not None:
                         break
                     continue
@@ -167,6 +174,10 @@ def _run_single_game(scenario, total_players, max_turns, seed, rollout_samples):
     }
 
 
+def _run_single_game_from_kwargs(kwargs):
+    return _run_single_game(**kwargs)
+
+
 def _summarize_results(raw_games):
     wins = Counter()
     errors = Counter()
@@ -181,7 +192,11 @@ def _summarize_results(raw_games):
             errors[result['error']] += 1
 
         for player_name, values in result['ai_decision_ms'].items():
-            key = 'v2' if 'v2' in player_name.lower() else 'v1'
+            lowered = player_name.lower()
+            if 'l2' in lowered or 'level2' in lowered:
+                key = 'level2'
+            else:
+                key = 'level1'
             ai_latency.setdefault(key, []).extend(values)
 
     latency_summary = {}
@@ -213,35 +228,58 @@ def _summarize_results(raw_games):
     }
 
 
-def run_benchmarks(games, players, max_turns, seed, rollout_samples):
-    scenarios = ['v2_vs_v1']
+def run_benchmarks(games, players, max_turns, seed, rollout_samples, jobs=1, scenario='level2_vs_level1'):
+    scenarios = [scenario]
     out = {}
 
     for scenario in scenarios:
-        raw = []
+        requests = []
         for i in range(games):
             game_seed = seed + (100_000 * scenarios.index(scenario)) + i
-            raw.append(
-                _run_single_game(
-                    scenario=scenario,
-                    total_players=players,
-                    max_turns=max_turns,
-                    seed=game_seed,
-                    rollout_samples=rollout_samples,
-                )
+            requests.append(
+                {
+                    'scenario': scenario,
+                    'total_players': players,
+                    'max_turns': max_turns,
+                    'seed': game_seed,
+                    'rollout_samples': rollout_samples,
+                }
             )
+
+        if jobs > 1:
+            max_workers = min(jobs, len(requests))
+            chunksize = max(1, len(requests) // (max_workers * 4))
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                raw = list(executor.map(_run_single_game_from_kwargs,
+                           requests, chunksize=chunksize))
+        else:
+            raw = [_run_single_game_from_kwargs(req) for req in requests]
         out[scenario] = _summarize_results(raw)
 
     return out
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Benchmark Yaniv AI policies.')
-    parser.add_argument('--games', type=int, default=250, help='Games per scenario')
-    parser.add_argument('--players', type=int, default=3, help='Total players per game (2-4)')
-    parser.add_argument('--max-turns', type=int, default=2000, help='Turn cap per game')
+    parser = argparse.ArgumentParser(
+        description='Benchmark Yaniv AI policies.')
+    parser.add_argument('--games', type=int, default=250,
+                        help='Games per scenario')
+    parser.add_argument('--players', type=int, default=3,
+                        help='Total players per game (2-4)')
+    parser.add_argument('--max-turns', type=int,
+                        default=1000, help='Turn cap per game')
     parser.add_argument('--seed', type=int, default=7, help='Base RNG seed')
-    parser.add_argument('--rollout-samples', type=int, default=24, help='Deck rollout samples for v2')
+    parser.add_argument('--rollout-samples', type=int,
+                        default=24, help='Deck rollout samples for level 2')
+    parser.add_argument(
+        '--scenario',
+        type=str,
+        default='level2_vs_level1',
+        choices=['level2_vs_level1'],
+        help='Benchmark scenario',
+    )
+    parser.add_argument('--jobs', type=int, default=1,
+                        help='Parallel worker processes (default: 1)')
     parser.add_argument(
         '--output',
         type=str,
@@ -254,6 +292,7 @@ def parse_args():
 def main():
     args = parse_args()
     players = max(2, min(4, args.players))
+    jobs = max(1, args.jobs)
 
     started = time.perf_counter()
     results = run_benchmarks(
@@ -262,6 +301,8 @@ def main():
         max_turns=max(100, args.max_turns),
         seed=args.seed,
         rollout_samples=max(4, args.rollout_samples),
+        jobs=jobs,
+        scenario=args.scenario,
     )
 
     payload = {
@@ -272,6 +313,8 @@ def main():
             'max_turns': max(100, args.max_turns),
             'seed': args.seed,
             'rollout_samples': max(4, args.rollout_samples),
+            'scenario': args.scenario,
+            'jobs': jobs,
         },
         'runtime_seconds': round(time.perf_counter() - started, 3),
         'results': results,
@@ -286,7 +329,8 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
 
-    print(json.dumps({'written': str(out_path), 'runtime_seconds': payload['runtime_seconds']}, indent=2))
+    print(json.dumps({'written': str(out_path),
+          'runtime_seconds': payload['runtime_seconds']}, indent=2))
 
 
 if __name__ == '__main__':

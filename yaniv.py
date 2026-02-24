@@ -5,9 +5,11 @@ from aiplayer import AIPlayer
 from player import Player
 from card import Card
 
+
 class YanivGame:
-    def __init__(self, players=None):
+    def __init__(self, players=None, rng=None):
         self.game_id = str(uuid.uuid4())
+        self._rng = rng if rng is not None else random
         self.deck = []
         self.discard_pile = []
         self.last_discard = []  # Track the most recent discarded cards separately
@@ -20,7 +22,7 @@ class YanivGame:
             self._create_players(players)
         else:
             self.players = []
-    
+
     def to_dict(self):
         # serialize the essential game state
         return {
@@ -41,7 +43,7 @@ class YanivGame:
             'slamdown_player': self.slamdown_player,
             'slamdown_card': self.slamdown_card._card if self.slamdown_card else None,
         }
-    
+
     @classmethod
     def from_dict(cls, data):
         game = cls()
@@ -51,9 +53,11 @@ class YanivGame:
         players = []
         for player_data in data.get('players', []):
             is_ai = bool(player_data.get('is_ai', False))
-            player = AIPlayer(player_data['name']) if is_ai else Player(player_data['name'])
+            player = AIPlayer(player_data['name']) if is_ai else Player(
+                player_data['name'])
             player.score = player_data.get('score', 0)
-            player.hand = [Card.deserialize(card_data) for card_data in player_data.get('hand', [])]
+            player.hand = [Card.deserialize(card_data)
+                           for card_data in player_data.get('hand', [])]
             players.append(player)
 
         game._create_players(players)
@@ -62,12 +66,15 @@ class YanivGame:
             'previous_scores',
             [player.score for player in game.players],
         )
-        game.discard_pile = [Card.deserialize(card_data) for card_data in data.get('discard_pile', [])]
-        game.last_discard = game.discard_pile[-data.get('last_discard_size', 0):]
+        game.discard_pile = [Card.deserialize(
+            card_data) for card_data in data.get('discard_pile', [])]
+        game.last_discard = game.discard_pile[-data.get(
+            'last_discard_size', 0):]
 
         game._create_deck()
         used_ids = {card._card for card in game.discard_pile}
-        used_ids |= {card._card for player in game.players for card in player.hand}
+        used_ids |= {
+            card._card for player in game.players for card in player.hand}
         game.deck = [card for card in game.deck if card._card not in used_ids]
         game._shuffle_deck()
 
@@ -87,7 +94,7 @@ class YanivGame:
     def start_game(self):
         """
         Start a new game by resetting the deck and discard pile, shuffling the deck, and dealing the cards.
-        
+
         Raises:
             ValueError: If no players have been added to the game.
         """
@@ -100,7 +107,7 @@ class YanivGame:
         for player in self.players:
             if isinstance(player, AIPlayer):
                 player.observe_round(round_info)
-        
+
     def start_turn(self):
         """
         Start a new turn.
@@ -110,7 +117,7 @@ class YanivGame:
             discard_options (list): The list of cards that the current player can draw from the discard pile.
         """
         current_player = self._get_player()
-        current_player.hand.sort() # sort the hand by rank
+        current_player.hand.sort()  # sort the hand by rank
         discard_options = self._get_draw_options()
         return current_player, discard_options
 
@@ -131,7 +138,8 @@ class YanivGame:
             action = player.decide_action()
 
         if not isinstance(action['discard'], list):
-            raise ValueError("Invalid 'discard' action. Must be a list of cards.")
+            raise ValueError(
+                "Invalid 'discard' action. Must be a list of cards.")
 
         # Capture hand identity before draw to detect the newly drawn card
         hand_before_ids = set(id(c) for c in player.hand)
@@ -141,20 +149,25 @@ class YanivGame:
         elif isinstance(action['draw'], int) and action['draw'] >= 0:
             draw_options = self._get_draw_options()
             if action['draw'] < len(draw_options):
-                drawn_card_obj = self._draw_card(player, from_discard=True, draw_option_index=action['draw'])
+                drawn_card_obj = self._draw_card(
+                    player, from_discard=True, draw_option_index=action['draw'])
             else:
-                raise ValueError("Invalid 'draw' action. Index out of range of draw options.")
+                raise ValueError(
+                    "Invalid 'draw' action. Index out of range of draw options.")
         else:
-            raise ValueError("Invalid 'draw' action. Must be 'deck' or a valid index of a card in discard pile.")
+            raise ValueError(
+                "Invalid 'draw' action. Must be 'deck' or a valid index of a card in discard pile.")
 
         # Identify the newly drawn card (for slamdown check and AI observation)
-        newly_drawn = next((c for c in player.hand if id(c) not in hand_before_ids), None)
+        newly_drawn = next((c for c in player.hand if id(c)
+                           not in hand_before_ids), None)
         drawn_card = drawn_card_obj if action['draw'] != 'deck' else None
         self._discard_cards(player, action['discard'])
 
         # Check if a slamdown is possible before advancing the turn
         drew_from_deck = action['draw'] == 'deck'
-        self._check_slamdown(player, action['discard'], newly_drawn, drew_from_deck)
+        self._check_slamdown(
+            player, action['discard'], newly_drawn, drew_from_deck)
 
         # Inform AIPlayers what happened
         for other_player in self.players:
@@ -166,7 +179,8 @@ class YanivGame:
                     "discarded_cards": action['discard'],
                     "drawn_card": drawn_card
                 }
-                other_player.observe_turn(turn_info, self.discard_pile, self._get_draw_options())
+                other_player.observe_turn(
+                    turn_info, self.discard_pile, self._get_draw_options())
 
         self._next_turn()
         return action
@@ -177,7 +191,6 @@ class YanivGame:
         """
         return sum(card.value for card in player.hand) <= 5
 
-    
     def declare_yaniv(self, player):
         """
         Handle a Yaniv declaration by the specified player.
@@ -200,15 +213,17 @@ class YanivGame:
         self.slamdown_player = None
         self.slamdown_card = None
 
-        self.previous_scores = [player.score for player in self.players]  # Update previous scores
-        
+        # Update previous scores
+        self.previous_scores = [player.score for player in self.players]
+
         update_info = self._update_scores(player)
         eliminated_players = [p for p in self.players if p.score > 100]
         for p in eliminated_players:
             self.players.remove(p)
         # After removing eliminated players the index may be out of range; clamp it.
         if self.players:
-            self.current_player_index = self.current_player_index % len(self.players)
+            self.current_player_index = self.current_player_index % len(
+                self.players)
         winner = self._check_end_of_game()
 
         self._deal_new_hand()
@@ -223,18 +238,20 @@ class YanivGame:
     ### Internal Methods ###
     def _create_players(self, players):
         self.players = players
-        self.previous_scores = [0 for _ in players]  # Track previous scores to implement reset rule
-        self.current_player_index = random.randint(0, len(players) - 1) if players else 0
+        # Track previous scores to implement reset rule
+        self.previous_scores = [0 for _ in players]
+        self.current_player_index = self._rng.randint(
+            0, len(players) - 1) if players else 0
 
     def _create_deck(self):
         self.deck = Card.create_deck()
 
     def _shuffle_deck(self):
-        random.shuffle(self.deck)
+        self._rng.shuffle(self.deck)
 
     def _deal_cards(self):
         for player in self.players:
-            player.hand = [] #reset hand
+            player.hand = []  # reset hand
             for _ in range(5):
                 card = self.deck.pop(0)
                 player.hand.append(card)
@@ -258,7 +275,8 @@ class YanivGame:
         return self.players[self.current_player_index]
 
     def _next_turn(self):
-        self.current_player_index = (self.current_player_index + 1) % len(self.players)
+        self.current_player_index = (
+            self.current_player_index + 1) % len(self.players)
 
     def _is_valid_discard(self, cards):
         """Returns True if cards form a legal discard: single card, set (same rank), or run (3+ same suit, consecutive)."""
@@ -293,7 +311,7 @@ class YanivGame:
             player.hand.remove(card)
             self.discard_pile.append(card)
             self.last_discard.append(card)
-    
+
     def _check_slamdown(self, player, discarded_cards, drawn_card, drew_from_deck):
         """After a turn, determine if the player can slamdown their drawn card."""
         self.slamdown_player = None
@@ -311,7 +329,8 @@ class YanivGame:
         if drawn_card is None or len(player.hand) <= 1:
             return
 
-        non_jokers_discarded = [c for c in discarded_cards if c.rank != 'Joker']
+        non_jokers_discarded = [
+            c for c in discarded_cards if c.rank != 'Joker']
 
         # Case 1: Rank match — drawn card same rank as discarded set
         if non_jokers_discarded and drawn_card.rank == non_jokers_discarded[0].rank:
@@ -369,7 +388,8 @@ class YanivGame:
         num_jokers = len(cards) - len(non_joker_cards)
 
         # Calculate the number of Jokers needed to fill in the gaps in the ranks
-        jokers_needed = sum(ranks[i + 1] - ranks[i] - 1 for i in range(len(ranks) - 1))
+        jokers_needed = sum(ranks[i + 1] - ranks[i] -
+                            1 for i in range(len(ranks) - 1))
 
         # Check if the number of available Jokers is enough to fill in the gaps
         has_enough_jokers = jokers_needed <= num_jokers
@@ -386,7 +406,8 @@ class YanivGame:
                 for _ in range(ranks[i + 1] - ranks[i] - 1):
                     sorted_run.append(jokers.pop())
             sorted_run.append(non_joker_cards[-1])
-            sorted_run = jokers + sorted_run  # Add any remaining Jokers to the beginning of the run
+            # Add any remaining Jokers to the beginning of the run
+            sorted_run = jokers + sorted_run
             return sorted_run
         else:
             # If the run is invalid, return False
@@ -408,21 +429,23 @@ class YanivGame:
         return options
 
     def _draw_card(self, player, from_discard=False, draw_option_index=None):
-        #reshuffle if empty deck
+        # reshuffle if empty deck
         if not self.deck:
             # Exclude all cards involved in the last set or run from the reshuffle
             last_set_or_run = list(self.last_discard)
-            self.deck = [card for card in self.discard_pile if card not in last_set_or_run]
+            self.deck = [
+                card for card in self.discard_pile if card not in last_set_or_run]
             self._shuffle_deck()
             self.discard_pile = list(last_set_or_run)
-        
+
         if from_discard:
             if draw_option_index is not None:
                 draw_options = list(self._get_draw_options())
                 if draw_option_index < len(draw_options):
                     card_to_draw = draw_options[draw_option_index]
                     card_index_in_pile = self.discard_pile.index(card_to_draw)
-                    card = self.discard_pile.pop(card_index_in_pile) # remove card
+                    card = self.discard_pile.pop(
+                        card_index_in_pile)  # remove card
                 else:
                     raise ValueError("Invalid discard option index.")
             else:
@@ -434,11 +457,14 @@ class YanivGame:
 
     def _update_scores(self, yaniv_player):
         yaniv_points = sum(card.value for card in yaniv_player.hand)
-        other_players = [player for player in self.players if player != yaniv_player]
-        other_players_points = [sum(card.value for card in player.hand) for player in other_players]
+        other_players = [
+            player for player in self.players if player != yaniv_player]
+        other_players_points = [
+            sum(card.value for card in player.hand) for player in other_players]
 
         min_points = min(other_players_points)
-        min_points_player = other_players[other_players_points.index(min_points)]
+        min_points_player = other_players[other_players_points.index(
+            min_points)]
 
         update_info = {}
 
@@ -450,7 +476,8 @@ class YanivGame:
                     player.score += sum(card.value for card in player.hand)
         else:
             yaniv_player.score += 30
-            update_info['assaf'] = {'assafed_by': min_points_player, 'assafed': yaniv_player}
+            update_info['assaf'] = {
+                'assafed_by': min_points_player, 'assafed': yaniv_player}
 
         update_info['reset_players'] = self._reset_player_scores()
 
@@ -465,7 +492,8 @@ class YanivGame:
         return reset_players
 
     def _check_end_of_game(self):
-        players_with_100_or_fewer = [player for player in self.players if player.score <= 100]
+        players_with_100_or_fewer = [
+            player for player in self.players if player.score <= 100]
         if len(players_with_100_or_fewer) == 1:
             return players_with_100_or_fewer[0]
         else:

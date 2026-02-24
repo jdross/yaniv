@@ -6,9 +6,18 @@ from player import Player, Card
 
 
 class AIPlayer(Player):
-    def __init__(self, name, policy='v2', rollout_samples=24):
+    _FULL_DECK = tuple(Card.create_deck())
+    _MAX_CACHE_ENTRIES = 50_000
+
+    def __init__(self, name, level=2, rollout_samples=24, policy=None):
         super().__init__(name)
-        self.policy = policy if policy in ('v1', 'v2') else 'v2'
+        if policy is not None:
+            level = 1 if policy == 'v1' else 2
+        try:
+            level = int(level)
+        except (TypeError, ValueError):
+            level = 2
+        self.level = 1 if level <= 1 else 2
         self.rollout_samples = max(4, int(rollout_samples))
         self.other_players = {}
         self.draw_options = []
@@ -17,6 +26,8 @@ class AIPlayer(Player):
         # Lightweight caches keyed by hand signature to reduce repeated search work.
         self._discard_options_cache = {}
         self._best_residual_cache = {}
+        self._best_discard_options_cache = {}
+        self._simulate_action_cache = {}
 
     def observe_round(self, round_info):
         """
@@ -30,6 +41,8 @@ class AIPlayer(Player):
         self.public_discard_pile = []
         self._discard_options_cache.clear()
         self._best_residual_cache.clear()
+        self._best_discard_options_cache.clear()
+        self._simulate_action_cache.clear()
         for player_info in round_info:
             if player_info['name'] != self.name:
                 self.other_players[player_info['name']] = {
@@ -76,9 +89,28 @@ class AIPlayer(Player):
 
             self.estimate_hand_values()
 
+    def _cache_set(self, cache, key, value):
+        if len(cache) >= self._MAX_CACHE_ENTRIES:
+            cache.clear()
+        cache[key] = value
+
+    def _active_player_count(self):
+        # other_players tracks everyone except this AI for the current round.
+        return len(self.other_players) + 1
+
+    def _strategy_for_level(self):
+        if self.level == 1:
+            return 'v1'
+        if self._active_player_count() <= 2:
+            return 'v2'
+        return 'v3'
+
     def decide_action(self):
         """Decide what action to take based on the observed game state."""
-        if self.policy == 'v2':
+        strategy = self._strategy_for_level()
+        if strategy == 'v3':
+            return self._decide_action_v3()
+        if strategy == 'v2':
             return self._decide_action_v2()
         return self._decide_action_v1()
 
@@ -103,6 +135,8 @@ class AIPlayer(Player):
                     return reset_action
 
         unseen_cards = self._get_unseen_cards()
+        sampled_cards, deck_variance = self._deck_rollout_context(unseen_cards)
+        known_ranks, known_suit_ranks = self._known_card_indexes()
         threat = self._opponent_threat_score()
         best_action = None
         best_score = float('inf')
@@ -112,17 +146,20 @@ class AIPlayer(Player):
         for discard_option in discard_options:
             post_discard_hand = [
                 card for card in self.hand if card not in discard_option]
-            feed_penalty = self._feed_penalty(discard_option)
+            feed_penalty = self._feed_penalty(
+                discard_option,
+                known_ranks=known_ranks,
+                known_suit_ranks=known_suit_ranks,
+            )
             discard_value = sum(card.value for card in discard_option)
-            joker_discard_penalty = 1.5 * \
-                sum(1 for card in discard_option if card.rank == 'Joker')
-            post_turn_without_draw = sum(
-                card.value for card in post_discard_hand)
+            joker_discard_penalty = 1.5 * sum(
+                1 for card in discard_option if card.rank == 'Joker')
+            post_turn_without_draw = sum(card.value for card in post_discard_hand)
 
             # Known draw options from discard pile.
             for i, draw_card in enumerate(self.draw_options):
                 future_score, _best_discard = self._simulate_action(
-                    post_discard_hand, draw_card)
+                    post_discard_hand, draw_card, prune_to_best_discard=False)
                 immediate_points = post_turn_without_draw + draw_card.value
                 heuristic_cost = (0.06 * threat * immediate_points) + \
                     (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
@@ -135,11 +172,12 @@ class AIPlayer(Player):
                     best_action = {'discard': discard_option, 'draw': i}
 
             # Unknown deck draw.
-            expected_future, expected_immediate, draw_variance = self._evaluate_deck_draw(
+            expected_future, expected_immediate = self._evaluate_deck_draw_samples(
                 post_discard_hand,
-                unseen_cards
+                sampled_cards,
+                prune_to_best_discard=False,
             )
-            uncertainty_cost = 0.04 * math.sqrt(draw_variance) * (1.0 + threat)
+            uncertainty_cost = 0.04 * math.sqrt(deck_variance) * (1.0 + threat)
             heuristic_cost = (0.06 * threat * expected_immediate) + \
                 (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
             action_score = expected_future + heuristic_cost + uncertainty_cost
@@ -154,6 +192,136 @@ class AIPlayer(Player):
             return self.action_to_minimize_score()
         return best_action
 
+    def _decide_action_v3(self):
+        # v3 extends v2 with reset opportunism when an opponent is likely to Yaniv next turn.
+        for player_info in self.other_players.values():
+            if player_info['estimated_score'] <= 5:
+                reset_action = self.action_to_reset()
+                if reset_action is not None:
+                    return reset_action
+
+        unseen_cards = self._get_unseen_cards()
+        sampled_cards, deck_variance = self._deck_rollout_context(unseen_cards)
+        known_ranks, known_suit_ranks = self._known_card_indexes()
+        threat = self._opponent_threat_score()
+        yaniv_next_turn_prob = self._v3_opponent_yaniv_next_turn_probability()
+        best_action = None
+        best_score = float('inf')
+        best_discard_value = -1
+
+        discard_options = self._get_discard_options_cached(self.hand)
+        for discard_option in discard_options:
+            post_discard_hand = [
+                card for card in self.hand if card not in discard_option]
+            feed_penalty = self._feed_penalty(
+                discard_option,
+                known_ranks=known_ranks,
+                known_suit_ranks=known_suit_ranks,
+            )
+            discard_value = sum(card.value for card in discard_option)
+            joker_discard_penalty = 1.5 * sum(
+                1 for card in discard_option if card.rank == 'Joker')
+            post_turn_without_draw = sum(card.value for card in post_discard_hand)
+
+            # Known draw options from discard pile.
+            for i, draw_card in enumerate(self.draw_options):
+                future_score, _best_discard = self._simulate_action(
+                    post_discard_hand, draw_card, prune_to_best_discard=False)
+                immediate_points = post_turn_without_draw + draw_card.value
+                heuristic_cost = (0.06 * threat * immediate_points) + \
+                    (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
+                reset_bonus = self._v3_reset_bonus(
+                    immediate_points, yaniv_next_turn_prob)
+                action_score = future_score + heuristic_cost - reset_bonus
+                if action_score < best_score or (
+                    action_score == best_score and discard_value > best_discard_value
+                ):
+                    best_score = action_score
+                    best_discard_value = discard_value
+                    best_action = {'discard': discard_option, 'draw': i}
+
+            # Unknown deck draw.
+            expected_future, expected_immediate = self._evaluate_deck_draw_samples(
+                post_discard_hand,
+                sampled_cards,
+                prune_to_best_discard=False,
+            )
+            expected_reset_bonus = self._v3_expected_reset_bonus_from_samples(
+                post_turn_without_draw,
+                sampled_cards,
+                yaniv_next_turn_prob,
+            )
+            uncertainty_cost = 0.04 * math.sqrt(deck_variance) * (1.0 + threat)
+            heuristic_cost = (0.06 * threat * expected_immediate) + \
+                (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
+            action_score = expected_future + heuristic_cost + \
+                uncertainty_cost - expected_reset_bonus
+            if action_score < best_score or (
+                action_score == best_score and discard_value > best_discard_value
+            ):
+                best_score = action_score
+                best_discard_value = discard_value
+                best_action = {'discard': discard_option, 'draw': 'deck'}
+
+        if best_action is None:
+            return self.action_to_minimize_score()
+        return best_action
+
+    def _v3_opponent_yaniv_next_turn_probability(self):
+        # Conservative estimate of "someone will likely Yaniv next turn" based on low estimated hands.
+        if not self.other_players:
+            return 0.0
+
+        not_yaniv_prob = 1.0
+        for player_info in self.other_players.values():
+            estimated = player_info.get('estimated_score', 50)
+            hand_count = player_info.get('hand_count', 5)
+
+            if estimated > 6.5:
+                continue
+
+            if estimated <= 5.0:
+                p = 0.55 + (5.0 - estimated) * 0.08
+            else:
+                p = 0.18 + (6.5 - estimated) * 0.25
+
+            if hand_count <= 2:
+                p += 0.10
+            elif hand_count == 3:
+                p += 0.05
+
+            low_known = sum(1 for card in player_info['known_cards'] if card.value <= 3)
+            p += 0.03 * low_known
+            p = min(0.92, max(0.0, p))
+            not_yaniv_prob *= (1.0 - p)
+
+        return 1.0 - not_yaniv_prob
+
+    def _v3_reset_bonus(self, hand_total, yaniv_next_turn_prob):
+        projected_score = self.score + hand_total
+        if projected_score not in (50, 100):
+            return 0.0
+
+        # Opponent must both Yaniv and succeed for this to convert into our reset.
+        if hand_total <= 5:
+            success_factor = 0.25
+        elif hand_total <= 7:
+            success_factor = 0.55
+        else:
+            success_factor = 0.75
+
+        expected_reset_value = 50.0 * yaniv_next_turn_prob * success_factor
+        return min(24.0, expected_reset_value)
+
+    def _v3_expected_reset_bonus_from_samples(self, post_turn_without_draw, sampled_cards, yaniv_next_turn_prob):
+        if not sampled_cards:
+            return 0.0
+        total_bonus = 0.0
+        for draw_card in sampled_cards:
+            hand_total = post_turn_without_draw + draw_card.value
+            total_bonus += self._v3_reset_bonus(hand_total, yaniv_next_turn_prob)
+        return total_bonus / len(sampled_cards)
+
     def action_to_reset(self):
         """
         Returns:
@@ -161,13 +329,13 @@ class AIPlayer(Player):
         """
         # The AI can reset if there is discard and replace with a card it could draw from discard_options,
         # where (drawn card value - discard value + AIPlayer's current score) % 50 = 0.
-        for discard_option in self._get_discard_options():
+        for discard_option in self._get_discard_options_cached(self.hand):
             discard_value = sum(card.value for card in discard_option)
-            for draw_card in self.draw_options:
+            for draw_idx, draw_card in enumerate(self.draw_options):
                 if (discard_value - draw_card.value + self.score) % 50 == 0:
                     return {
                         'discard': discard_option,
-                        'draw': self.draw_options.index(draw_card),
+                        'draw': draw_idx,
                     }
         return None
 
@@ -191,39 +359,47 @@ class AIPlayer(Player):
 
         jokers = [card for card in hand if card.rank == 'Joker']
         non_jokers = [card for card in hand if card.rank != 'Joker']
+        joker_count = len(jokers)
+        rank_index_by_id = {card._card: card.rank_index() for card in hand}
 
         for combo_size in range(2, len(non_jokers) + 1):
             for combo in itertools.combinations(non_jokers, combo_size):
-                if len(set(card.rank for card in combo)) == 1:
-                    for num_jokers in range(len(jokers) + 1):
+                first_rank = combo[0].rank
+                if all(card.rank == first_rank for card in combo):
+                    for num_jokers in range(joker_count + 1):
                         for joker_combo in itertools.combinations(jokers, num_jokers):
                             discard_options.append(
                                 list(combo) + list(joker_combo))
-                elif len(set(card.suit for card in combo)) == 1:
-                    sorted_combo = sorted(
-                        combo, key=lambda card: card.rank_index())
+                    continue
 
+                first_suit = combo[0].suit
+                if all(card.suit == first_suit for card in combo):
+                    sorted_combo = sorted(combo, key=lambda card: rank_index_by_id[card._card])
                     gaps = [
-                        (i, sorted_combo[i + 1].rank_index() -
-                         sorted_combo[i].rank_index() - 1)
+                        (
+                            i,
+                            rank_index_by_id[sorted_combo[i + 1]._card] -
+                            rank_index_by_id[sorted_combo[i]._card] - 1,
+                        )
                         for i in range(len(sorted_combo) - 1)
-                        if sorted_combo[i + 1].rank_index() - sorted_combo[i].rank_index() > 1
+                        if rank_index_by_id[sorted_combo[i + 1]._card] - rank_index_by_id[sorted_combo[i]._card] > 1
                     ]
 
-                    if sum(gap for _, gap in gaps) <= len(jokers):
+                    if sum(gap for _, gap in gaps) <= joker_count:
+                        sorted_combo = list(sorted_combo)
                         joker_index = 0
                         for i, gap in gaps:
                             for _ in range(gap):
-                                if joker_index < len(jokers):
+                                if joker_index < joker_count:
                                     sorted_combo.insert(
                                         i + 1, jokers[joker_index])
                                     joker_index += 1
 
                         remaining_jokers = jokers[joker_index:]
                         for joker in remaining_jokers:
-                            if sorted_combo[0].rank_index() > 1:
+                            if rank_index_by_id[sorted_combo[0]._card] > 1:
                                 discard_options.append([joker] + sorted_combo)
-                            if sorted_combo[-1].rank_index() < 13:
+                            if rank_index_by_id[sorted_combo[-1]._card] < 13:
                                 discard_options.append(sorted_combo + [joker])
 
                         if len(sorted_combo) >= 3:
@@ -236,33 +412,51 @@ class AIPlayer(Player):
         cached = self._discard_options_cache.get(signature)
         if cached is None:
             cached = self._get_discard_options(hand)
-            self._discard_options_cache[signature] = cached
+            self._cache_set(self._discard_options_cache, signature, cached)
         return cached
 
     def _hand_signature(self, hand):
         return tuple(sorted(card._card for card in hand))
 
+    def _get_best_discard_options_cached(self, hand):
+        signature = self._hand_signature(hand)
+        cached = self._best_discard_options_cache.get(signature)
+        if cached is None:
+            discard_options = self._get_discard_options_cached(hand)
+            cached = self._get_best_discard_options(discard_options)
+            self._cache_set(self._best_discard_options_cache, signature, cached)
+        return cached
+
     def _option_value(self, option):
         return sum(card.value for card in option)
 
-    def _simulate_action(self, potential_hand, draw_card):
+    def _simulate_action(self, potential_hand, draw_card, prune_to_best_discard=True):
         # Simulates the score for a specific discard & draw action.
         # Returns the score and the discard options for the best score.
         new_hand = potential_hand + [draw_card]
-        next_discard_options = self._get_discard_options(new_hand)
-        best_next_discard_options = self._get_best_discard_options(
-            next_discard_options)
+        signature = self._hand_signature(new_hand)
+        cache_key = (signature, bool(prune_to_best_discard))
+        cached = self._simulate_action_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if prune_to_best_discard:
+            candidate_discard_options = self._get_best_discard_options_cached(new_hand)
+        else:
+            candidate_discard_options = self._get_discard_options_cached(new_hand)
 
         future_expected_points = float('inf')
         best_next_discard_option = None
-        for discard_option in best_next_discard_options:
+        for discard_option in candidate_discard_options:
             expected_points = self._calculate_new_total_points(
                 new_hand, discard_option)
             if expected_points <= future_expected_points:
                 future_expected_points = expected_points
                 best_next_discard_option = discard_option
 
-        return future_expected_points, best_next_discard_option
+        out = (future_expected_points, best_next_discard_option)
+        self._cache_set(self._simulate_action_cache, cache_key, out)
+        return out
 
     def _get_best_action(self, post_discard_hand):
         best_score = float('inf')
@@ -278,13 +472,12 @@ class AIPlayer(Player):
         return best_draw_card, best_score
 
     def _simulate_next_turn(self):
-        best_discard = self._get_best_discard_options(
-            self._get_discard_options())[0]
+        discard_options = self._get_discard_options_cached(self.hand)
+        best_discard = self._get_best_discard_options(discard_options)[0]
         best_score = sum(card.value for card in self.hand) - \
             sum(card.value for card in best_discard) + 0
         best_draw_card = 'deck'
 
-        discard_options = self._get_discard_options()
         for discard_option in discard_options:
             post_discard_hand = [
                 card for card in self.hand if card not in discard_option]
@@ -331,7 +524,7 @@ class AIPlayer(Player):
         """
         Decide whether to declare Yaniv based on the observed game state and the AI's objective.
         """
-        if self.policy == 'v2':
+        if self._strategy_for_level() in ('v2', 'v3'):
             return self._should_declare_yaniv_v2()
         return self._should_declare_yaniv_v1()
 
@@ -423,7 +616,7 @@ class AIPlayer(Player):
         """
         if num_unknown_cards <= 0:
             return 0
-        if self.policy != 'v2':
+        if self.level == 1:
             return num_unknown_cards * 5
 
         unseen_cards = self._get_unseen_cards()
@@ -438,7 +631,18 @@ class AIPlayer(Player):
             visible_ids.update(
                 card._card for card in player_info['known_cards'])
 
-        return [card for card in Card.create_deck() if card._card not in visible_ids]
+        return [card for card in self._FULL_DECK if card._card not in visible_ids]
+
+    def _known_card_indexes(self):
+        known_ranks = set()
+        known_suit_ranks = {}
+        for player_info in self.other_players.values():
+            for card in player_info['known_cards']:
+                if card.rank == 'Joker':
+                    continue
+                known_ranks.add(card.rank)
+                known_suit_ranks.setdefault(card.suit, set()).add(card.rank_index())
+        return known_ranks, known_suit_ranks
 
     def _mean_and_variance(self, cards):
         if not cards:
@@ -465,29 +669,45 @@ class AIPlayer(Player):
         return seed
 
     def _evaluate_deck_draw(self, post_discard_hand, unseen_cards):
+        sampled_cards, variance = self._deck_rollout_context(unseen_cards)
+        mean_future, mean_immediate = self._evaluate_deck_draw_samples(
+            post_discard_hand, sampled_cards)
+        return mean_future, mean_immediate, variance
+
+    def _deck_rollout_context(self, unseen_cards):
         if not unseen_cards:
+            return [], 8.0
+
+        sample_count = min(self.rollout_samples, len(unseen_cards))
+        if sample_count < len(unseen_cards):
+            rng = random.Random(self._state_seed())
+            sampled_cards = rng.sample(unseen_cards, sample_count)
+        else:
+            sampled_cards = unseen_cards
+
+        _mean_value, variance = self._mean_and_variance(unseen_cards)
+        return sampled_cards, variance
+
+    def _evaluate_deck_draw_samples(self, post_discard_hand, sampled_cards, prune_to_best_discard=True):
+        if not sampled_cards:
             fallback = self._best_residual_points(post_discard_hand)
             immediate = sum(card.value for card in post_discard_hand) + 5.0
-            return fallback, immediate, 8.0
+            return fallback, immediate
 
-        rng = random.Random(self._state_seed())
-        sample_count = min(self.rollout_samples, len(unseen_cards))
-        sampled_cards = rng.sample(unseen_cards, sample_count) if sample_count < len(
-            unseen_cards) else unseen_cards
-
-        future_scores = []
-        immediate_scores = []
+        post_turn_without_draw = sum(card.value for card in post_discard_hand)
+        future_total = 0.0
+        immediate_total = 0.0
         for draw_card in sampled_cards:
             future_score, _best_discard = self._simulate_action(
-                post_discard_hand, draw_card)
-            future_scores.append(future_score)
-            immediate_scores.append(
-                sum(card.value for card in post_discard_hand) + draw_card.value)
+                post_discard_hand,
+                draw_card,
+                prune_to_best_discard=prune_to_best_discard,
+            )
+            future_total += future_score
+            immediate_total += post_turn_without_draw + draw_card.value
 
-        mean_future = sum(future_scores) / len(future_scores)
-        mean_immediate = sum(immediate_scores) / len(immediate_scores)
-        _mean_value, variance = self._mean_and_variance(unseen_cards)
-        return mean_future, mean_immediate, variance
+        sample_size = len(sampled_cards)
+        return future_total / sample_size, immediate_total / sample_size
 
     def _evaluate_candidate_hand(self, hand_after, threat):
         immediate_points = sum(card.value for card in hand_after)
@@ -514,7 +734,7 @@ class AIPlayer(Player):
             if residual < best_residual:
                 best_residual = residual
 
-        self._best_residual_cache[signature] = best_residual
+        self._cache_set(self._best_residual_cache, signature, best_residual)
         return best_residual
 
     def _meld_potential_score(self, hand):
@@ -541,12 +761,9 @@ class AIPlayer(Player):
             threat = max(threat, player_threat)
         return min(1.5, threat)
 
-    def _feed_penalty(self, discard_option):
-        known_cards = [
-            card
-            for player_info in self.other_players.values()
-            for card in player_info['known_cards']
-        ]
+    def _feed_penalty(self, discard_option, known_ranks=None, known_suit_ranks=None):
+        if known_ranks is None or known_suit_ranks is None:
+            known_ranks, known_suit_ranks = self._known_card_indexes()
 
         penalty = 0.0
         for card in discard_option:
@@ -561,14 +778,15 @@ class AIPlayer(Player):
             else:
                 penalty += 0.2
 
-            if any(k.rank == card.rank for k in known_cards if k.rank != 'Joker'):
+            if card.rank in known_ranks:
                 penalty += 1.3
 
-            if any(
-                k.rank != 'Joker'
-                and k.suit == card.suit
-                and abs(k.rank_index() - card.rank_index()) <= 1
-                for k in known_cards
+            card_rank = card.rank_index()
+            suit_ranks = known_suit_ranks.get(card.suit, set())
+            if (
+                card_rank in suit_ranks
+                or (card_rank - 1) in suit_ranks
+                or (card_rank + 1) in suit_ranks
             ):
                 penalty += 0.8
 
