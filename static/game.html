@@ -58,9 +58,6 @@
     <!-- Scores -->
     <div class="score-bar" id="score-bar"></div>
 
-    <!-- Round result banner (Yaniv/Assaf) -->
-    <div id="round-banner" class="round-banner hidden"></div>
-
     <!-- Turn log (last 3 plays, animated) -->
     <div id="turn-log" class="turn-log"></div>
 
@@ -84,7 +81,7 @@
       </div>
     </div>
 
-    <!-- Hand panel: fixed at bottom on mobile -->
+    <!-- Hand panel -->
     <div class="hand-panel">
       <!-- Your hand -->
       <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
@@ -114,8 +111,24 @@
     </div>
   </div>
 
+  <!-- ROUND RESULT MODAL -->
+  <div id="round-result-modal" class="round-result-modal hidden" aria-hidden="true">
+    <div class="round-result-card" role="dialog" aria-modal="true" aria-labelledby="round-result-title">
+      <button id="round-result-close" class="round-result-close" aria-label="Close round summary">✕</button>
+      <h2 id="round-result-title" class="round-result-title">Round Result</h2>
+      <div id="round-result-content" class="round-result-content"></div>
+      <div class="round-result-footer">
+        <button id="round-result-continue" class="btn btn-primary">Continue</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/shared/pid.js"></script>
   <script src="/js/shared/game-logic.js"></script>
-  <script src="/js/game.js"></script>
+  <script src="/js/game/core.js"></script>
+  <script src="/js/game/animations.js"></script>
+  <script src="/js/game/render.js"></script>
+  <script src="/js/game/actions.js"></script>
+  <script src="/js/game/main.js"></script>
 </body>
 </html>

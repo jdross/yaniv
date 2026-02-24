@@ -6,6 +6,7 @@ import queue
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from application import server
+from card import Card
 
 
 class TestServerApi(unittest.TestCase):
@@ -164,6 +165,26 @@ class TestServerApi(unittest.TestCase):
         server._unregister_sse_client(code, pid, q)
 
         self.assertNotIn(code, server.sse_clients)
+
+    def test_yaniv_round_payload_includes_final_hands_before_redeal(self):
+        code = self._create_started_game()
+        room = server.rooms[code]
+        game = room["game"]
+        declarer = game._get_player()
+        opponent = next(p for p in game.players if p is not declarer)
+
+        declarer.hand = [Card("A", "Clubs")]
+        opponent.hand = [Card("K", "Spades"), Card("Q", "Spades")]
+
+        server._apply_yaniv_outcome(room, game, declarer)
+        last_round = room["last_round"]
+
+        changes = {sc["name"]: sc for sc in last_round["score_changes"]}
+        declarer_change = changes[declarer.name]
+        opponent_change = changes[opponent.name]
+
+        self.assertEqual([c["rank"] for c in declarer_change["final_hand"]], ["A"])
+        self.assertEqual([c["rank"] for c in opponent_change["final_hand"]], ["K", "Q"])
 
 
 if __name__ == "__main__":

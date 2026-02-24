@@ -463,7 +463,8 @@ def push_state(code):
 
 
 def format_round_result(update_info, eliminated, declarer_name,
-                        all_players_before, scores_before, declarer_hand_value=0):
+                        all_players_before, scores_before, final_hands_by_name,
+                        declarer_hand_value=0):
     reset_names = set(p.name for p in update_info.get('reset_players', []))
     elim_names  = set(p.name for p in eliminated)
 
@@ -486,12 +487,14 @@ def format_round_result(update_info, eliminated, declarer_name,
         old   = scores_before[p.name]
         net   = p.score - old
         added = net + 50 if p.name in reset_names else net
+        final_hand = final_hands_by_name.get(p.name, [])
         result['score_changes'].append({
             'name':       p.name,
             'added':      added,
             'new_score':  p.score,
             'reset':      p.name in reset_names,
             'eliminated': p.name in elim_names,
+            'final_hand': final_hand,
         })
 
     return result
@@ -542,9 +545,11 @@ def _apply_yaniv_outcome(room, game, declarer):
     hand_val = sum(c.value for c in declarer.hand)
     all_before = list(game.players)
     scores_before = {p.name: p.score for p in game.players}
+    final_hands_by_name = {p.name: [card_to_dict(c) for c in p.hand] for p in game.players}
     update_info, eliminated, winner = game.declare_yaniv(declarer)
     room['last_round'] = format_round_result(
-        update_info, eliminated, declarer.name, all_before, scores_before, hand_val
+        update_info, eliminated, declarer.name, all_before, scores_before,
+        final_hands_by_name, hand_val
     )
     room['round_banner_turns_left'] = len(game.players)
     room['last_turn'] = None

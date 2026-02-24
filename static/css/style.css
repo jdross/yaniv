@@ -8,6 +8,10 @@ body {
   min-height: 100vh;
 }
 
+html, body.game-page {
+  height: 100%;
+}
+
 /* ── Utility ── */
 .hidden { display: none !important; }
 .error-msg { color: #ff9a9a; font-size: .85rem; min-height: 1.2em; margin-top: .4rem; }
@@ -224,16 +228,24 @@ input[type="range"] {
 .join-full-msg { color: rgba(255,255,255,.65); font-size: .85rem; margin-top: .8rem; }
 
 /* ── Game Board ── */
-.game-page { background: #1a5c38; }
+.game-page {
+  background: #1a5c38;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 .board {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100%;
+  height: 100%;
   padding: .6rem .7rem 1rem;
   max-width: 540px;
   margin: 0 auto;
-  gap: .5rem;
+  gap: .45rem;
+  overflow: hidden;
 }
 
 /* Score bar */
@@ -269,16 +281,58 @@ input[type="range"] {
 .score-player .sp-cards { font-size: .7rem; opacity: .6; }
 .score-player.self .sp-name::after { content: ' (you)'; opacity: .6; font-weight: 400; }
 
-/* Round banner (Yaniv/Assaf) */
-.round-banner {
-  background: rgba(0,0,0,.5);
-  border-radius: 10px;
-  padding: .7rem 1rem;
-  font-size: .9rem;
-  line-height: 1.6;
-  text-align: center;
-  border: 1px solid rgba(255,255,255,.2);
+/* Round-result modal */
+.round-result-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vw, 28px);
+  background: rgba(4, 16, 11, .75);
+  backdrop-filter: blur(3px);
 }
+.round-result-card {
+  width: min(760px, 100%);
+  max-height: min(88vh, 820px);
+  overflow-y: auto;
+  background: linear-gradient(160deg, rgba(8, 47, 30, .97), rgba(4, 33, 21, .97));
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  padding: .95rem 1rem 1.05rem;
+  position: relative;
+}
+.round-result-close {
+  position: absolute;
+  top: .55rem;
+  right: .55rem;
+  border: 1px solid rgba(255,255,255,.28);
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.92);
+  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.round-result-close:hover { background: rgba(255,255,255,.15); }
+.round-result-title {
+  font-size: clamp(1.2rem, 2.2vw, 1.45rem);
+  font-weight: 800;
+  text-align: center;
+  margin: .1rem 2.2rem .25rem;
+  color: #f3f7f4;
+}
+.round-result-content { margin-top: .15rem; }
+.round-result-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: .9rem;
+}
+body.round-modal-open { overflow: hidden; }
 
 /* Turn log — last 3 plays stacked, newest on top.
    Fixed height so adding/removing entries never shifts the deck/pile above. */
@@ -286,8 +340,8 @@ input[type="range"] {
   display: flex;
   flex-direction: column;
   gap: .25rem;
-  min-height: 7rem;
-  max-height: 7rem;
+  min-height: 5.8rem;
+  max-height: 5.8rem;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -302,8 +356,12 @@ input[type="range"] {
   border-radius: 8px;
   padding: .4rem .8rem;
   font-size: .82rem;
+  line-height: 1.2;
   color: rgba(255,255,255,.85);
   border-left: 3px solid rgba(244,208,63,.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .turn-log-item:not(:first-child) {
   opacity: .55;
@@ -316,18 +374,79 @@ input[type="range"] {
 .log-red { color: #ff8a80; font-weight: 700; }
 
 /* Round-result banner enrichments */
-.round-headline { font-weight: 600; margin-bottom: .35rem; }
-.round-score-changes { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .25rem; }
-.score-chip {
-  background: rgba(255,255,255,.1);
-  border-radius: 6px;
-  padding: .18rem .45rem;
-  font-size: .76rem;
+.round-headline {
+  font-weight: 700;
+  font-size: clamp(1.1rem, 2.6vw, 1.5rem);
+  line-height: 1.28;
+  text-align: center;
+  margin: .35rem 0 .7rem;
+}
+.round-score-changes {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  margin-top: .35rem;
+  text-align: left;
+}
+.round-player-row {
+  background: rgba(255,255,255,.08);
+  border-left: 3px solid rgba(255,255,255,.2);
+  border-radius: 10px;
+  padding: .65rem .7rem .6rem;
+}
+.round-player-row.reset {
+  background: rgba(244,208,63,.2);
+  border-left-color: rgba(244,208,63,.55);
+}
+.round-player-row.assafed {
+  background: rgba(231,76,60,.2);
+  border-left-color: rgba(231,76,60,.55);
+}
+.round-player-row.elim {
+  background: rgba(0,0,0,.3);
+  border-left-color: rgba(255,255,255,.4);
+  opacity: .85;
+}
+.round-player-name {
+  font-size: 1.06rem;
+  margin-bottom: .18rem;
+}
+.round-player-hand,
+.round-player-score {
+  font-size: .97rem;
+  opacity: .97;
+  display: flex;
+  gap: .55rem;
+  align-items: flex-start;
+  margin-top: .14rem;
+  line-height: 1.35;
+}
+.round-label {
+  min-width: 86px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .68rem;
+  opacity: .72;
+  font-weight: 700;
+  padding-top: .16rem;
+}
+.round-hand-cards {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: .28rem;
+}
+.round-hand-card {
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 999px;
+  padding: .12rem .5rem;
+  font-size: .98rem;
   white-space: nowrap;
 }
-.score-chip.reset   { background: rgba(244,208,63,.2);  border: 1px solid rgba(244,208,63,.35); }
-.score-chip.assafed { background: rgba(231,76,60,.22);  border: 1px solid rgba(231,76,60,.4); }
-.score-chip.elim    { background: rgba(0,0,0,.3); opacity: .7; }
+.round-hand-empty {
+  opacity: .65;
+  font-style: italic;
+}
 
 /* Turn status */
 .turn-status {
@@ -354,7 +473,7 @@ input[type="range"] {
   flex-wrap: wrap;
   gap: .4rem;
   align-items: flex-start;
-  min-height: 90px;
+  min-height: 84px;
 }
 
 /* ── Cards ── */
@@ -503,11 +622,12 @@ input[type="range"] {
 .final-score-row.winner { background: rgba(244,208,63,.2); color: #f4d03f; }
 
 /* ── Hand panel ── */
-/* On desktop the hand panel sits naturally in the board flow */
 .hand-panel {
   display: flex;
   flex-direction: column;
   gap: .35rem;
+  margin-top: auto;
+  min-height: 0;
 }
 
 /* ── Deck-draw flying card animation overlay ────────────────────────────────── */
@@ -568,23 +688,102 @@ input[type="range"] {
   text-shadow: 0 0 40px rgba(255,107,74,.7), 0 4px 16px rgba(0,0,0,.7);
 }
 
-/* Mobile: fix the hand panel to the bottom so it never shifts */
+/* Mobile: full-screen app layout with no page scroll */
 @media (max-width: 600px) {
-  .hand-panel {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: #1a5c38;
-    border-top: 1px solid rgba(255,255,255,.15);
-    padding: .5rem .7rem env(safe-area-inset-bottom, 0px);
-    z-index: 100;
-    gap: .3rem;
+  .round-result-modal {
+    align-items: stretch;
+    padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(10px, env(safe-area-inset-bottom, 0px));
+  }
+  .round-result-card {
+    max-height: 100%;
+    border-radius: 14px;
+    padding: .85rem .85rem .9rem;
+  }
+  .round-player-name { font-size: 1rem; }
+  .round-player-hand,
+  .round-player-score { font-size: .92rem; }
+  .round-label {
+    min-width: 76px;
+    font-size: .64rem;
+  }
+  .round-hand-card { font-size: .93rem; }
+  .round-result-footer .btn { width: 100%; }
+
+  .game-page {
+    min-height: 100dvh;
+    height: 100dvh;
   }
 
-  /* Push board content up so it is not hidden behind the fixed panel */
+  .score-bar {
+    padding: .45rem .5rem;
+    gap: .32rem;
+  }
+  .score-player {
+    padding: .28rem .38rem;
+    font-size: .72rem;
+  }
+  .score-player .sp-score { font-size: .88rem; }
+  .score-player .sp-cards { font-size: .64rem; }
+
+  .hand-panel {
+    position: static;
+    background: transparent;
+    border-top: none;
+    padding: 0 0 env(safe-area-inset-bottom, 0px);
+    gap: .22rem;
+  }
+
   .board {
-    padding-bottom: 230px;
+    padding: .5rem .6rem .55rem;
+    gap: .34rem;
+  }
+
+  .turn-log {
+    gap: .18rem;
+    min-height: 5.05rem;
+    max-height: 5.05rem;
+  }
+  .turn-log-item {
+    padding: .28rem .58rem;
+    font-size: .73rem;
+  }
+  .turn-log-item:not(:first-child) {
+    font-size: .69rem;
+  }
+
+  .turn-status {
+    font-size: .83rem;
+    min-height: 1.2em;
+  }
+
+  .draw-section {
+    padding: .4rem .5rem;
+  }
+  .draw-section-inner {
+    gap: .85rem;
+  }
+
+  .section-label {
+    font-size: .67rem;
+    margin-bottom: .15rem;
+  }
+  .your-hand-label {
+    margin-top: .02rem;
+    margin-bottom: .22rem;
+  }
+
+  .card-row {
+    min-height: 78px;
+    gap: .35rem;
+  }
+
+  .action-bar {
+    margin-top: .2rem;
+    padding-top: .2rem;
+    gap: .45rem;
+  }
+  .action-bar .btn {
+    padding: .6rem 1rem;
   }
 
   /* Hide keyboard shortcut hints on mobile */
@@ -597,5 +796,21 @@ input[type="range"] {
   .card { width: 52px; height: 76px; }
   .deck-choice .deck-icon { width: 52px; height: 76px; font-size: 1.6rem; }
   .logo { font-size: 2.8rem; }
-  .board { padding-bottom: 210px; }
+  .board { padding: .44rem .5rem .5rem; }
+  .turn-log {
+    gap: .14rem;
+    min-height: 4.55rem;
+    max-height: 4.55rem;
+  }
+  .turn-log-item {
+    padding: .24rem .5rem;
+    font-size: .69rem;
+  }
+  .turn-log-item:not(:first-child) {
+    font-size: .66rem;
+  }
+  .card-row {
+    min-height: 74px;
+    gap: .28rem;
+  }
 }
