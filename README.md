@@ -43,3 +43,13 @@ YANIV_DB_TEST_URL=postgresql://jdross@localhost/yaniv python3 -m unittest tests.
 ```
 
 DB integration tests automatically skip when `YANIV_DB_TEST_URL` (or `DATABASE_URL`) is not set or cannot be reached.
+
+### Benchmark AI policies
+
+Run seeded head-to-head benchmarks for `v1` and `v2`:
+
+```bash
+python3 scripts/benchmark_ai.py --games 250 --players 3
+```
+
+Results are written to `metrics/ai_benchmark_<timestamp>.json` by default.

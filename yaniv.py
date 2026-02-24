@@ -137,11 +137,11 @@ class YanivGame:
         hand_before_ids = set(id(c) for c in player.hand)
 
         if action['draw'] == 'deck':
-            self._draw_card(player)
+            drawn_card_obj = self._draw_card(player)
         elif isinstance(action['draw'], int) and action['draw'] >= 0:
             draw_options = self._get_draw_options()
             if action['draw'] < len(draw_options):
-                self._draw_card(player, from_discard=True, draw_option_index=action['draw'])
+                drawn_card_obj = self._draw_card(player, from_discard=True, draw_option_index=action['draw'])
             else:
                 raise ValueError("Invalid 'draw' action. Index out of range of draw options.")
         else:
@@ -149,7 +149,7 @@ class YanivGame:
 
         # Identify the newly drawn card (for slamdown check and AI observation)
         newly_drawn = next((c for c in player.hand if id(c) not in hand_before_ids), None)
-        drawn_card = self.last_discard[action['draw']] if action['draw'] != 'deck' else None
+        drawn_card = drawn_card_obj if action['draw'] != 'deck' else None
         self._discard_cards(player, action['discard'])
 
         # Check if a slamdown is possible before advancing the turn
@@ -411,10 +411,10 @@ class YanivGame:
         #reshuffle if empty deck
         if not self.deck:
             # Exclude all cards involved in the last set or run from the reshuffle
-            last_set_or_run = self.last_discard
+            last_set_or_run = list(self.last_discard)
             self.deck = [card for card in self.discard_pile if card not in last_set_or_run]
             self._shuffle_deck()
-            self.discard_pile = last_set_or_run
+            self.discard_pile = list(last_set_or_run)
         
         if from_discard:
             if draw_option_index is not None:
@@ -430,6 +430,7 @@ class YanivGame:
         else:
             card = self.deck.pop(0)
         player.hand.append(card)
+        return card
 
     def _update_scores(self, yaniv_player):
         yaniv_points = sum(card.value for card in yaniv_player.hand)
