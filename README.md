@@ -12,9 +12,6 @@ A game engine and simple "AI" player for the Yaniv card game
 - Assaf'ed players get 30 points & everyone else gets 0 points
 - Optional slamdowns in human-only games
 
-### Future plans:
-- Make the AI smarter
-
 ### Running tests
 
 Frontend unit tests (Node built-in test runner):

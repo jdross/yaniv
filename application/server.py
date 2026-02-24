@@ -31,6 +31,27 @@ room_locks_guard = threading.Lock()
 rooms_guard = threading.Lock()
 
 
+def _register_sse_client(code, pid, client_queue):
+    with sse_lock:
+        sse_clients.setdefault(code, {})[pid] = client_queue
+
+
+def _unregister_sse_client(code, pid, client_queue):
+    """
+    Remove only the exact SSE queue that was registered by this stream.
+    A reconnect can install a newer queue for the same pid before an older
+    stream's finally-block runs; in that case keep the newer queue.
+    """
+    with sse_lock:
+        clients = sse_clients.get(code)
+        if not clients:
+            return
+        if clients.get(pid) is client_queue:
+            clients.pop(pid, None)
+            if not clients:
+                sse_clients.pop(code, None)
+
+
 def error_response(message, status=400):
     return jsonify({'error': message}), status
 
@@ -598,8 +619,7 @@ def game_page(code):
 @app.route('/api/events/<code_>/<pid>')
 def sse_stream(code_, pid):
     q = queue.Queue(maxsize=50)
-    with sse_lock:
-        sse_clients.setdefault(code_, {})[pid] = q
+    _register_sse_client(code_, pid, q)
 
     def generate():
         try:
@@ -617,9 +637,7 @@ def sse_stream(code_, pid):
                 except queue.Empty:
                     yield ': heartbeat\n\n'
         finally:
-            with sse_lock:
-                if code_ in sse_clients:
-                    sse_clients[code_].pop(pid, None)
+            _unregister_sse_client(code_, pid, q)
 
     return Response(
         stream_with_context(generate()),

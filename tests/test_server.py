@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import queue
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -140,6 +141,29 @@ class TestServerApi(unittest.TestCase):
         )
         self.assertEqual(opt.status_code, 400)
         self.assertIn("error", opt.get_json())
+
+    def test_sse_unregister_old_stream_keeps_new_reconnect(self):
+        code = "abcde"
+        pid = "pid-1"
+        old_q = queue.Queue()
+        new_q = queue.Queue()
+
+        server._register_sse_client(code, pid, old_q)
+        server._register_sse_client(code, pid, new_q)
+        server._unregister_sse_client(code, pid, old_q)
+
+        self.assertIn(code, server.sse_clients)
+        self.assertIs(server.sse_clients[code][pid], new_q)
+
+    def test_sse_unregister_current_stream_removes_client(self):
+        code = "vwxyz"
+        pid = "pid-2"
+        q = queue.Queue()
+
+        server._register_sse_client(code, pid, q)
+        server._unregister_sse_client(code, pid, q)
+
+        self.assertNotIn(code, server.sse_clients)
 
 
 if __name__ == "__main__":
