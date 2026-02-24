@@ -16,7 +16,7 @@ cp .env.example .env
 Useful env vars:
 
 - `PORT` (default: `5174`)
-- `DATABASE_URL` (default: `postgresql://jdross@localhost/yaniv`)
+- `DATABASE_URL` (default: `postgresql://localhost/yaniv`)
 
 If Postgres is unavailable, the app still runs, but persistence is disabled.
 
@@ -53,7 +53,7 @@ python3 python-server/application/server.py
 For production-style startup (Gunicorn):
 
 ```bash
-PORT=5174 npm run server:prod
+PORT=8080 npm run server:prod
 ```
 
 ## Quick test commands

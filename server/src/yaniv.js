@@ -39,7 +39,7 @@ class YanivGame {
     this.current_player_index = 0;
 
     if (players) {
-      this._create_players(players);
+      this._createPlayers(players);
     } else {
       this.players = [];
     }
@@ -59,7 +59,7 @@ class YanivGame {
     return min + Math.floor(this._rand() * (maxInclusive - min + 1));
   }
 
-  to_dict() {
+  toDict() {
     return {
       game_id: this.game_id,
       discard_pile: this.discard_pile.map((card) => card.serialize()),
@@ -77,7 +77,7 @@ class YanivGame {
     };
   }
 
-  static from_dict(data) {
+  static fromDict(data) {
     const game = new YanivGame();
 
     game.game_id = data.game_id || randomUuid();
@@ -91,7 +91,7 @@ class YanivGame {
       players.push(player);
     }
 
-    game._create_players(players);
+    game._createPlayers(players);
     game.current_player_index = data.current_player_index || 0;
     game.previous_scores = data.previous_scores || game.players.map((player) => player.score);
     game.discard_pile = (data.discard_pile || []).map((card_data) => Card.deserialize(card_data));
@@ -99,7 +99,7 @@ class YanivGame {
     const lastDiscardSize = data.last_discard_size || 0;
     game.last_discard = game.discard_pile.slice(-lastDiscardSize);
 
-    game._create_deck();
+    game._createDeck();
     const used_ids = new Set(game.discard_pile.map((card) => card._card));
     for (const player of game.players) {
       for (const card of player.hand) {
@@ -107,7 +107,7 @@ class YanivGame {
       }
     }
     game.deck = game.deck.filter((card) => !used_ids.has(card._card));
-    game._shuffle_deck();
+    game._shuffleDeck();
 
     game.slamdown_player = data.slamdown_player;
     const sdc = data.slamdown_card;
@@ -123,12 +123,22 @@ class YanivGame {
     return game;
   }
 
-  start_game() {
+  // Backward-compatible alias for persisted callers still using snake_case.
+  to_dict() {
+    return this.toDict();
+  }
+
+  // Backward-compatible alias for persisted callers still using snake_case.
+  static from_dict(data) {
+    return this.fromDict(data);
+  }
+
+  startGame() {
     if (!this.players || this.players.length === 0) {
       throw new Error('No players have been added to the game.');
     }
 
-    this._deal_new_hand();
+    this._dealNewHand();
 
     const round_info = this.players.map((player) => ({ name: player.name, score: player.score }));
     for (const player of this.players) {
@@ -138,14 +148,22 @@ class YanivGame {
     }
   }
 
-  start_turn() {
-    const current_player = this._get_player();
-    current_player.hand.sort((a, b) => a._card - b._card);
-    const discard_options = this._get_draw_options();
-    return [current_player, discard_options];
+  start_game() {
+    this.startGame();
   }
 
-  play_turn(player, action = null) {
+  startTurn() {
+    const currentPlayer = this.getCurrentPlayer();
+    currentPlayer.hand.sort((a, b) => a._card - b._card);
+    const drawOptions = this._getDrawOptions();
+    return [currentPlayer, drawOptions];
+  }
+
+  start_turn() {
+    return this.startTurn();
+  }
+
+  playTurn(player, action = null) {
     if (player instanceof AIPlayer) {
       action = player.decide_action();
     }
@@ -158,11 +176,11 @@ class YanivGame {
     let drawn_card_obj;
 
     if (action.draw === 'deck') {
-      drawn_card_obj = this._draw_card(player);
+      drawn_card_obj = this._drawCard(player);
     } else if (Number.isInteger(action.draw) && action.draw >= 0) {
-      const draw_options = this._get_draw_options();
+      const draw_options = this._getDrawOptions();
       if (action.draw < draw_options.length) {
-        drawn_card_obj = this._draw_card(player, true, action.draw);
+        drawn_card_obj = this._drawCard(player, true, action.draw);
       } else {
         throw new Error("Invalid 'draw' action. Index out of range of draw options.");
       }
@@ -172,10 +190,10 @@ class YanivGame {
 
     const newly_drawn = player.hand.find((card) => !hand_before_refs.has(card)) || null;
     const drawn_card = action.draw !== 'deck' ? drawn_card_obj : null;
-    this._discard_cards(player, action.discard);
+    this._discardCards(player, action.discard);
 
     const drew_from_deck = action.draw === 'deck';
-    this._check_slamdown(player, action.discard, newly_drawn, drew_from_deck);
+    this._checkSlamdown(player, action.discard, newly_drawn, drew_from_deck);
 
     for (const other_player of this.players) {
       if (other_player instanceof AIPlayer && other_player !== player) {
@@ -186,19 +204,27 @@ class YanivGame {
           discarded_cards: action.discard,
           drawn_card,
         };
-        other_player.observe_turn(turn_info, this.discard_pile, this._get_draw_options());
+        other_player.observe_turn(turn_info, this.discard_pile, this._getDrawOptions());
       }
     }
 
-    this._next_turn();
+    this._nextTurn();
     return action;
   }
 
-  can_declare_yaniv(player) {
+  play_turn(player, action = null) {
+    return this.playTurn(player, action);
+  }
+
+  canDeclareYaniv(player) {
     return player.hand.reduce((sum, card) => sum + card.value, 0) <= 5;
   }
 
-  declare_yaniv(player) {
+  can_declare_yaniv(player) {
+    return this.canDeclareYaniv(player);
+  }
+
+  declareYaniv(player) {
     if (player.hand.reduce((sum, card) => sum + card.value, 0) > 5) {
       throw new Error('Cannot declare Yaniv with more than 5 points.');
     }
@@ -208,7 +234,7 @@ class YanivGame {
 
     this.previous_scores = this.players.map((p) => p.score);
 
-    const update_info = this._update_scores(player);
+    const update_info = this._updateScores(player);
     const eliminated_players = this.players.filter((p) => p.score > 100);
     this.players = this.players.filter((p) => p.score <= 100);
 
@@ -216,9 +242,9 @@ class YanivGame {
       this.current_player_index = this.current_player_index % this.players.length;
     }
 
-    const winner = this._check_end_of_game();
+    const winner = this._checkEndOfGame();
 
-    this._deal_new_hand();
+    this._dealNewHand();
     const round_info = this.players.map((p) => ({ name: p.name, score: p.score }));
     for (const remainingPlayer of this.players) {
       if (remainingPlayer instanceof AIPlayer) {
@@ -229,17 +255,22 @@ class YanivGame {
     return [update_info, eliminated_players, winner];
   }
 
-  _create_players(players) {
+  declare_yaniv(player) {
+    return this.declareYaniv(player);
+  }
+
+
+  _createPlayers(players) {
     this.players = players;
     this.previous_scores = players.map(() => 0);
     this.current_player_index = players.length > 0 ? this._randint(0, players.length - 1) : 0;
   }
 
-  _create_deck() {
+  _createDeck() {
     this.deck = Card.createDeck();
   }
 
-  _shuffle_deck() {
+  _shuffleDeck() {
     if (this._rng && typeof this._rng.shuffle === 'function') {
       this._rng.shuffle(this.deck);
       return;
@@ -247,16 +278,16 @@ class YanivGame {
     shuffleInPlace(this.deck, this._rand.bind(this));
   }
 
-  _deal_cards() {
+  _dealCards() {
     for (const player of this.players) {
       player.hand = [];
       for (let i = 0; i < 5; i += 1) {
-        const card = this.deck.shift();
+        const card = this.deck.pop();
         player.hand.push(card);
       }
     }
 
-    const first_discard = this.deck.shift();
+    const first_discard = this.deck.pop();
     this.discard_pile.push(first_discard);
     this.last_discard.push(first_discard);
 
@@ -267,23 +298,31 @@ class YanivGame {
     }
   }
 
-  _deal_new_hand() {
+  _dealNewHand() {
     this.discard_pile = [];
     this.last_discard = [];
-    this._create_deck();
-    this._shuffle_deck();
-    this._deal_cards();
+    this._createDeck();
+    this._shuffleDeck();
+    this._dealCards();
   }
 
-  _get_player() {
+  getCurrentPlayer() {
     return this.players[this.current_player_index];
   }
 
-  _next_turn() {
+  _getPlayer() {
+    return this.getCurrentPlayer();
+  }
+
+  _get_player() {
+    return this._getPlayer();
+  }
+
+  _nextTurn() {
     this.current_player_index = (this.current_player_index + 1) % this.players.length;
   }
 
-  _is_valid_discard(cards) {
+  _isValidDiscard(cards) {
     if (cards.length === 1) {
       return true;
     }
@@ -293,17 +332,17 @@ class YanivGame {
       return true;
     }
 
-    if (cards.length >= 3 && this._return_run_if_valid(cards) !== false) {
+    if (cards.length >= 3 && this._returnRunIfValid(cards) !== false) {
       return true;
     }
 
     return false;
   }
 
-  _discard_cards(player, cards) {
+  _discardCards(player, cards) {
     const cardsList = Array.isArray(cards) ? cards : [cards];
 
-    if (!this._is_valid_discard(cardsList)) {
+    if (!this._isValidDiscard(cardsList)) {
       throw new Error(
         'Invalid discard: must be a single card, a set (same rank), or a run (3 or more consecutive cards of the same suit).',
       );
@@ -324,7 +363,7 @@ class YanivGame {
     }
   }
 
-  _check_slamdown(player, discarded_cards, drawn_card, drew_from_deck) {
+  _checkSlamdown(player, discarded_cards, drawn_card, drew_from_deck) {
     this.slamdown_player = null;
     this.slamdown_card = null;
 
@@ -348,7 +387,7 @@ class YanivGame {
       return;
     }
 
-    const run = this._return_run_if_valid(discarded_cards);
+    const run = this._returnRunIfValid(discarded_cards);
     if (run) {
       const non_joker_run = run.filter((card) => card.rank !== 'Joker');
       if (non_joker_run.length > 0 && drawn_card.rank !== 'Joker') {
@@ -366,7 +405,7 @@ class YanivGame {
     }
   }
 
-  perform_slamdown(player) {
+  performSlamdown(player) {
     if (this.slamdown_player !== player.name) {
       throw new Error('No slamdown available for this player.');
     }
@@ -388,7 +427,12 @@ class YanivGame {
     return card;
   }
 
-  _return_run_if_valid(cards) {
+  perform_slamdown(player) {
+    return this.performSlamdown(player);
+  }
+
+
+  _returnRunIfValid(cards) {
     if (cards.length < 3) {
       return false;
     }
@@ -481,9 +525,9 @@ class YanivGame {
     return ordered_run;
   }
 
-  _get_draw_options() {
+  _getDrawOptions() {
     const top_cards = [...this.last_discard];
-    const run = this._return_run_if_valid(top_cards);
+    const run = this._returnRunIfValid(top_cards);
 
     if (run) {
       return [run[0], run[run.length - 1]];
@@ -492,11 +536,11 @@ class YanivGame {
     return top_cards;
   }
 
-  _draw_card(player, from_discard = false, draw_option_index = null) {
+  _drawCard(player, from_discard = false, draw_option_index = null) {
     if (this.deck.length === 0) {
       const last_set_or_run = [...this.last_discard];
       this.deck = this.discard_pile.filter((card) => !containsCard(last_set_or_run, card));
-      this._shuffle_deck();
+      this._shuffleDeck();
       this.discard_pile = [...last_set_or_run];
     }
 
@@ -505,7 +549,7 @@ class YanivGame {
       if (draw_option_index === null || draw_option_index === undefined) {
         throw new Error('Draw option index is required for discard draws.');
       }
-      const draw_options = [...this._get_draw_options()];
+      const draw_options = [...this._getDrawOptions()];
       if (draw_option_index < draw_options.length) {
         const card_to_draw = draw_options[draw_option_index];
         const card_index_in_pile = this.discard_pile.findIndex((c) => c._card === card_to_draw._card);
@@ -517,14 +561,14 @@ class YanivGame {
         throw new Error('Invalid discard option index.');
       }
     } else {
-      card = this.deck.shift();
+      card = this.deck.pop();
     }
 
     player.hand.push(card);
     return card;
   }
 
-  _update_scores(yaniv_player) {
+  _updateScores(yaniv_player) {
     const yaniv_points = yaniv_player.hand.reduce((sum, card) => sum + card.value, 0);
     const other_players = this.players.filter((player) => player !== yaniv_player);
     const other_players_points = other_players.map((player) => player.hand.reduce((sum, card) => sum + card.value, 0));
@@ -548,11 +592,11 @@ class YanivGame {
       };
     }
 
-    update_info.reset_players = this._reset_player_scores();
+    update_info.reset_players = this._resetPlayerScores();
     return update_info;
   }
 
-  _reset_player_scores() {
+  _resetPlayerScores() {
     const reset_players = [];
 
     for (let index = 0; index < this.players.length; index += 1) {
@@ -566,7 +610,7 @@ class YanivGame {
     return reset_players;
   }
 
-  _check_end_of_game() {
+  _checkEndOfGame() {
     const players_with_100_or_fewer = this.players.filter((player) => player.score <= 100);
     if (players_with_100_or_fewer.length === 1) {
       return players_with_100_or_fewer[0];

@@ -116,7 +116,7 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
   const game = new YanivGame(players, gameRng);
 
   try {
-    game.start_game();
+    game.startGame();
   } catch (err) {
     return {
       winner: null,
@@ -144,9 +144,9 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
     turns += 1;
 
     try {
-      const [currentPlayer, drawOptions] = game.start_turn();
+      const [currentPlayer, drawOptions] = game.startTurn();
 
-      if (game.can_declare_yaniv(currentPlayer)) {
+      if (game.canDeclareYaniv(currentPlayer)) {
         let shouldDeclare = false;
         if (currentPlayer instanceof AIPlayer) {
           shouldDeclare = currentPlayer.should_declare_yaniv();
@@ -155,7 +155,7 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
         }
 
         if (shouldDeclare) {
-          const [, , declaredWinner] = game.declare_yaniv(currentPlayer);
+          const [, , declaredWinner] = game.declareYaniv(currentPlayer);
           if (declaredWinner !== null && declaredWinner !== undefined) {
             winner = declaredWinner;
             break;
@@ -165,10 +165,10 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
       }
 
       if (currentPlayer instanceof AIPlayer) {
-        game.play_turn(currentPlayer);
+        game.playTurn(currentPlayer);
       } else {
         const action = randomAction(currentPlayer, drawOptions, rng);
-        game.play_turn(currentPlayer, action);
+        game.playTurn(currentPlayer, action);
       }
     } catch (err) {
       error = `${err.name}: ${err.message}`;
