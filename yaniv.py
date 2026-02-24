@@ -372,45 +372,77 @@ class YanivGame:
         return card
 
     def _return_run_if_valid(self, cards):
-        # Extract all the non-joker cards
-        non_joker_cards = [card for card in cards if card.rank != 'Joker']
+        if len(cards) < 3:
+            return False
 
-        # Check if all non-joker cards have the same suit
+        non_joker_cards = [card for card in cards if card.rank != 'Joker']
+        if not non_joker_cards:
+            return False
+
         if len(set(card.suit for card in non_joker_cards)) > 1:
             return False
 
-        # Get the ranks of the non-joker cards
-        ranks = [card.rank_index() for card in non_joker_cards]
-        ranks.sort()
-
-        # Count the number of jokers
-        num_jokers = len(cards) - len(non_joker_cards)
-
-        # Calculate the number of Jokers needed to fill in the gaps in the ranks
-        jokers_needed = sum(ranks[i + 1] - ranks[i] -
-                            1 for i in range(len(ranks) - 1))
-
-        # Check if the number of available Jokers is enough to fill in the gaps
-        has_enough_jokers = jokers_needed <= num_jokers
-
-        # A valid run needs to be at least 3 cards
-        is_valid_length = len(ranks) + num_jokers >= 3
-
-        if has_enough_jokers and is_valid_length:
-            # If the run is valid, return the sorted run's cards with Jokers in their proper places
-            sorted_run = []
-            jokers = [card for card in cards if card.rank == 'Joker']
-            for i in range(len(ranks) - 1):
-                sorted_run.append(non_joker_cards[i])
-                for _ in range(ranks[i + 1] - ranks[i] - 1):
-                    sorted_run.append(jokers.pop())
-            sorted_run.append(non_joker_cards[-1])
-            # Add any remaining Jokers to the beginning of the run
-            sorted_run = jokers + sorted_run
-            return sorted_run
-        else:
-            # If the run is invalid, return False
+        sorted_non_jokers = sorted(non_joker_cards, key=lambda card: card.rank_index())
+        ranks = [card.rank_index() for card in sorted_non_jokers]
+        if any(ranks[i] == ranks[i + 1] for i in range(len(ranks) - 1)):
             return False
+
+        gaps = [ranks[i + 1] - ranks[i] - 1 for i in range(len(ranks) - 1)]
+        if any(gap < 0 for gap in gaps):
+            return False
+
+        joker_cards = [card for card in cards if card.rank == 'Joker']
+        jokers_needed = sum(gaps)
+        if jokers_needed > len(joker_cards):
+            return False
+
+        leading = 0
+        while leading < len(cards) and cards[leading].rank == 'Joker':
+            leading += 1
+        trailing = 0
+        while trailing < len(cards) - leading and cards[len(cards) - 1 - trailing].rank == 'Joker':
+            trailing += 1
+
+        leading_jokers = list(cards[:leading])
+        trailing_jokers = list(cards[len(cards) - trailing:]) if trailing else []
+        interior_jokers = [
+            card
+            for card in cards[leading:len(cards) - trailing]
+            if card.rank == 'Joker'
+        ]
+
+        gap_jokers = []
+        needed = jokers_needed
+        while needed and interior_jokers:
+            gap_jokers.append(interior_jokers.pop(0))
+            needed -= 1
+        while needed and leading_jokers:
+            # Consume jokers nearest to the center first to preserve edge intent.
+            gap_jokers.append(leading_jokers.pop())
+            needed -= 1
+        while needed and trailing_jokers:
+            # Consume jokers nearest to the center first to preserve edge intent.
+            gap_jokers.append(trailing_jokers.pop(0))
+            needed -= 1
+        if needed:
+            return False
+
+        ordered_run = list(leading_jokers)
+        # Keep extra interior jokers at the low end of the run.
+        ordered_run.extend(interior_jokers)
+
+        gap_idx = 0
+        for i, non_joker in enumerate(sorted_non_jokers):
+            ordered_run.append(non_joker)
+            if i < len(gaps):
+                for _ in range(gaps[i]):
+                    ordered_run.append(gap_jokers[gap_idx])
+                    gap_idx += 1
+
+        ordered_run.extend(trailing_jokers)
+        if len(ordered_run) < 3:
+            return False
+        return ordered_run
 
     def _get_draw_options(self):
         top_cards = self.last_discard[:]

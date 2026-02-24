@@ -165,6 +165,29 @@ class TestYanivGame(unittest.TestCase):
         game.last_discard = [Card('2', 'Hearts'), Card('Joker', 'Spades'), Card('4', 'Hearts')]
         self.assertEqual(game._get_draw_options(), [game.last_discard[0], game.last_discard[-1]])
 
+    def test_get_draw_options_unsorted_run_uses_true_run_edges(self):
+        game = self.game
+        game.last_discard = [
+            Card('4', 'Hearts'),
+            Card('3', 'Hearts'),
+            Card('2', 'Hearts'),
+            Card('5', 'Hearts'),
+        ]
+        options = game._get_draw_options()
+        self.assertEqual(options, [Card('2', 'Hearts'), Card('5', 'Hearts')])
+
+    def test_get_draw_options_run_with_left_edge_joker(self):
+        game = self.game
+        game.last_discard = [Card('Joker', 'Spades'), Card('4', 'Hearts'), Card('5', 'Hearts')]
+        options = game._get_draw_options()
+        self.assertEqual(options, [Card('Joker', 'Spades'), Card('5', 'Hearts')])
+
+    def test_get_draw_options_run_with_right_edge_joker(self):
+        game = self.game
+        game.last_discard = [Card('4', 'Hearts'), Card('5', 'Hearts'), Card('Joker', 'Spades')]
+        options = game._get_draw_options()
+        self.assertEqual(options, [Card('4', 'Hearts'), Card('Joker', 'Spades')])
+
     def test_discard_and_draw(self):
         # Scenario 1: Player discards a card and draws from deck
         self.player1.hand = [Card('10', 'Hearts'), Card('J', 'Diamonds'), Card('Q', 'Spades')]
