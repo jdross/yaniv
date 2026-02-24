@@ -3,3 +3,24 @@ __pycache__/
 *.pyo
 .env
 metrics/
+
+# Node / npm
+node_modules/
+**/node_modules/
+package-lock.json
+**/package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build / test outputs
+dist/
+build/
+coverage/
+.pytest_cache/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
