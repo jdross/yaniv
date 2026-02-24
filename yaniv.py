@@ -17,7 +17,6 @@ class YanivGame:
         self.slamdown_card = None    # Card object that can be slammed down
         self.previous_scores = []
         self.current_player_index = 0
-        self.players = players if players else []
         if players:
             self._create_players(players)
         else:
@@ -439,17 +438,16 @@ class YanivGame:
             self.discard_pile = list(last_set_or_run)
 
         if from_discard:
-            if draw_option_index is not None:
-                draw_options = list(self._get_draw_options())
-                if draw_option_index < len(draw_options):
-                    card_to_draw = draw_options[draw_option_index]
-                    card_index_in_pile = self.discard_pile.index(card_to_draw)
-                    card = self.discard_pile.pop(
-                        card_index_in_pile)  # remove card
-                else:
-                    raise ValueError("Invalid discard option index.")
+            if draw_option_index is None:
+                raise ValueError("Draw option index is required for discard draws.")
+            draw_options = list(self._get_draw_options())
+            if draw_option_index < len(draw_options):
+                card_to_draw = draw_options[draw_option_index]
+                card_index_in_pile = self.discard_pile.index(card_to_draw)
+                card = self.discard_pile.pop(
+                    card_index_in_pile)  # remove card
             else:
-                card = self.discard_pile.pop()
+                raise ValueError("Invalid discard option index.")
         else:
             card = self.deck.pop(0)
         player.hand.append(card)

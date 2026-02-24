@@ -25,8 +25,8 @@ class RandomPolicyPlayer(Player):
 
 
 class TimedAIPlayer(AIPlayer):
-    def __init__(self, name, level=1, rollout_samples=24):
-        super().__init__(name=name, level=level, rollout_samples=rollout_samples)
+    def __init__(self, name, rollout_samples=24):
+        super().__init__(name=name, rollout_samples=rollout_samples)
         self.decision_times_ms = []
 
     def decide_action(self):
@@ -76,14 +76,10 @@ def _build_players(scenario, total_players, rollout_samples):
     players = []
     label_by_name = {}
 
-    if scenario == 'level2_vs_level1':
-        ai_l2 = TimedAIPlayer('AI-L2', level=2,
-                              rollout_samples=rollout_samples)
-        ai_l1 = TimedAIPlayer('AI-L1', level=1,
-                              rollout_samples=rollout_samples)
-        players.extend([ai_l2, ai_l1])
-        label_by_name[ai_l2.name] = 'level2'
-        label_by_name[ai_l1.name] = 'level1'
+    if scenario == 'modern_vs_random':
+        ai = TimedAIPlayer('AI-Modern', rollout_samples=rollout_samples)
+        players.append(ai)
+        label_by_name[ai.name] = 'modern'
     else:
         raise ValueError(f'Unsupported scenario: {scenario}')
 
@@ -191,13 +187,8 @@ def _summarize_results(raw_games):
         if result['error']:
             errors[result['error']] += 1
 
-        for player_name, values in result['ai_decision_ms'].items():
-            lowered = player_name.lower()
-            if 'l2' in lowered or 'level2' in lowered:
-                key = 'level2'
-            else:
-                key = 'level1'
-            ai_latency.setdefault(key, []).extend(values)
+        for _player_name, values in result['ai_decision_ms'].items():
+            ai_latency.setdefault('modern', []).extend(values)
 
     latency_summary = {}
     for key, values in ai_latency.items():
@@ -228,7 +219,7 @@ def _summarize_results(raw_games):
     }
 
 
-def run_benchmarks(games, players, max_turns, seed, rollout_samples, jobs=1, scenario='level2_vs_level1'):
+def run_benchmarks(games, players, max_turns, seed, rollout_samples, jobs=1, scenario='modern_vs_random'):
     scenarios = [scenario]
     out = {}
 
@@ -274,8 +265,8 @@ def parse_args():
     parser.add_argument(
         '--scenario',
         type=str,
-        default='level2_vs_level1',
-        choices=['level2_vs_level1'],
+        default='modern_vs_random',
+        choices=['modern_vs_random'],
         help='Benchmark scenario',
     )
     parser.add_argument('--jobs', type=int, default=1,

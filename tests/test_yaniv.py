@@ -150,7 +150,7 @@ class TestYanivGame(unittest.TestCase):
     def test_get_draw_options_set(self):
         # Test with a set in the last discarded cards
         self.game.last_discard = [Card('2', 'Hearts'), Card('2', 'Diamonds'), Card('2', 'Clubs')]
-        self.assertEqual(self.game._get_draw_options().sort(), self.game.last_discard.sort())
+        self.assertCountEqual(self.game._get_draw_options(), self.game.last_discard)
 
     def test_get_draw_options_run(self):
         # Test with a run in the last discarded cards
@@ -199,14 +199,19 @@ class TestYanivGame(unittest.TestCase):
         self.player2.score = 10
         self.assertTrue(self.game._check_end_of_game())
 
-        #elimation
+        # Three-player elimination flow.
         player3 = Player("Player 3")
         self.game = YanivGame([self.player1, self.player2, player3])
         self.player1.score = 70
         self.player2.score = 90
         player3.score = 90
-        self.game
-        
+        self.assertIsNone(self.game._check_end_of_game())
+
+        self.player2.score = 120
+        self.assertIsNone(self.game._check_end_of_game())
+
+        player3.score = 140
+        self.assertEqual(self.game._check_end_of_game(), self.player1)
 
     def test_run(self):
         # Scenario 3: Player discards a run and draws from deck
@@ -243,6 +248,7 @@ class TestYanivGame(unittest.TestCase):
     def test_play_turn(self):
         self.game.start_game()
         current_player, discard_options = self.game.start_turn()
+        valid_discard = [current_player.hand[0]]
         
         # Test discard validation
         with self.assertRaises(ValueError):
@@ -250,10 +256,10 @@ class TestYanivGame(unittest.TestCase):
         
         # Test draw validation
         with self.assertRaises(ValueError):
-            self.game.play_turn(current_player, {'discard': [], 'draw': "not 'deck' or an int"})
+            self.game.play_turn(current_player, {'discard': valid_discard, 'draw': "not 'deck' or an int"})
         
         with self.assertRaises(ValueError):
-            self.game.play_turn(current_player, {'discard': [], 'draw': len(discard_options)})
+            self.game.play_turn(current_player, {'discard': valid_discard, 'draw': len(discard_options)})
 
     def test_slamdown_allowed_after_deck_draw(self):
         self.player1.hand = [Card('7', 'Hearts'), Card('3', 'Clubs'), Card('4', 'Diamonds')]
@@ -325,8 +331,5 @@ class TestYanivGame(unittest.TestCase):
         self.assertIn(self.player2, update_info['reset_players'])
         self.assertEqual(self.player2.score, 0)
     
-    def tearDown(self):
-        pass
-
 if __name__ == '__main__':
     unittest.main()

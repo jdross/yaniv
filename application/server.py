@@ -79,12 +79,8 @@ def _with_room_lock(code):
 DB_URL = os.getenv('DATABASE_URL', 'postgresql://jdross@localhost/yaniv')
 _pool  = None   # ThreadedConnectionPool, set by _init_db()
 
-# All schema in one idempotent migration block
-_MIGRATION_SQL = """
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER NOT NULL
-);
-
+# Fresh schema for clean server initialization.
+_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS rooms (
     code       TEXT PRIMARY KEY,
     status     TEXT NOT NULL DEFAULT 'waiting',
@@ -109,11 +105,7 @@ CREATE TABLE IF NOT EXISTS game_state (
     options                 JSONB NOT NULL DEFAULT '{}',
     updated_at              TIMESTAMPTZ DEFAULT now()
 );
-
-ALTER TABLE game_state ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';
 """
-
-_SCHEMA_VERSION = 2
 
 
 @contextmanager
@@ -132,15 +124,10 @@ def _get_db():
         _pool.putconn(conn)
 
 
-def _run_migrations():
+def _ensure_schema():
     with _get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute(_MIGRATION_SQL)
-            cur.execute('SELECT COUNT(*) FROM schema_version')
-            if cur.fetchone()[0] == 0:
-                cur.execute('INSERT INTO schema_version VALUES (%s)', (_SCHEMA_VERSION,))
-            else:
-                cur.execute('UPDATE schema_version SET version = %s', (_SCHEMA_VERSION,))
+            cur.execute(_SCHEMA_SQL)
 
 
 def _cleanup_stale_rooms():
@@ -167,14 +154,14 @@ def _cleanup_stale_rooms():
 
 
 def _init_db():
-    """Connect to Postgres, migrate, and load existing rooms into memory."""
+    """Connect to Postgres, ensure schema, and load existing rooms into memory."""
     global _pool
     if not HAS_PSYCOPG2:
         print('[DB] psycopg2 not installed — running without persistence')
         return
     try:
         _pool = ThreadedConnectionPool(2, 10, DB_URL)
-        _run_migrations()
+        _ensure_schema()
         _cleanup_stale_rooms()
         _load_rooms()
         print(f'[DB] Initialised — {len(rooms)} room(s) restored')
@@ -187,16 +174,6 @@ def _init_db():
     except Exception as exc:
         print(f'[DB] Init failed — running without persistence: {exc}')
         _pool = None
-
-
-# ── Serialisation helpers ──────────────────────────────────────────────────────
-
-def game_to_json(game):
-    return game.to_dict()
-
-
-def game_from_json(data):
-    return YanivGame.from_dict(data)
 
 
 # ── Persistence helpers ────────────────────────────────────────────────────────
@@ -262,7 +239,7 @@ def save_room(code):
                         )
 
                     # Upsert game state
-                    game_json = _as_json(game_to_json(room['game'])) if room['game'] else None
+                    game_json = _as_json(room['game'].to_dict()) if room['game'] else None
                     cur.execute(
                         """
                         INSERT INTO game_state
@@ -319,7 +296,7 @@ def _load_rooms():
                 game = None
                 if gs and gs[0] is not None:
                     try:
-                        game = game_from_json(_parse_jsonish(gs[0]))
+                        game = YanivGame.from_dict(_parse_jsonish(gs[0]))
                     except Exception as exc:
                         print(f'[DB] Could not restore game {code}: {exc}')
                 room = _new_room(

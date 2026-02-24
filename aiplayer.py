@@ -1,33 +1,38 @@
 import itertools
 import math
 import random
+from collections import OrderedDict
+from dataclasses import dataclass
 
-from player import Player, Card
+from player import Player
+from card import Card
+
+
+@dataclass(frozen=True)
+class ActionContext:
+    sampled_cards: list
+    deck_variance: float
+    known_ranks: set
+    known_suit_ranks: dict
+    threat: float
+    yaniv_next_turn_prob: float
 
 
 class AIPlayer(Player):
     _FULL_DECK = tuple(Card.create_deck())
     _MAX_CACHE_ENTRIES = 50_000
 
-    def __init__(self, name, level=2, rollout_samples=24, policy=None):
+    def __init__(self, name, rollout_samples=24):
         super().__init__(name)
-        if policy is not None:
-            level = 1 if policy == 'v1' else 2
-        try:
-            level = int(level)
-        except (TypeError, ValueError):
-            level = 2
-        self.level = 1 if level <= 1 else 2
         self.rollout_samples = max(4, int(rollout_samples))
         self.other_players = {}
         self.draw_options = []
         self.public_discard_pile = []
 
-        # Lightweight caches keyed by hand signature to reduce repeated search work.
-        self._discard_options_cache = {}
-        self._best_residual_cache = {}
-        self._best_discard_options_cache = {}
-        self._simulate_action_cache = {}
+        self._discard_options_cache = OrderedDict()
+        self._best_residual_cache = OrderedDict()
+        self._best_discard_options_cache = OrderedDict()
+        self._simulate_action_cache = OrderedDict()
 
     def observe_round(self, round_info):
         """
@@ -77,197 +82,126 @@ class AIPlayer(Player):
                     self.other_players[player_name]['known_cards'].remove(card)
 
             if drawn_card is not None:
-                if isinstance(drawn_card, int):
-                    # Legacy wire format can send draw-option index.
-                    if 0 <= drawn_card < len(draw_options):
-                        drawn_card = draw_options[drawn_card]
-                    else:
-                        drawn_card = None
-                if drawn_card is not None:
-                    self.other_players[player_name]['known_cards'].append(
-                        drawn_card)
+                self.other_players[player_name]['known_cards'].append(drawn_card)
 
             self.estimate_hand_values()
 
     def _cache_set(self, cache, key, value):
-        if len(cache) >= self._MAX_CACHE_ENTRIES:
-            cache.clear()
+        if key in cache:
+            cache.pop(key)
+        elif len(cache) >= self._MAX_CACHE_ENTRIES:
+            cache.popitem(last=False)
         cache[key] = value
 
-    def _active_player_count(self):
-        # other_players tracks everyone except this AI for the current round.
-        return len(self.other_players) + 1
-
-    def _strategy_for_level(self):
-        if self.level == 1:
-            return 'v1'
-        if self._active_player_count() <= 2:
-            return 'v2'
-        return 'v3'
+    def _cache_get(self, cache, key):
+        value = cache.get(key)
+        if value is None:
+            return None
+        cache.move_to_end(key)
+        return value
 
     def decide_action(self):
         """Decide what action to take based on the observed game state."""
-        strategy = self._strategy_for_level()
-        if strategy == 'v3':
-            return self._decide_action_v3()
-        if strategy == 'v2':
-            return self._decide_action_v2()
-        return self._decide_action_v1()
-
-    def _decide_action_v1(self):
-        # First, check if the AI estimates that another player is going to declare Yaniv on their next turn
-        # and the AI can perform an action so their hand sums to a score that would allow them to reset.
         for player_info in self.other_players.values():
             if player_info['estimated_score'] <= 5:
                 reset_action = self.action_to_reset()
                 if reset_action is not None:
                     return reset_action
 
-        # If not, play to win the hand with the lowest score.
-        return self.action_to_minimize_score()
-
-    def _decide_action_v2(self):
-        # Preserve reset opportunism from v1, then evaluate all legal actions by EV.
-        for player_info in self.other_players.values():
-            if player_info['estimated_score'] <= 5:
-                reset_action = self.action_to_reset()
-                if reset_action is not None:
-                    return reset_action
-
-        unseen_cards = self._get_unseen_cards()
-        sampled_cards, deck_variance = self._deck_rollout_context(unseen_cards)
-        known_ranks, known_suit_ranks = self._known_card_indexes()
-        threat = self._opponent_threat_score()
+        context = self._build_action_context()
         best_action = None
         best_score = float('inf')
         best_discard_value = -1
 
-        discard_options = self._get_discard_options_cached(self.hand)
-        for discard_option in discard_options:
-            post_discard_hand = [
-                card for card in self.hand if card not in discard_option]
-            feed_penalty = self._feed_penalty(
-                discard_option,
-                known_ranks=known_ranks,
-                known_suit_ranks=known_suit_ranks,
-            )
-            discard_value = sum(card.value for card in discard_option)
-            joker_discard_penalty = 1.5 * sum(
-                1 for card in discard_option if card.rank == 'Joker')
-            post_turn_without_draw = sum(card.value for card in post_discard_hand)
-
-            # Known draw options from discard pile.
-            for i, draw_card in enumerate(self.draw_options):
-                future_score, _best_discard = self._simulate_action(
-                    post_discard_hand, draw_card, prune_to_best_discard=False)
-                immediate_points = post_turn_without_draw + draw_card.value
-                heuristic_cost = (0.06 * threat * immediate_points) + \
-                    (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
-                action_score = future_score + heuristic_cost
-                if action_score < best_score or (
-                    action_score == best_score and discard_value > best_discard_value
-                ):
-                    best_score = action_score
-                    best_discard_value = discard_value
-                    best_action = {'discard': discard_option, 'draw': i}
-
-            # Unknown deck draw.
-            expected_future, expected_immediate = self._evaluate_deck_draw_samples(
-                post_discard_hand,
-                sampled_cards,
-                prune_to_best_discard=False,
-            )
-            uncertainty_cost = 0.04 * math.sqrt(deck_variance) * (1.0 + threat)
-            heuristic_cost = (0.06 * threat * expected_immediate) + \
-                (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
-            action_score = expected_future + heuristic_cost + uncertainty_cost
+        for action, action_score, discard_value in self._iter_candidate_actions(context):
             if action_score < best_score or (
                 action_score == best_score and discard_value > best_discard_value
             ):
                 best_score = action_score
                 best_discard_value = discard_value
-                best_action = {'discard': discard_option, 'draw': 'deck'}
+                best_action = action
 
         if best_action is None:
             return self.action_to_minimize_score()
         return best_action
 
-    def _decide_action_v3(self):
-        # v3 extends v2 with reset opportunism when an opponent is likely to Yaniv next turn.
-        for player_info in self.other_players.values():
-            if player_info['estimated_score'] <= 5:
-                reset_action = self.action_to_reset()
-                if reset_action is not None:
-                    return reset_action
-
+    def _build_action_context(self):
         unseen_cards = self._get_unseen_cards()
         sampled_cards, deck_variance = self._deck_rollout_context(unseen_cards)
         known_ranks, known_suit_ranks = self._known_card_indexes()
         threat = self._opponent_threat_score()
-        yaniv_next_turn_prob = self._v3_opponent_yaniv_next_turn_probability()
-        best_action = None
-        best_score = float('inf')
-        best_discard_value = -1
+        yaniv_next_turn_prob = self._opponent_yaniv_next_turn_probability()
+        return ActionContext(
+            sampled_cards=sampled_cards,
+            deck_variance=deck_variance,
+            known_ranks=known_ranks,
+            known_suit_ranks=known_suit_ranks,
+            threat=threat,
+            yaniv_next_turn_prob=yaniv_next_turn_prob,
+        )
 
+    def _iter_candidate_actions(self, context):
         discard_options = self._get_discard_options_cached(self.hand)
         for discard_option in discard_options:
             post_discard_hand = [
                 card for card in self.hand if card not in discard_option]
+            post_turn_without_draw = sum(card.value for card in post_discard_hand)
+            discard_value = sum(card.value for card in discard_option)
             feed_penalty = self._feed_penalty(
                 discard_option,
-                known_ranks=known_ranks,
-                known_suit_ranks=known_suit_ranks,
+                known_ranks=context.known_ranks,
+                known_suit_ranks=context.known_suit_ranks,
             )
-            discard_value = sum(card.value for card in discard_option)
             joker_discard_penalty = 1.5 * sum(
                 1 for card in discard_option if card.rank == 'Joker')
-            post_turn_without_draw = sum(card.value for card in post_discard_hand)
 
-            # Known draw options from discard pile.
             for i, draw_card in enumerate(self.draw_options):
                 future_score, _best_discard = self._simulate_action(
                     post_discard_hand, draw_card, prune_to_best_discard=False)
                 immediate_points = post_turn_without_draw + draw_card.value
-                heuristic_cost = (0.06 * threat * immediate_points) + \
-                    (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
-                reset_bonus = self._v3_reset_bonus(
-                    immediate_points, yaniv_next_turn_prob)
+                heuristic_cost = self._heuristic_action_cost(
+                    threat=context.threat,
+                    immediate_points=immediate_points,
+                    feed_penalty=feed_penalty,
+                    joker_discard_penalty=joker_discard_penalty,
+                )
+                reset_bonus = self._reset_bonus(
+                    immediate_points,
+                    context.yaniv_next_turn_prob,
+                )
                 action_score = future_score + heuristic_cost - reset_bonus
-                if action_score < best_score or (
-                    action_score == best_score and discard_value > best_discard_value
-                ):
-                    best_score = action_score
-                    best_discard_value = discard_value
-                    best_action = {'discard': discard_option, 'draw': i}
+                yield {'discard': discard_option, 'draw': i}, action_score, discard_value
 
-            # Unknown deck draw.
             expected_future, expected_immediate = self._evaluate_deck_draw_samples(
                 post_discard_hand,
-                sampled_cards,
+                context.sampled_cards,
                 prune_to_best_discard=False,
             )
-            expected_reset_bonus = self._v3_expected_reset_bonus_from_samples(
+            expected_reset_bonus = self._expected_reset_bonus_from_samples(
                 post_turn_without_draw,
-                sampled_cards,
-                yaniv_next_turn_prob,
+                context.sampled_cards,
+                context.yaniv_next_turn_prob,
             )
-            uncertainty_cost = 0.04 * math.sqrt(deck_variance) * (1.0 + threat)
-            heuristic_cost = (0.06 * threat * expected_immediate) + \
-                (0.12 * feed_penalty) + (0.08 * joker_discard_penalty)
+            uncertainty_cost = 0.04 * \
+                math.sqrt(context.deck_variance) * (1.0 + context.threat)
+            heuristic_cost = self._heuristic_action_cost(
+                threat=context.threat,
+                immediate_points=expected_immediate,
+                feed_penalty=feed_penalty,
+                joker_discard_penalty=joker_discard_penalty,
+            )
             action_score = expected_future + heuristic_cost + \
                 uncertainty_cost - expected_reset_bonus
-            if action_score < best_score or (
-                action_score == best_score and discard_value > best_discard_value
-            ):
-                best_score = action_score
-                best_discard_value = discard_value
-                best_action = {'discard': discard_option, 'draw': 'deck'}
+            yield {'discard': discard_option, 'draw': 'deck'}, action_score, discard_value
 
-        if best_action is None:
-            return self.action_to_minimize_score()
-        return best_action
+    def _heuristic_action_cost(self, threat, immediate_points, feed_penalty, joker_discard_penalty):
+        return (
+            (0.06 * threat * immediate_points)
+            + (0.12 * feed_penalty)
+            + (0.08 * joker_discard_penalty)
+        )
 
-    def _v3_opponent_yaniv_next_turn_probability(self):
+    def _opponent_yaniv_next_turn_probability(self):
         # Conservative estimate of "someone will likely Yaniv next turn" based on low estimated hands.
         if not self.other_players:
             return 0.0
@@ -297,7 +231,7 @@ class AIPlayer(Player):
 
         return 1.0 - not_yaniv_prob
 
-    def _v3_reset_bonus(self, hand_total, yaniv_next_turn_prob):
+    def _reset_bonus(self, hand_total, yaniv_next_turn_prob):
         projected_score = self.score + hand_total
         if projected_score not in (50, 100):
             return 0.0
@@ -313,13 +247,13 @@ class AIPlayer(Player):
         expected_reset_value = 50.0 * yaniv_next_turn_prob * success_factor
         return min(24.0, expected_reset_value)
 
-    def _v3_expected_reset_bonus_from_samples(self, post_turn_without_draw, sampled_cards, yaniv_next_turn_prob):
+    def _expected_reset_bonus_from_samples(self, post_turn_without_draw, sampled_cards, yaniv_next_turn_prob):
         if not sampled_cards:
             return 0.0
         total_bonus = 0.0
         for draw_card in sampled_cards:
             hand_total = post_turn_without_draw + draw_card.value
-            total_bonus += self._v3_reset_bonus(hand_total, yaniv_next_turn_prob)
+            total_bonus += self._reset_bonus(hand_total, yaniv_next_turn_prob)
         return total_bonus / len(sampled_cards)
 
     def action_to_reset(self):
@@ -409,7 +343,7 @@ class AIPlayer(Player):
 
     def _get_discard_options_cached(self, hand):
         signature = self._hand_signature(hand)
-        cached = self._discard_options_cache.get(signature)
+        cached = self._cache_get(self._discard_options_cache, signature)
         if cached is None:
             cached = self._get_discard_options(hand)
             self._cache_set(self._discard_options_cache, signature, cached)
@@ -420,15 +354,12 @@ class AIPlayer(Player):
 
     def _get_best_discard_options_cached(self, hand):
         signature = self._hand_signature(hand)
-        cached = self._best_discard_options_cache.get(signature)
+        cached = self._cache_get(self._best_discard_options_cache, signature)
         if cached is None:
             discard_options = self._get_discard_options_cached(hand)
             cached = self._get_best_discard_options(discard_options)
             self._cache_set(self._best_discard_options_cache, signature, cached)
         return cached
-
-    def _option_value(self, option):
-        return sum(card.value for card in option)
 
     def _simulate_action(self, potential_hand, draw_card, prune_to_best_discard=True):
         # Simulates the score for a specific discard & draw action.
@@ -436,7 +367,7 @@ class AIPlayer(Player):
         new_hand = potential_hand + [draw_card]
         signature = self._hand_signature(new_hand)
         cache_key = (signature, bool(prune_to_best_discard))
-        cached = self._simulate_action_cache.get(cache_key)
+        cached = self._cache_get(self._simulate_action_cache, cache_key)
         if cached is not None:
             return cached
 
@@ -524,19 +455,6 @@ class AIPlayer(Player):
         """
         Decide whether to declare Yaniv based on the observed game state and the AI's objective.
         """
-        if self._strategy_for_level() in ('v2', 'v3'):
-            return self._should_declare_yaniv_v2()
-        return self._should_declare_yaniv_v1()
-
-    def _should_declare_yaniv_v1(self):
-        own_hand_value = sum(card.value for card in self.hand)
-        if own_hand_value > 5:
-            return False
-        if all(player_info['estimated_score'] > own_hand_value for player_info in self.other_players.values()):
-            return True
-        return False
-
-    def _should_declare_yaniv_v2(self):
         own_hand_value = sum(card.value for card in self.hand)
         if own_hand_value > 5:
             return False
@@ -547,7 +465,6 @@ class AIPlayer(Player):
         unseen = self._get_unseen_cards()
         mean_value, var_value = self._mean_and_variance(unseen)
 
-        assaf_risk = 0.0
         not_assaf_prob = 1.0
         for player_info in self.other_players.values():
             p = self._estimate_assaf_probability(
@@ -587,37 +504,28 @@ class AIPlayer(Player):
 
     def estimate_hand_values(self):
         """Estimate the hand values for the other players."""
-        all_known_cards = [
-            card
-            for other in self.other_players.values()
-            for card in other['known_cards']
-        ]
-
         for player_info in self.other_players.values():
             unknown_cards_count = player_info['hand_count'] - \
                 len(player_info['known_cards'])
             estimated_unknown_card_score = self.estimate_unknown_cards(
-                unknown_cards_count, all_known_cards)
+                unknown_cards_count)
             player_info['estimated_score'] = (
                 sum(card.value for card in player_info['known_cards']
                     ) + estimated_unknown_card_score
             )
 
-    def estimate_unknown_cards(self, num_unknown_cards, known_cards):
+    def estimate_unknown_cards(self, num_unknown_cards):
         """
         Estimate the expected score contribution of unknown cards.
 
         Args:
             num_unknown_cards (int): The number of hidden cards to estimate.
-            known_cards (list): Known public cards (kept for compatibility; not used directly in v1).
 
         Returns:
             float: Estimated summed value of unknown cards.
         """
         if num_unknown_cards <= 0:
             return 0
-        if self.level == 1:
-            return num_unknown_cards * 5
 
         unseen_cards = self._get_unseen_cards()
         mean_value, _var_value = self._mean_and_variance(unseen_cards)
@@ -668,12 +576,6 @@ class AIPlayer(Player):
             seed = (seed * 16777619) & 0xFFFFFFFF
         return seed
 
-    def _evaluate_deck_draw(self, post_discard_hand, unseen_cards):
-        sampled_cards, variance = self._deck_rollout_context(unseen_cards)
-        mean_future, mean_immediate = self._evaluate_deck_draw_samples(
-            post_discard_hand, sampled_cards)
-        return mean_future, mean_immediate, variance
-
     def _deck_rollout_context(self, unseen_cards):
         if not unseen_cards:
             return [], 8.0
@@ -690,9 +592,9 @@ class AIPlayer(Player):
 
     def _evaluate_deck_draw_samples(self, post_discard_hand, sampled_cards, prune_to_best_discard=True):
         if not sampled_cards:
-            fallback = self._best_residual_points(post_discard_hand)
+            baseline_residual = self._best_residual_points(post_discard_hand)
             immediate = sum(card.value for card in post_discard_hand) + 5.0
-            return fallback, immediate
+            return baseline_residual, immediate
 
         post_turn_without_draw = sum(card.value for card in post_discard_hand)
         future_total = 0.0
@@ -709,20 +611,9 @@ class AIPlayer(Player):
         sample_size = len(sampled_cards)
         return future_total / sample_size, immediate_total / sample_size
 
-    def _evaluate_candidate_hand(self, hand_after, threat):
-        immediate_points = sum(card.value for card in hand_after)
-        best_residual = self._best_residual_points(hand_after)
-        meld_potential = self._meld_potential_score(hand_after)
-
-        # Lower is better.
-        score = 0.68 * immediate_points + 0.32 * best_residual
-        score -= 0.45 * meld_potential
-        score += 0.30 * threat * immediate_points
-        return score
-
     def _best_residual_points(self, hand):
         signature = self._hand_signature(hand)
-        cached = self._best_residual_cache.get(signature)
+        cached = self._cache_get(self._best_residual_cache, signature)
         if cached is not None:
             return cached
 
@@ -736,17 +627,6 @@ class AIPlayer(Player):
 
         self._cache_set(self._best_residual_cache, signature, best_residual)
         return best_residual
-
-    def _meld_potential_score(self, hand):
-        options = self._get_discard_options_cached(hand)
-        combo_options = [opt for opt in options if len(opt) >= 2]
-        if not combo_options:
-            return 0.0
-
-        longest = max(len(opt) for opt in combo_options)
-        strongest = max(sum(card.value for card in opt)
-                        for opt in combo_options)
-        return (0.7 * longest) + (0.1 * strongest)
 
     def _opponent_threat_score(self):
         threat = 0.0

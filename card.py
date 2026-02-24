@@ -45,13 +45,6 @@ class Card:
     def serialize(self):
         return self._card
 
-    def to_dict(self):
-        return self.serialize()
-
-    @classmethod
-    def from_dict(cls, data):
-        return cls.deserialize(data)
-
     @staticmethod
     def deserialize(card):
         return Card(card)

@@ -13,8 +13,8 @@ from card import Card
 class TestSerialization(unittest.TestCase):
     def test_card_round_trip(self):
         card = Card("Q", "Hearts")
-        data = card.to_dict()
-        rebuilt = Card.from_dict(data)
+        data = card.serialize()
+        rebuilt = Card.deserialize(data)
         self.assertEqual(card, rebuilt)
 
     def test_game_round_trip_preserves_players_and_state(self):

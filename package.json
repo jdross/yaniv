@@ -6,6 +6,8 @@
     "test": "npm run test:frontend",
     "test:frontend": "node --test tests/frontend/*.test.js",
     "test:python": "python3 -m unittest discover -s tests -v",
-    "test:db": "python3 -m unittest tests.test_db_integration -v"
+    "test:db": "python3 -m unittest tests.test_db_integration -v",
+    "server:dev": "python3 application/server.py",
+    "server:prod": "gunicorn --workers 4 --threads 8 --bind 0.0.0.0:${PORT:-5174} application.server:app"
   }
 }

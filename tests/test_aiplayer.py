@@ -6,29 +6,22 @@ class TestAIPlayer(unittest.TestCase):
     def setUp(self):
         self.aiplayer = AIPlayer("AI")
 
-    def test_level_one_strategy_selection(self):
-        ai = AIPlayer("AI-L1", level=1)
+    def test_estimate_unknown_cards_returns_zero_when_no_unknowns(self):
+        ai = AIPlayer("AI")
         ai.observe_round([
-            {'name': 'AI-L1', 'score': 0},
+            {'name': 'AI', 'score': 0},
             {'name': 'P2', 'score': 0},
-            {'name': 'P3', 'score': 0},
         ])
-        self.assertEqual(ai._strategy_for_level(), 'v1')
+        self.assertEqual(ai.estimate_unknown_cards(0), 0)
 
-    def test_level_two_strategy_selection_by_player_count(self):
-        ai = AIPlayer("AI-L2", level=2)
+    def test_estimate_unknown_cards_positive_for_hidden_cards(self):
+        ai = AIPlayer("AI")
+        ai.hand = [Card('2', 'Hearts')]
         ai.observe_round([
-            {'name': 'AI-L2', 'score': 0},
+            {'name': 'AI', 'score': 0},
             {'name': 'P2', 'score': 0},
         ])
-        self.assertEqual(ai._strategy_for_level(), 'v2')
-
-        ai.observe_round([
-            {'name': 'AI-L2', 'score': 0},
-            {'name': 'P2', 'score': 0},
-            {'name': 'P3', 'score': 0},
-        ])
-        self.assertEqual(ai._strategy_for_level(), 'v3')
+        self.assertGreater(ai.estimate_unknown_cards(2), 0)
 
     # Testing discard options validation
 
@@ -185,9 +178,6 @@ class TestAIPlayer(unittest.TestCase):
         self.aiplayer.draw_options = self.aiplayer.discard_pile
         action = self.aiplayer._simulate_next_turn()
         self.assertNotEqual(action['draw'], 'deck')
-        # self.assertEqual(action['draw'], 1)
-        # self.assertEqual(action['points'], 0)
-        # TODO Fix this. should drop run and take the king; currently drops 9 then tries to complete the dropped run
     
     def test_simulate_next_turn_complete_run_drop(self):
         """ Draw against a complete run """
@@ -226,7 +216,6 @@ class TestAIPlayer(unittest.TestCase):
         self.assertEqual(action['points'], 0)
 
     def test_simulate_next_turn_joker_2(self):
-        # TODO Smarter play would discard the Q, take the Jack (keep joker protected)
         self.aiplayer.hand = [Card('Joker', 'Spades'), Card('Q', 'Hearts'), Card('K', 'Hearts')]
         self.aiplayer.discard_pile = [Card('J', 'Spades')]
         self.aiplayer.draw_options = self.aiplayer.discard_pile
@@ -241,7 +230,7 @@ class TestAIPlayer(unittest.TestCase):
         self.aiplayer.draw_options = self.aiplayer.discard_pile
         action = self.aiplayer._simulate_next_turn()
         self.assertEqual(action['draw'], 0)
-        self.assertEqual(action['discard'], [Card('9', 'Hearts')]) # TODO: Should discard King, Keep 9
+        self.assertEqual(action['discard'], [Card('9', 'Hearts')])
         self.assertEqual(action['points'], 0)
 
     def test_simulate_action(self):
