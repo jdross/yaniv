@@ -55,14 +55,11 @@
 
   <!-- GAME BOARD -->
   <div id="board" class="board hidden">
-    <!-- Scores -->
-    <div class="score-bar" id="score-bar"></div>
+    <!-- Opponents (other players only) -->
+    <div class="opponents-bar" id="score-bar"></div>
 
     <!-- Turn log (last 3 plays, animated) -->
     <div id="turn-log" class="turn-log"></div>
-
-    <!-- Turn status -->
-    <div id="turn-status" class="turn-status"></div>
 
     <!-- Draw section — always visible; interactive only on your turn -->
     <div id="draw-section" class="draw-section">
@@ -83,8 +80,14 @@
 
     <!-- Hand panel -->
     <div class="hand-panel">
-      <!-- Your hand -->
-      <div class="section-label your-hand-label">Your hand <span id="hand-value" class="hand-value"></span></div>
+      <!-- Your hand header with score info -->
+      <div class="hand-panel-top">
+        <div class="section-label your-hand-label">Your hand</div>
+        <div class="my-score-info">
+          <span id="hand-value" class="hand-value"></span>
+          <span id="my-game-score" class="my-game-score"></span>
+        </div>
+      </div>
       <div id="hand" class="card-row hand-row"></div>
 
       <!-- Key hints -->

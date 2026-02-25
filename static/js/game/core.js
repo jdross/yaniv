@@ -4,7 +4,6 @@ const pid  = getYanivPid();
 const { sortHand, suitSymbol, cardColor, validateDiscard } = window.YanivGameLogic;
 
 const UI_TEXT = {
-  turnPrompt: 'Your turn. Select cards to discard and where to draw.',
   waitingHand: '<span style="opacity:.5;font-size:.85rem">Waiting for your hand…</span>',
 };
 
@@ -59,7 +58,6 @@ const $startBtn     = document.getElementById('start-btn');
 const $slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
 const $scoreBar     = document.getElementById('score-bar');
 const $turnLog      = document.getElementById('turn-log');
-const $turnStatus   = document.getElementById('turn-status');
 const $drawSection  = document.getElementById('draw-section');
 const $drawOptions  = document.getElementById('draw-options');
 const $deckBtn      = document.getElementById('deck-btn');
@@ -67,6 +65,7 @@ const $deckSizeLabel = document.getElementById('deck-size-label');
 const $pileHint     = document.getElementById('pile-hint');
 const $hand         = document.getElementById('hand');
 const $handValue    = document.getElementById('hand-value');
+const $myGameScore  = document.getElementById('my-game-score');
 const $yanivBtn     = document.getElementById('yaniv-btn');
 const $slamdownBtn  = document.getElementById('slamdown-btn');
 const $playBtn      = document.getElementById('play-btn');

@@ -251,38 +251,68 @@ input[type="range"] {
   overflow: visible;
 }
 
-/* Score bar */
-.score-bar {
+/* Opponents bar — fanned card hands */
+.opponents-bar {
   display: flex;
-  gap: .4rem;
+  gap: .6rem;
+  justify-content: center;
   flex-wrap: wrap;
-  padding: .5rem .6rem;
-  background: rgba(0,0,0,.3);
-  border-radius: 10px;
+  padding: .3rem .4rem;
 }
-.score-player {
-  flex: 1 1 auto;
-  text-align: center;
-  padding: .35rem .5rem;
-  border-radius: 7px;
-  font-size: .78rem;
-  background: rgba(255,255,255,.07);
-  transition: background .3s;
+
+.opponent-player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+  min-width: 60px;
+}
+
+.opp-info { text-align: center; line-height: 1.25; }
+
+.opp-name {
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.opp-score { font-size: .88rem; font-weight: 800; color: #f4d03f; }
+.opp-cards { font-size: .65rem; opacity: .6; }
+
+/* Fanned card-back representation */
+.player-fan {
+  position: relative;
+  width: 60px;
+  height: 52px;
+}
+
+.fan-card {
+  position: absolute;
+  width: 32px;
+  height: 46px;
+  background: linear-gradient(135deg, #1a3a6e, #0d2240);
+  border-radius: 4px;
+  box-shadow: 0 1px 5px rgba(0,0,0,.45);
+  transform-origin: bottom center;
+  bottom: 0;
+  left: 50%;
+  margin-left: -16px;
 }
 
 @keyframes pulse-current {
   0%, 100% { box-shadow: 0 0 0 0 rgba(244,208,63,.5); }
   50%       { box-shadow: 0 0 0 5px rgba(244,208,63,0); }
 }
-.score-player.current {
-  background: rgba(244,208,63,.2);
-  border: 1px solid rgba(244,208,63,.5);
+
+/* Current player — fan cards get a gold glow */
+.opponent-player.current .fan-card {
+  border: 1px solid rgba(244,208,63,.6);
+  box-shadow: 0 1px 5px rgba(0,0,0,.45), 0 0 8px rgba(244,208,63,.35);
   animation: pulse-current 1.6s ease-in-out infinite;
 }
-.score-player .sp-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
-.score-player .sp-score { font-size: .95rem; font-weight: 800; color: #f4d03f; }
-.score-player .sp-cards { font-size: .7rem; opacity: .6; }
-.score-player.self .sp-name::after { content: ' (you)'; opacity: .6; font-weight: 400; }
 
 /* Round-result modal */
 .round-result-modal {
@@ -451,14 +481,6 @@ body.round-modal-open { overflow: hidden; }
   font-style: italic;
 }
 
-/* Turn status */
-.turn-status {
-  text-align: center;
-  font-size: .9rem;
-  opacity: .85;
-  min-height: 1.4em;
-}
-
 /* Section labels */
 .section-label {
   font-size: .72rem;
@@ -467,8 +489,25 @@ body.round-modal-open { overflow: hidden; }
   opacity: .55;
   margin-bottom: .25rem;
 }
-.your-hand-label { margin-top: .3rem; margin-bottom: 10px; }
-.hand-value { font-size: .8rem; opacity: .7; margin-left: .3rem; }
+.your-hand-label { margin-top: .3rem; margin-bottom: 0; }
+
+/* Hand panel top row: label left, score info right */
+.hand-panel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: .3rem;
+}
+
+.my-score-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .05rem;
+}
+
+.hand-value { font-size: .8rem; opacity: .7; }
+.my-game-score { font-size: .8rem; font-weight: 700; color: #f4d03f; }
 
 /* Card rows */
 .card-row {
@@ -725,16 +764,40 @@ body.round-modal-open { overflow: hidden; }
     overflow: hidden;
   }
 
-  .score-bar {
-    padding: .45rem .5rem;
-    gap: .32rem;
+  .opponents-bar {
+    gap: .4rem;
+    padding: .2rem .3rem;
   }
-  .score-player {
-    padding: .28rem .38rem;
-    font-size: .72rem;
+  .opp-name { font-size: .7rem; }
+  .opp-score { font-size: .82rem; }
+  .opp-cards { font-size: .6rem; }
+  .player-fan { width: 52px; height: 46px; }
+  .fan-card { width: 28px; height: 40px; margin-left: -14px; }
+
+  /* Deck/pile floats in the center of the screen on mobile */
+  .draw-section {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    width: auto;
+    max-width: calc(100vw - 2rem);
+    background: rgba(8, 40, 25, 0.96);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.55);
+    padding: .6rem .8rem;
   }
-  .score-player .sp-score { font-size: .88rem; }
-  .score-player .sp-cards { font-size: .64rem; }
+
+  /* Turn log fills the flex gap left by the fixed draw section */
+  .turn-log {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
 
   .hand-panel {
     position: static;
@@ -749,11 +812,6 @@ body.round-modal-open { overflow: hidden; }
     gap: .34rem;
   }
 
-  .turn-log {
-    gap: .18rem;
-    min-height: 5.05rem;
-    max-height: 5.05rem;
-  }
   .turn-log-item {
     padding: .28rem .58rem;
     font-size: .73rem;
@@ -762,14 +820,6 @@ body.round-modal-open { overflow: hidden; }
     font-size: .69rem;
   }
 
-  .turn-status {
-    font-size: .83rem;
-    min-height: 1.2em;
-  }
-
-  .draw-section {
-    padding: .4rem .5rem;
-  }
   .draw-section-inner {
     gap: .85rem;
   }
@@ -777,10 +827,6 @@ body.round-modal-open { overflow: hidden; }
   .section-label {
     font-size: .67rem;
     margin-bottom: .15rem;
-  }
-  .your-hand-label {
-    margin-top: .02rem;
-    margin-bottom: .22rem;
   }
 
   .card-row {
@@ -808,11 +854,6 @@ body.round-modal-open { overflow: hidden; }
   .deck-choice .deck-icon { width: 52px; height: 76px; font-size: 1.6rem; }
   .logo { font-size: 2.8rem; }
   .board { padding: .44rem .5rem .5rem; }
-  .turn-log {
-    gap: .14rem;
-    min-height: 4.55rem;
-    max-height: 4.55rem;
-  }
   .turn-log-item {
     padding: .24rem .5rem;
     font-size: .69rem;

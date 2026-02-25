@@ -101,7 +101,18 @@ function isValidDiscard(ids) {
 
 function updatePlayBtn() {
   const g = state && state.game;
-  if (!g || !g.is_my_turn || actionInFlight) { $playBtn.disabled = true; return; }
+  if (!g) { $playBtn.disabled = true; $playBtn.textContent = 'Play turn'; return; }
+
+  if (!g.is_my_turn || actionInFlight) {
+    if (!g.is_my_turn) {
+      const cur = g.players.find(p => p.is_current);
+      $playBtn.textContent = cur ? `${cur.name}'s turn` : 'Waiting…';
+    }
+    $playBtn.disabled = true;
+    return;
+  }
+
+  $playBtn.textContent = 'Play turn';
   if (!selectedCards.length) { $playBtn.disabled = true; clearError(); return; }
 
   const { valid, reason } = isValidDiscard(selectedCards);

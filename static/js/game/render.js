@@ -54,31 +54,39 @@ function showLobby(s) {
   }
 }
 
+function fanHtml(cardCount) {
+  if (cardCount === 0) return '<div class="player-fan"></div>';
+  const n = Math.min(cardCount, 10);
+  const maxAngle = Math.min(35, n * 7);
+  const cards = Array.from({ length: n }, (_, i) => {
+    const angle = n === 1 ? 0 : -maxAngle + (i * 2 * maxAngle / (n - 1));
+    return `<div class="fan-card" style="transform:rotate(${angle.toFixed(1)}deg)"></div>`;
+  }).join('');
+  return `<div class="player-fan">${cards}</div>`;
+}
+
 function showBoard(s) {
   showScreen($board);
 
   const g  = s.game;
   const me = getSelfPlayer(s);
 
-  // Scores.
-  $scoreBar.innerHTML = g.players.map(p =>
-    `<div class="score-player ${p.is_current ? 'current' : ''} ${p.is_self ? 'self' : ''}">
-       <div class="sp-name">${esc(p.name)}</div>
-       <div class="sp-score">${p.score}</div>
-       <div class="sp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
-     </div>`
-  ).join('');
+  // Opponents bar — only other players, shown as fanned card hands.
+  $scoreBar.innerHTML = g.players
+    .filter(p => !p.is_self)
+    .map(p =>
+      `<div class="opponent-player ${p.is_current ? 'current' : ''}">
+         <div class="opp-info">
+           <div class="opp-name">${esc(p.name)}</div>
+           <div class="opp-score">${p.score}</div>
+           <div class="opp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
+         </div>
+         ${fanHtml(p.hand_count)}
+       </div>`
+    ).join('');
 
   // Turn log (last 3 plays, animated).
   renderTurnLog(s.last_turn, s.last_round);
-
-  // Turn status — only shown when it's your turn.
-  if (g.is_my_turn) {
-    $turnStatus.textContent = UI_TEXT.turnPrompt;
-    show($turnStatus);
-  } else {
-    hide($turnStatus);
-  }
 
   // Draw section — always visible; interactive only on your turn.
   show($drawSection);
@@ -106,7 +114,8 @@ function showBoard(s) {
        </div>`;
     }).join('');
 
-    $handValue.textContent = `(${me.hand.reduce((sum, c) => sum + c.value, 0)} pts)`;
+    $handValue.textContent = `${me.hand.reduce((sum, c) => sum + c.value, 0)} pts`;
+    $myGameScore.textContent = `${me.score}/100`;
 
     // Always attach click handlers — cards can be pre-selected while waiting.
     $hand.querySelectorAll('.card').forEach(el => {
@@ -118,6 +127,7 @@ function showBoard(s) {
   } else {
     $hand.innerHTML = UI_TEXT.waitingHand;
     $handValue.textContent = '';
+    $myGameScore.textContent = '';
     hide($yanivBtn);
     hide($slamdownBtn);
   }
