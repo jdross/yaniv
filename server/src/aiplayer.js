@@ -618,23 +618,6 @@ class AIPlayer extends Player {
     return assaf_risk <= risk_threshold;
   }
 
-  _evaluate_elimination_potential() {
-    // Returns a bonus for calling Yaniv if it would eliminate opponents (push past 100)
-    let bonus = 0;
-    for (const player_info of Object.values(this.other_players)) {
-      const opponent_score = player_info.current_score;
-      const estimated_hand = player_info.estimated_score ?? 50;
-      const new_score = opponent_score + estimated_hand;
-
-      if (new_score > 100) {
-        bonus += 3.0;
-      } else if (new_score > 85) {
-        bonus += 0.8;
-      }
-    }
-    return Math.min(5.0, bonus);
-  }
-
   _evaluate_yaniv_reset_impact() {
     // Returns a penalty for calling Yaniv if it would give opponents a beneficial reset
     let penalty = 0;
