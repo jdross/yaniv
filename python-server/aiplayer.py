@@ -489,11 +489,6 @@ class AIPlayer(Player):
         if not self.other_players:
             return own_hand_value <= 2
 
-        # Check for assaf hunting opportunity: if an opponent is likely to call Yaniv
-        # soon and our hand would assaf them, wait instead of calling ourselves.
-        if self._should_wait_for_assaf(own_hand_value):
-            return False
-
         unseen = self._get_unseen_cards()
         mean_value, var_value = self._mean_and_variance(unseen)
 
@@ -525,43 +520,6 @@ class AIPlayer(Player):
         risk_threshold = max(0.03, risk_threshold)
 
         return assaf_risk <= risk_threshold
-
-    def _should_wait_for_assaf(self, own_hand_value):
-        """If an opponent is about to call Yaniv and we'd assaf them, wait.
-        IMPORTANT: We must still play a turn (discard+draw), so our hand will change.
-        Only wait if we can likely maintain a low enough hand through the mandatory trade.
-        """
-        for player_info in self.other_players.values():
-            estimated = player_info.get('estimated_score', 50)
-            hand_count = player_info.get('hand_count', 5)
-
-            if estimated > 5.5 or hand_count > 3:
-                continue
-            if own_hand_value > estimated:
-                continue
-
-            confidence = 0.0
-            if hand_count <= 1:
-                confidence = 0.7
-            elif hand_count <= 2:
-                confidence = 0.5
-            else:
-                confidence = 0.25
-
-            if estimated <= 3:
-                confidence += 0.15
-
-            # Estimate post-trade hand value: we must discard+draw.
-            max_card_value = max((c.value for c in self.hand), default=0)
-            min_post_discard = own_hand_value - max_card_value
-            # Conservative estimate: post-trade ≈ min_post_discard + 3
-            estimated_post_trade = min_post_discard + 3
-
-            # Only wait if post-trade hand would still likely assaf them.
-            # Very conservative: only when we have 0-1 points (near-zero risk of hand rising above theirs).
-            if confidence >= 0.45 and own_hand_value <= 1 and estimated_post_trade <= estimated:
-                return True
-        return False
 
     def _evaluate_elimination_potential(self):
         """Returns a bonus for calling Yaniv if it would eliminate opponents."""

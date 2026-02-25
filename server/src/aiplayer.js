@@ -585,12 +585,6 @@ class AIPlayer extends Player {
       return own_hand_value <= 2;
     }
 
-    // Check for assaf hunting opportunity: if an opponent is likely to call Yaniv
-    // soon and our hand would assaf them, wait instead of calling ourselves.
-    if (this._should_wait_for_assaf(own_hand_value)) {
-      return false;
-    }
-
     const unseen = this._get_unseen_cards();
     const [mean_value, var_value] = this._mean_and_variance(unseen);
 
@@ -622,48 +616,6 @@ class AIPlayer extends Player {
     risk_threshold = Math.max(0.03, risk_threshold);
 
     return assaf_risk <= risk_threshold;
-  }
-
-  _should_wait_for_assaf(own_hand_value) {
-    // If an opponent is estimated close to calling Yaniv and we'd assaf them,
-    // it's better to wait (+30 penalty to them) than to call ourselves (0 to us).
-    // IMPORTANT: We must still play a turn (discard+draw), so our hand will change.
-    // Only wait if we can likely maintain a low enough hand through the mandatory trade.
-    for (const player_info of Object.values(this.other_players)) {
-      const estimated = player_info.estimated_score ?? 50;
-      const hand_count = player_info.hand_count ?? 5;
-
-      // Opponent likely to call Yaniv soon?
-      if (estimated > 5.5 || hand_count > 3) continue;
-
-      // Would we assaf them? (our hand <= their hand when they call)
-      if (own_hand_value > estimated) continue;
-
-      // Confidence that they'll actually call: higher when few cards, low estimate
-      let confidence = 0;
-      if (hand_count <= 1) confidence = 0.7;
-      else if (hand_count <= 2) confidence = 0.5;
-      else confidence = 0.25;
-
-      if (estimated <= 3) confidence += 0.15;
-
-      // Estimate post-trade hand value: we must discard+draw.
-      // Best case: discard highest card, draw a low card.
-      // Check if we can maintain a hand that still assafs the opponent.
-      const max_card_value = Math.max(...this.hand.map((c) => c.value));
-      const min_post_discard = own_hand_value - max_card_value;
-      // After drawing, expected hand = min_post_discard + average_draw_value.
-      // With unseen cards averaging ~5, our hand would be roughly min_post_discard + 5.
-      // But we might draw from discard pile too. Be conservative: estimate post-trade ≈ min_post_discard + 3.
-      const estimated_post_trade = min_post_discard + 3;
-
-      // Only wait if post-trade hand would still likely assaf them.
-      // Very conservative: only when we have 0-1 points (near-zero risk of our hand rising above theirs).
-      if (confidence >= 0.45 && own_hand_value <= 1 && estimated_post_trade <= estimated) {
-        return true;
-      }
-    }
-    return false;
   }
 
   _evaluate_elimination_potential() {
