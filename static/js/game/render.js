@@ -5,6 +5,7 @@ function showJoin(s) {
   resetRoundResultState();
   showScreen($joinScreen);
   $joinCode.textContent = s.code;
+  $joinError.textContent = '';
 
   $joinPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
@@ -14,12 +15,45 @@ function showJoin(s) {
   ).join('');
 
   const humanCount = s.members.filter(m => !m.isAi).length;
+  if (s.status === 'playing') {
+    hide($joinForm);
+    hide($joinFullMsg);
+    show($joinStartedMsg);
+    $joinStartedMsg.textContent = 'Game in progress. Select a player to continue.';
+
+    const humanPlayers = s.members.filter(m => !m.isAi);
+    const prevSelectedPid = $joinPlayerSelect.value;
+    $joinPlayerSelect.innerHTML = humanPlayers.map((member) => {
+      const turnSuffix = s.game?.currentPlayerName === member.name ? ' (current turn)' : '';
+      return `<option value="${esc(member.pid)}">${esc(member.name)}${turnSuffix}</option>`;
+    }).join('');
+
+    if (humanPlayers.length > 0) {
+      $joinPlayerSelect.value = humanPlayers.some((member) => member.pid === prevSelectedPid)
+        ? prevSelectedPid
+        : humanPlayers[0].pid;
+      show($joinClaimForm);
+    } else {
+      hide($joinClaimForm);
+      $joinStartedMsg.textContent = 'Game in progress. No human seats are available.';
+    }
+    return;
+  }
+
+  hide($joinClaimForm);
   if (s.status !== 'waiting') {
-    hide($joinForm); hide($joinFullMsg); show($joinStartedMsg);
+    hide($joinForm);
+    hide($joinFullMsg);
+    show($joinStartedMsg);
+    $joinStartedMsg.textContent = 'This game has finished. You can watch results but not join.';
   } else if (humanCount >= 4) {
-    hide($joinForm); show($joinFullMsg); hide($joinStartedMsg);
+    hide($joinForm);
+    show($joinFullMsg);
+    hide($joinStartedMsg);
   } else {
-    show($joinForm); hide($joinFullMsg); hide($joinStartedMsg);
+    show($joinForm);
+    hide($joinFullMsg);
+    hide($joinStartedMsg);
   }
 }
 
@@ -308,54 +342,106 @@ function renderTurnLog(lastTurn, lastRound) {
   while ($turnLog.children.length > 3) $turnLog.removeChild($turnLog.lastChild);
 }
 
+function roundPlayerLabel(name, myName) {
+  return name === myName ? 'You' : name;
+}
+
+function roundScorePriority(sc, myName, winnerName, loserName) {
+  if (sc.name === myName) return 0;
+  if (loserName && sc.name === loserName) return 1;
+  if (winnerName && sc.name === winnerName) return 2;
+  if (sc.eliminated) return 3;
+  return 4;
+}
+
 function formatRoundResultModal(round, currentState) {
   const myName = getSelfPlayer(currentState)?.name;
-  const handPts = round.declarerHandValue != null ? ` (${round.declarerHandValue} pts)` : '';
+  const winnerName = round.assaf ? round.assaf.by : round.declarer;
+  const loserName = round.assaf ? round.assaf.assafed : null;
+  const declarerLabel = roundPlayerLabel(round.declarer, myName);
 
-  let headline;
+  let heroTitle = '';
+  let heroSubline = '';
+  let heroClass = 'round-hero';
   if (round.assaf) {
-    const assafedStr = myName === round.assaf.assafed ? 'You' : `<strong>${esc(round.assaf.assafed)}</strong>`;
-    const byStr = myName === round.assaf.by ? 'you' : `<strong>${esc(round.assaf.by)}</strong>`;
-    headline = `😱 ${assafedStr} called Yaniv${handPts} but got Assaf'd by ${byStr}!`;
+    const assafedLabel = roundPlayerLabel(round.assaf.assafed, myName);
+    const blockerLabel = roundPlayerLabel(round.assaf.by, myName);
+    heroClass += ' assaf';
+    heroTitle = `${assafedLabel} ${assafedLabel === 'You' ? 'were' : 'was'} ASSAF'ed!`;
+    if (round.declarerHandValue != null) {
+      heroSubline = `${declarerLabel} called Yaniv at ${round.declarerHandValue} pts. ${blockerLabel} matched or beat it, so ${assafedLabel} gets +30.`;
+    } else {
+      heroSubline = `${blockerLabel} matched or beat the Yaniv call, so ${assafedLabel} gets +30.`;
+    }
   } else {
-    const who = myName === round.declarer ? 'You' : `<strong>${esc(round.declarer)}</strong>`;
-    headline = `🎉 ${who} called Yaniv${handPts}!`;
+    if (round.declarer === myName) {
+      heroTitle = 'You WON the round!';
+    } else {
+      heroTitle = `${declarerLabel} called Yaniv!`;
+    }
+    heroClass += ' yaniv';
+    heroSubline = round.declarerHandValue != null
+      ? `Yaniv declared at ${round.declarerHandValue} pts.`
+      : 'Yaniv declared this round.';
   }
 
   let rowsHtml = '';
   if (round.scoreChanges?.length) {
-    rowsHtml = round.scoreChanges.map(sc => {
+    const sorted = [...round.scoreChanges].sort((a, b) => {
+      const priorityDiff = roundScorePriority(a, myName, winnerName, loserName)
+        - roundScorePriority(b, myName, winnerName, loserName);
+      if (priorityDiff !== 0) return priorityDiff;
+      const impactDiff = Math.abs(b.added) - Math.abs(a.added);
+      if (impactDiff !== 0) return impactDiff;
+      return a.name.localeCompare(b.name);
+    });
+
+    rowsHtml = sorted.map((sc, index) => {
       const isMe = myName === sc.name;
-      const name = isMe ? 'You' : esc(sc.name);
-      const isAssafed = round.assaf?.assafed === sc.name;
+      const isWinner = sc.name === winnerName;
+      const isLoser = loserName && sc.name === loserName;
       const finalHand = Array.isArray(sc.finalHand) ? sc.finalHand : [];
-
-      let delta;
-      if (sc.added === 0) delta = `→ ${sc.newScore}`;
-      else if (sc.reset) delta = `+${sc.added} → reset to ${sc.newScore}`;
-      else delta = `+${sc.added} → ${sc.newScore}`;
-      if (sc.eliminated) delta += ' ❌ eliminated';
-
+      const scoreImpact = isWinner && sc.added === 0
+        ? 'WON'
+        : (sc.added > 0 ? `+${sc.added}` : `${sc.added}`);
+      const impactTone = isWinner
+        ? 'good'
+        : (isLoser || sc.eliminated || sc.added > 0)
+          ? 'bad'
+          : (sc.added < 0 ? 'good' : 'neutral');
       const handHtml = finalHand.length
         ? `<span class="round-hand-cards">${finalHand.map(card => `<span class="round-hand-card">${cardShortHtml(card)}</span>`).join('')}</span>`
         : '<span class="round-hand-empty">no cards</span>';
 
       const cls = [
         'round-player-row',
-        isAssafed ? 'assafed' : '',
+        isMe ? 'me' : '',
+        isWinner ? 'winner' : '',
+        isLoser ? 'loser' : '',
         sc.reset ? 'reset' : '',
         sc.eliminated ? 'elim' : '',
       ].filter(Boolean).join(' ');
 
-      return `<div class="${cls}">
-        <div class="round-player-name"><strong>${name}</strong></div>
-        <div class="round-player-hand"><span class="round-label">Final hand</span>${handHtml}</div>
-        <div class="round-player-score"><span class="round-label">Score</span><span>${delta}</span></div>
+      return `<div class="${cls}" style="--row-delay:${index * 80}ms">
+        <div class="round-row-top">
+          <div class="round-player-main">
+            <div class="round-player-name"><strong>${esc(roundPlayerLabel(sc.name, myName))}</strong></div>
+            <div class="round-impact ${impactTone}">
+              <span class="round-impact-value">${scoreImpact}</span>
+            </div>
+          </div>
+          <div class="round-total-score">${sc.newScore}</div>
+        </div>
+        <div class="round-player-hand">${handHtml}</div>
       </div>`;
     }).join('');
   }
 
-  return `<div class="round-headline">${headline}</div><div class="round-score-changes">${rowsHtml}</div>`;
+  return `<div class="${heroClass}">
+    <div class="round-hero-title">${esc(heroTitle)}</div>
+    <div class="round-hero-subline">${esc(heroSubline)}</div>
+  </div>
+  <div class="round-score-changes">${rowsHtml}</div>`;
 }
 
 function formatLastTurn(t, me) {

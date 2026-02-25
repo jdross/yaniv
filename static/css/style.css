@@ -84,7 +84,7 @@ header { text-align: center; margin-bottom: 2rem; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; font-size: .85rem; opacity: .8; margin-bottom: .35rem; }
 
-input[type="text"], input[type="text"] {
+input[type="text"], select {
   width: 100%;
   padding: .65rem .8rem;
   border-radius: 8px;
@@ -95,8 +95,12 @@ input[type="text"], input[type="text"] {
   outline: none;
   transition: border-color .2s;
 }
-input[type="text"]:focus { border-color: #f4d03f; }
+input[type="text"]:focus, select:focus { border-color: #f4d03f; }
 input[type="text"]::placeholder { color: rgba(255,255,255,.35); }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+}
 .code-input { text-transform: lowercase; letter-spacing: .15em; font-size: 1.1rem; }
 
 input[type="range"] {
@@ -153,7 +157,6 @@ input[type="range"] {
 .room-code-label { font-size: .75rem; opacity: .6; display: block; text-transform: uppercase; letter-spacing: .1em; }
 .room-code { font-size: 2.8rem; font-weight: 900; letter-spacing: .35em; color: #f4d03f; }
 
-.share-hint { font-size: .8rem; opacity: .6; margin-bottom: .4rem; }
 .share-link-row {
   display: flex;
   align-items: center;
@@ -161,12 +164,6 @@ input[type="range"] {
   gap: .6rem;
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
-}
-.share-url-text {
-  color: #f4d03f;
-  word-break: break-all;
-  flex: 1;
-  font-size: .8rem;
 }
 .share-btn {
   background: rgba(244,208,63,.15);
@@ -204,10 +201,6 @@ input[type="range"] {
 }
 .option-toggle input[type="checkbox"] {
   accent-color: #f4d03f;
-}
-.option-hint {
-  opacity: .55;
-  font-size: .8rem;
 }
 .lobby-player {
   display: flex;
@@ -311,28 +304,6 @@ input[type="range"] {
   padding: .95rem 1rem 1.05rem;
   position: relative;
 }
-.round-result-close {
-  position: absolute;
-  top: .55rem;
-  right: .55rem;
-  border: 1px solid rgba(255,255,255,.28);
-  background: rgba(255,255,255,.08);
-  color: rgba(255,255,255,.92);
-  border-radius: 999px;
-  width: 34px;
-  height: 34px;
-  font-size: 1.05rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.round-result-close:hover { background: rgba(255,255,255,.15); }
-.round-result-title {
-  font-size: clamp(1.2rem, 2.2vw, 1.45rem);
-  font-weight: 800;
-  text-align: center;
-  margin: .1rem 2.2rem .25rem;
-  color: #f3f7f4;
-}
 .round-result-content { margin-top: .15rem; }
 .round-result-footer {
   display: flex;
@@ -381,61 +352,151 @@ body.round-modal-open { overflow: hidden; }
 .log-red { color: #ff8a80; font-weight: 700; }
 
 /* Round-result banner enrichments */
-.round-headline {
-  font-weight: 700;
-  font-size: clamp(1.1rem, 2.6vw, 1.5rem);
-  line-height: 1.28;
-  text-align: center;
-  margin: .35rem 0 .7rem;
+@keyframes round-hero-pop {
+  from { opacity: 0; transform: translateY(-7px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
+@keyframes round-row-in {
+  from { opacity: 0; transform: translateY(11px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes round-impact-pulse {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.05); }
+}
+
+.round-hero {
+  margin: .3rem 0 .75rem;
+  padding: .6rem .72rem;
+  border-radius: 13px;
+  border: 1px solid rgba(255,255,255,.2);
+  background: linear-gradient(145deg, rgba(8,66,41,.72), rgba(6,52,33,.5));
+  animation: round-hero-pop .24s ease-out both;
+}
+.round-hero.yaniv {
+  border-color: rgba(46, 204, 113, .45);
+  background: linear-gradient(145deg, rgba(23,108,67,.65), rgba(9,67,44,.45));
+}
+.round-hero.assaf {
+  border-color: rgba(255, 107, 74, .45);
+  background: linear-gradient(145deg, rgba(130,44,33,.52), rgba(75,26,19,.42));
+}
+.round-hero-title {
+  font-size: clamp(1.25rem, 2.8vw, 1.62rem);
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.16;
+  letter-spacing: .01em;
+}
+.round-hero-subline {
+  margin-top: .22rem;
+  text-align: center;
+  color: rgba(238,247,241,.88);
+  font-size: .9rem;
+  line-height: 1.35;
+}
+
 .round-score-changes {
   display: flex;
   flex-direction: column;
-  gap: .55rem;
+  gap: .6rem;
   margin-top: .35rem;
   text-align: left;
 }
 .round-player-row {
   background: rgba(255,255,255,.08);
-  border-left: 3px solid rgba(255,255,255,.2);
-  border-radius: 10px;
-  padding: .65rem .7rem .6rem;
+  border: 1px solid rgba(255,255,255,.16);
+  border-left: 4px solid rgba(255,255,255,.22);
+  border-radius: 12px;
+  padding: .66rem .72rem .62rem;
+  opacity: 0;
+  transform: translateY(11px);
+  animation: round-row-in .36s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+  animation-delay: var(--row-delay, 0ms);
+}
+.round-player-row.me {
+  border-left-color: rgba(244,208,63,.9);
+  box-shadow: 0 0 0 1px rgba(244,208,63,.28), 0 0 18px rgba(244,208,63,.14);
+}
+.round-player-row.winner {
+  border-left-color: rgba(46, 204, 113, .72);
+  background: linear-gradient(128deg, rgba(46,204,113,.17), rgba(255,255,255,.06));
+}
+.round-player-row.loser {
+  border-left-color: rgba(255, 107, 74, .72);
+  background: linear-gradient(128deg, rgba(255,107,74,.15), rgba(255,255,255,.06));
 }
 .round-player-row.reset {
-  background: rgba(244,208,63,.2);
-  border-left-color: rgba(244,208,63,.55);
-}
-.round-player-row.assafed {
-  background: rgba(231,76,60,.2);
-  border-left-color: rgba(231,76,60,.55);
+  box-shadow: inset 0 0 0 1px rgba(244,208,63,.22);
 }
 .round-player-row.elim {
-  background: rgba(0,0,0,.3);
-  border-left-color: rgba(255,255,255,.4);
-  opacity: .85;
+  border-left-color: rgba(255,255,255,.45);
+  background: rgba(0,0,0,.34);
+}
+
+.round-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .55rem;
+}
+.round-player-main {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
 }
 .round-player-name {
-  font-size: 1.06rem;
-  margin-bottom: .18rem;
+  font-size: 1.08rem;
+  line-height: 1.15;
 }
-.round-player-hand,
-.round-player-score {
-  font-size: .97rem;
-  opacity: .97;
-  display: flex;
-  gap: .55rem;
-  align-items: flex-start;
-  margin-top: .14rem;
-  line-height: 1.35;
+.round-impact {
+  display: inline-flex;
+  align-items: center;
+  gap: .32rem;
+  border-radius: 999px;
+  padding: .18rem .58rem;
+  font-weight: 900;
+  letter-spacing: .02em;
+  animation: round-impact-pulse .34s ease-out both;
+  animation-delay: calc(var(--row-delay, 0ms) + 120ms);
 }
-.round-label {
-  min-width: 86px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  font-size: .68rem;
-  opacity: .72;
+.round-impact.good {
+  background: rgba(46,204,113,.2);
+  color: #9df2bf;
+}
+.round-impact.bad {
+  background: rgba(255,107,74,.2);
+  color: #ffc5b6;
+}
+.round-impact.neutral {
+  background: rgba(255,255,255,.14);
+  color: rgba(243,250,245,.92);
+}
+.round-impact-value {
+  font-size: 1.03rem;
+  line-height: 1;
+}
+.round-total-score {
+  font-size: 1.28rem;
+  line-height: 1;
   font-weight: 700;
-  padding-top: .16rem;
+  color: rgba(244,251,247,.96);
+  min-width: 2.1rem;
+  text-align: right;
+}
+.round-player-row.winner .round-total-score {
+  color: #9df2bf;
+}
+.round-player-row.loser .round-total-score,
+.round-player-row.elim .round-total-score {
+  color: #ffc5b6;
+}
+.round-player-hand {
+  font-size: .95rem;
+  opacity: .97;
+  margin-top: .24rem;
+  line-height: 1.35;
 }
 .round-hand-cards {
   display: inline-flex;
@@ -443,8 +504,8 @@ body.round-modal-open { overflow: hidden; }
   gap: .28rem;
 }
 .round-hand-card {
-  background: rgba(0,0,0,.25);
-  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(0,0,0,.24);
+  border: 1px solid rgba(255,255,255,.16);
   border-radius: 999px;
   padding: .12rem .5rem;
   font-size: .98rem;
@@ -745,13 +806,12 @@ body.round-modal-open { overflow: hidden; }
     border-radius: 14px;
     padding: .85rem .85rem .9rem;
   }
+  .round-hero-title { font-size: clamp(1.1rem, 5.4vw, 1.4rem); }
+  .round-hero-subline { font-size: .82rem; }
   .round-player-name { font-size: 1rem; }
-  .round-player-hand,
-  .round-player-score { font-size: .92rem; }
-  .round-label {
-    min-width: 76px;
-    font-size: .64rem;
-  }
+  .round-player-main { gap: .38rem; }
+  .round-total-score { font-size: 1.12rem; }
+  .round-player-hand { font-size: .9rem; }
   .round-hand-card { font-size: .93rem; }
   .round-result-footer .btn { width: 100%; }
 

@@ -33,7 +33,7 @@ const DEFAULT_PORT = 5174;
 const MAX_AI_PLAYERS = 3;
 const HEARTBEAT_INTERVAL_MS = 25000;
 const DEFAULT_ROOM_OPTIONS = Object.freeze({
-  slamdownsAllowed: false,
+  slamdownsAllowed: true,
 });
 
 let pool = null;
@@ -140,7 +140,7 @@ function normalizeRoomOptions(rawOptions = null) {
     return { ...DEFAULT_ROOM_OPTIONS };
   }
   return {
-    slamdownsAllowed: Boolean(rawOptions.slamdownsAllowed ?? false),
+    slamdownsAllowed: Boolean(rawOptions.slamdownsAllowed ?? DEFAULT_ROOM_OPTIONS.slamdownsAllowed),
   };
 }
 
@@ -811,13 +811,31 @@ app.post('/api/join', async (req, res) => {
   const code = parseRoomCode(payload.code);
   const pid = parsePid(payload.pid, randomPid);
   const name = parsePlayerName(payload.name);
+  const playAsPid = parsePid(payload.playAsPid);
 
   const room = rooms.get(code);
   if (!room) {
     return errorResponse(res, 'Room not found', 404);
   }
+
+  if (room.status === 'playing') {
+    if (!playAsPid) {
+      return errorResponse(res, 'Select a player to continue');
+    }
+    const selectedMember = room.members.find((member) => (
+      member.pid === playAsPid && !member.isAi
+    ));
+    if (!selectedMember) {
+      return errorResponse(res, 'Invalid player selection');
+    }
+    return res.json({ code, pid: selectedMember.pid });
+  }
+
   if (room.status !== 'waiting') {
-    return errorResponse(res, 'Game already started');
+    if (room.status === 'finished') {
+      return errorResponse(res, 'Game has finished');
+    }
+    return errorResponse(res, 'Cannot join this room right now');
   }
   if (room.members.filter((member) => !member.isAi).length >= 4) {
     return errorResponse(res, 'Room is full');

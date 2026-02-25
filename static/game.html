@@ -24,8 +24,15 @@
         </div>
         <button id="join-btn" class="btn btn-primary btn-large">Join Game</button>
       </div>
+      <div id="join-claim-form" class="hidden">
+        <div class="form-group" style="text-align:left">
+          <label for="join-player-select">Play as</label>
+          <select id="join-player-select"></select>
+        </div>
+        <button id="join-claim-btn" class="btn btn-primary btn-large">Play as Selected Player</button>
+      </div>
       <p id="join-full-msg" class="join-full-msg hidden">This room is full (4 players). You can watch but not join.</p>
-      <p id="join-started-msg" class="join-full-msg hidden">The game has already started. You can watch but not join.</p>
+      <p id="join-started-msg" class="join-full-msg hidden">This game has finished. You can watch results but not join.</p>
       <p id="join-error" class="error-msg"></p>
     </div>
   </div>
@@ -113,9 +120,7 @@
 
   <!-- ROUND RESULT MODAL -->
   <div id="round-result-modal" class="round-result-modal hidden" aria-hidden="true">
-    <div class="round-result-card" role="dialog" aria-modal="true" aria-labelledby="round-result-title">
-      <button id="round-result-close" class="round-result-close" aria-label="Close round summary">✕</button>
-      <h2 id="round-result-title" class="round-result-title">Round Result</h2>
+    <div class="round-result-card" role="dialog" aria-modal="true" aria-label="Round summary">
       <div id="round-result-content" class="round-result-content"></div>
       <div class="round-result-footer">
         <button id="round-result-continue" class="btn btn-primary">Continue</button>

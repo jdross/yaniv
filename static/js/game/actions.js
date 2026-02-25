@@ -163,11 +163,38 @@ function bindEventHandlers() {
       $joinError.textContent = data.error;
       return;
     }
+    if (data.pid) localStorage.setItem('yanivPid', data.pid);
     fetchState();
   });
 
   $joinNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') $joinBtn.click();
+  });
+
+  $joinClaimBtn?.addEventListener('click', async () => {
+    const playAsPid = $joinPlayerSelect?.value || '';
+    if (!playAsPid) {
+      $joinError.textContent = 'Select a player';
+      return;
+    }
+
+    const res = await fetch('/api/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pid, code, playAsPid }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      $joinError.textContent = data.error;
+      return;
+    }
+    if (data.pid) {
+      localStorage.setItem('yanivPid', data.pid);
+      window.location.reload();
+    }
+  });
+  $joinPlayerSelect?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $joinClaimBtn?.click();
   });
 
   $shareBtn.addEventListener('click', async () => {
@@ -267,7 +294,6 @@ function bindEventHandlers() {
     }
   });
 
-  $roundResultClose?.addEventListener('click', dismissRoundResultModal);
   $roundResultContinue?.addEventListener('click', dismissRoundResultModal);
 
   document.addEventListener('keydown', (e) => {

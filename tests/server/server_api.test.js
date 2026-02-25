@@ -203,6 +203,25 @@ test('waiting room options persist across join and start', async () => {
   assert.equal(rooms.get(code).options.slamdownsAllowed, true);
 });
 
+test('new rooms default slamdowns to enabled', async () => {
+  const create = await callRoute('post', '/api/create', {
+    body: {
+      name: 'P1',
+      pid: 'pid-1',
+      aiCount: 0,
+    },
+  });
+  assert.equal(create.status, 200);
+
+  const state = await callRoute('get', '/api/room/:code', {
+    params: { code: create.body.code },
+    query: { pid: 'pid-1' },
+  });
+  assert.equal(state.status, 200);
+  assert.equal(state.body.options.slamdownsAllowed, true);
+  assert.equal(rooms.get(create.body.code).options.slamdownsAllowed, true);
+});
+
 test('only creator can change waiting options', async () => {
   const create = await callRoute('post', '/api/create', {
     body: {
@@ -231,6 +250,50 @@ test('only creator can change waiting options', async () => {
   });
   assert.equal(options.status, 400);
   assert.ok(options.body.error);
+});
+
+test('join in active room can claim an existing human player', async () => {
+  const code = await createStartedGame();
+
+  const claim = await callRoute('post', '/api/join', {
+    body: {
+      code,
+      pid: 'observer-pid',
+      name: 'Observer',
+      playAsPid: 'pid-2',
+    },
+  });
+  assert.equal(claim.status, 200);
+  assert.equal(claim.body.pid, 'pid-2');
+
+  const room = rooms.get(code);
+  assert.equal(room.members.filter((member) => !member.isAi).length, 2);
+  assert.equal(room.members.some((member) => member.pid === 'observer-pid'), false);
+});
+
+test('join in active room rejects invalid claim selection', async () => {
+  const code = await createStartedGame();
+
+  const missingSelection = await callRoute('post', '/api/join', {
+    body: {
+      code,
+      pid: 'observer-pid',
+      name: 'Observer',
+    },
+  });
+  assert.equal(missingSelection.status, 400);
+  assert.equal(missingSelection.body.error, 'Select a player to continue');
+
+  const invalidSelection = await callRoute('post', '/api/join', {
+    body: {
+      code,
+      pid: 'observer-pid',
+      name: 'Observer',
+      playAsPid: 'missing-player-pid',
+    },
+  });
+  assert.equal(invalidSelection.status, 400);
+  assert.equal(invalidSelection.body.error, 'Invalid player selection');
 });
 
 test('sse unregister old stream keeps new reconnect', () => {

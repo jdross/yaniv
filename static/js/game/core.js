@@ -46,6 +46,9 @@ const $joinPlayers = document.getElementById('join-players');
 const $joinForm = document.getElementById('join-form');
 const $joinBtn = document.getElementById('join-btn');
 const $joinNameInput = document.getElementById('join-name-input');
+const $joinClaimForm = document.getElementById('join-claim-form');
+const $joinPlayerSelect = document.getElementById('join-player-select');
+const $joinClaimBtn = document.getElementById('join-claim-btn');
 const $joinFullMsg = document.getElementById('join-full-msg');
 const $joinStartedMsg = document.getElementById('join-started-msg');
 const $joinError = document.getElementById('join-error');
@@ -77,7 +80,6 @@ const $finalScores = document.getElementById('final-scores');
 const $playAgainBtn = document.getElementById('play-again-btn');
 const $roundResultModal = document.getElementById('round-result-modal');
 const $roundResultContent = document.getElementById('round-result-content');
-const $roundResultClose = document.getElementById('round-result-close');
 const $roundResultContinue = document.getElementById('round-result-continue');
 
 const SCREEN_ELEMENTS = [$joinScreen, $lobby, $board, $gameover];
@@ -114,9 +116,17 @@ function isRoundResultModalOpen() {
   return !$roundResultModal.classList.contains('hidden');
 }
 
+function isLikelyTouchDevice() {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
 function showRoundResultModal(round, currentState) {
   if (!round) return;
   $roundResultContent.innerHTML = formatRoundResultModal(round, currentState);
+  const continueLabel = currentState?.status === 'finished' ? 'View Final Standings' : 'Next Turn';
+  $roundResultContinue.textContent = isLikelyTouchDevice()
+    ? continueLabel
+    : `${continueLabel} (Enter)`;
   show($roundResultModal);
   $roundResultModal.setAttribute('aria-hidden', 'false');
   document.body.classList.add('round-modal-open');
