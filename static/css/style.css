@@ -29,7 +29,7 @@ kbd {
 
 /* ── Home Page ── */
 .home-page {
-  background: linear-gradient(160deg, #0d3d22 0%, #1a5c38 60%, #0d3d22 100%);
+  background: linear-gradient(160deg, #0d3d22 0%, #1a5c38 60%, #0d3d22 100%) fixed;
   background-repeat: no-repeat;
   background-size: 100% 100%;
 }
