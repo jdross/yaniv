@@ -184,7 +184,7 @@ class AIPlayer(Player):
                 if best_next_discard:
                     new_hand = post_discard_hand + [draw_card]
                     remaining = [c for c in new_hand if c not in best_next_discard]
-                    composition_bonus = 0.18 * self._hand_composition_bonus(remaining)
+                    composition_bonus = 0.10 * self._hand_composition_bonus(remaining)
                 action_score = future_score + heuristic_cost - reset_bonus - composition_bonus
                 yield {'discard': discard_option, 'draw': i}, action_score, discard_value
 
@@ -216,7 +216,7 @@ class AIPlayer(Player):
                         new_hand = post_discard_hand + [draw_card]
                         remaining = [c for c in new_hand if c not in best_next]
                         total_bonus += self._hand_composition_bonus(remaining)
-                deck_composition_bonus = 0.18 * (total_bonus / len(context.sampled_cards))
+                deck_composition_bonus = 0.10 * (total_bonus / len(context.sampled_cards))
             action_score = expected_future + heuristic_cost + \
                 uncertainty_cost - expected_reset_bonus - deck_composition_bonus
             yield {'discard': discard_option, 'draw': 'deck'}, action_score, discard_value
@@ -224,7 +224,7 @@ class AIPlayer(Player):
     def _heuristic_action_cost(self, threat, immediate_points, feed_penalty, joker_discard_penalty):
         return (
             (0.06 * threat * immediate_points)
-            + (0.30 * feed_penalty)
+            + (0.22 * feed_penalty)
             + (0.08 * joker_discard_penalty)
         )
 
@@ -518,13 +518,10 @@ class AIPlayer(Player):
         risk_threshold *= (1.0 - 0.35 * score_pressure)
         risk_threshold = max(0.03, risk_threshold)
 
-        # Boost threshold (more willing to call) if it would eliminate an opponent
-        elimination_bonus = self._evaluate_elimination_potential()
-        risk_threshold += elimination_bonus * 0.08
-
-        # Reduce threshold (less willing to call) if it would give an opponent a reset
+        # Reduce threshold (less willing to call) if it would give an opponent a reset.
+        # Giving someone a -50 reset is very costly and worth avoiding.
         reset_penalty = self._evaluate_yaniv_reset_impact()
-        risk_threshold -= reset_penalty * 0.08
+        risk_threshold -= reset_penalty * 0.04
         risk_threshold = max(0.03, risk_threshold)
 
         return assaf_risk <= risk_threshold
@@ -560,8 +557,9 @@ class AIPlayer(Player):
             # Conservative estimate: post-trade ≈ min_post_discard + 3
             estimated_post_trade = min_post_discard + 3
 
-            # Only wait if post-trade hand would still likely assaf them
-            if confidence >= 0.40 and own_hand_value <= 2 and estimated_post_trade <= estimated + 1:
+            # Only wait if post-trade hand would still likely assaf them.
+            # Very conservative: only when we have 0-1 points (near-zero risk of hand rising above theirs).
+            if confidence >= 0.45 and own_hand_value <= 1 and estimated_post_trade <= estimated:
                 return True
         return False
 
@@ -811,10 +809,10 @@ class AIPlayer(Player):
 
             # Enhanced: penalize based on opponent collection patterns
             for player_info in self.other_players.values():
-                # Heavy penalty if opponent has been picking up this rank
+                # Penalty if opponent has been picking up this rank (building a set)
                 collected_count = player_info['collected_ranks'].get(card.rank, 0)
                 if collected_count > 0:
-                    penalty += 3.0 * collected_count
+                    penalty += 2.0 * collected_count
 
                 # Penalty if card is adjacent to opponent's suit-run collection
                 opp_suit_ranks = player_info['collected_suit_ranks'].get(card.suit)
@@ -824,13 +822,13 @@ class AIPlayer(Player):
                         or (card_rank - 1) in opp_suit_ranks
                         or (card_rank + 1) in opp_suit_ranks
                     ):
-                        penalty += 2.0
+                        penalty += 1.5
                     # Extra penalty if this card would bridge two collected cards
                     if (card_rank - 1) in opp_suit_ranks and (card_rank + 1) in opp_suit_ranks:
-                        penalty += 3.0
+                        penalty += 2.5
 
-                # Mild safety bonus if opponent recently discarded this rank
+                # Safety bonus if opponent recently discarded this rank
                 if any(d.rank == card.rank for d in player_info['discard_history']):
-                    penalty -= 0.4
+                    penalty -= 0.6
 
         return penalty

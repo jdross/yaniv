@@ -233,7 +233,7 @@ class AIPlayer extends Player {
         if (best_next_discard) {
           const new_hand = [...post_discard_hand, draw_card];
           const remaining = new_hand.filter((c) => !containsCard(best_next_discard, c));
-          composition_bonus = 0.18 * this._hand_composition_bonus(remaining);
+          composition_bonus = 0.10 * this._hand_composition_bonus(remaining);
         }
         const action_score = future_score + heuristic_cost - reset_bonus - composition_bonus;
 
@@ -269,7 +269,7 @@ class AIPlayer extends Player {
             total_bonus += this._hand_composition_bonus(remaining);
           }
         }
-        deck_composition_bonus = 0.18 * (total_bonus / context.sampled_cards.length);
+        deck_composition_bonus = 0.10 * (total_bonus / context.sampled_cards.length);
       }
       const action_score = expected_future + heuristic_cost + uncertainty_cost - expected_reset_bonus - deck_composition_bonus;
 
@@ -278,7 +278,7 @@ class AIPlayer extends Player {
   }
 
   _heuristic_action_cost(threat, immediate_points, feed_penalty, joker_discard_penalty) {
-    return (0.06 * threat * immediate_points) + (0.30 * feed_penalty) + (0.08 * joker_discard_penalty);
+    return (0.06 * threat * immediate_points) + (0.22 * feed_penalty) + (0.08 * joker_discard_penalty);
   }
 
   _opponent_yaniv_next_turn_probability() {
@@ -615,13 +615,10 @@ class AIPlayer extends Player {
     risk_threshold *= (1 - 0.35 * score_pressure);
     risk_threshold = Math.max(0.03, risk_threshold);
 
-    // Boost threshold (more willing to call) if it would eliminate an opponent
-    const elimination_bonus = this._evaluate_elimination_potential();
-    risk_threshold += elimination_bonus * 0.08;
-
-    // Reduce threshold (less willing to call) if it would give an opponent a reset
+    // Reduce threshold (less willing to call) if it would give an opponent a reset.
+    // Giving someone a -50 reset is very costly and worth avoiding.
     const reset_penalty = this._evaluate_yaniv_reset_impact();
-    risk_threshold -= reset_penalty * 0.08;
+    risk_threshold -= reset_penalty * 0.04;
     risk_threshold = Math.max(0.03, risk_threshold);
 
     return assaf_risk <= risk_threshold;
@@ -660,8 +657,9 @@ class AIPlayer extends Player {
       // But we might draw from discard pile too. Be conservative: estimate post-trade ≈ min_post_discard + 3.
       const estimated_post_trade = min_post_discard + 3;
 
-      // Only wait if post-trade hand would still likely assaf them
-      if (confidence >= 0.40 && own_hand_value <= 2 && estimated_post_trade <= estimated + 1) {
+      // Only wait if post-trade hand would still likely assaf them.
+      // Very conservative: only when we have 0-1 points (near-zero risk of our hand rising above theirs).
+      if (confidence >= 0.45 && own_hand_value <= 1 && estimated_post_trade <= estimated) {
         return true;
       }
     }
@@ -976,27 +974,27 @@ class AIPlayer extends Player {
 
       // Enhanced: penalize based on opponent collection patterns
       for (const player_info of Object.values(this.other_players)) {
-        // Heavy penalty if opponent has been picking up this rank
+        // Penalty if opponent has been picking up this rank (building a set)
         const collected_count = player_info.collected_ranks[card.rank] || 0;
         if (collected_count > 0) {
-          penalty += 3.0 * collected_count;
+          penalty += 2.0 * collected_count;
         }
 
         // Penalty if card is adjacent to opponent's suit-run collection
         const opp_suit_ranks = player_info.collected_suit_ranks[card.suit];
         if (opp_suit_ranks) {
           if (opp_suit_ranks.has(card_rank) || opp_suit_ranks.has(card_rank - 1) || opp_suit_ranks.has(card_rank + 1)) {
-            penalty += 2.0;
+            penalty += 1.5;
           }
-          // Extra penalty if this card would bridge two collected cards
+          // Extra penalty if this card would bridge two collected cards (completes a run)
           if (opp_suit_ranks.has(card_rank - 1) && opp_suit_ranks.has(card_rank + 1)) {
-            penalty += 3.0;
+            penalty += 2.5;
           }
         }
 
-        // Mild safety bonus if opponent recently discarded this rank (they don't want it)
+        // Safety bonus if opponent recently discarded this rank (they don't want it)
         if (player_info.discard_history.some((d) => d.rank === card.rank)) {
-          penalty -= 0.4;
+          penalty -= 0.6;
         }
       }
     }
