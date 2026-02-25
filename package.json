@@ -3,17 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "npm run test:frontend",
+    "test": "npm run test:frontend && npm run test:server",
     "test:frontend": "node --test tests/frontend/*.test.js",
-    "test:python": "PYTHONPATH=python-server python3 -m unittest discover -s tests -v",
-    "test:db": "PYTHONPATH=python-server python3 -m unittest tests.test_db_integration -v",
-    "server:dev": "python3 python-server/application/server.py",
-    "server:prod": "PYTHONPATH=python-server python3 -m gunicorn --workers 1 --threads 8 --bind 0.0.0.0:${PORT:-5174} application.server:app",
-    "server:node:install": "npm --prefix server install",
-    "server:node:dev": "npm --prefix server run dev",
-    "server:node:start": "npm --prefix server run start",
-    "node-server:install": "npm run server:node:install",
-    "node-server:dev": "npm run server:node:dev",
-    "node-server:start": "npm run server:node:start"
+    "test:server": "node --test tests/server/*.test.js",
+    "server:install": "npm --prefix server install",
+    "server:dev": "npm --prefix server run dev",
+    "server:start": "npm --prefix server run start"
   }
 }

@@ -1,20 +1,20 @@
-# Server (Node.js implementation)
+# Server (Node.js)
 
-This folder contains a lightweight Node.js port of the Python game server and core game logic.
+This folder contains the Yaniv backend server and core game logic.
 
 ## Install
 
 ```bash
-npm run server:node:install
+npm run server:install
 ```
 
 ## Run
 
 ```bash
-npm run server:node:dev
+npm run server:dev
 ```
 
-The Node server reads the same environment variables as the Python server:
+The server reads:
 
 - `DATABASE_URL` (default: `postgresql://jdross@localhost/yaniv`)
 - `PORT` (default: `5174`)

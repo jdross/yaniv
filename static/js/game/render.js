@@ -1,4 +1,5 @@
 // Rendering and markup helpers.
+let pileLayoutRafId = null;
 
 function showJoin(s) {
   resetRoundResultState();
@@ -160,7 +161,82 @@ function renderDrawOptions(options, discardTop, isMyTurn) {
     + (isMyTurn && selectedDraw === 'deck' ? ' selected' : '')
     + (!isMyTurn ? ' pile-inactive' : '');
   $deckBtn.onclick = isMyTurn ? () => selectDraw('deck') : null;
+
+  schedulePileSqueezeLayout();
 }
+
+function schedulePileSqueezeLayout() {
+  if (pileLayoutRafId !== null) cancelAnimationFrame(pileLayoutRafId);
+  pileLayoutRafId = requestAnimationFrame(() => {
+    pileLayoutRafId = null;
+    applyPileSqueezeLayout();
+  });
+}
+
+function applyPileSqueezeLayout() {
+  const pileChoices = Array.from($drawOptions.querySelectorAll('.draw-choice'));
+  if (!pileChoices.length) {
+    $drawOptions.classList.remove('mobile-fan');
+    $drawOptions.style.removeProperty('--pile-gap');
+    $drawOptions.style.removeProperty('--pile-overlap');
+    return;
+  }
+
+  const containerWidth = $drawOptions.clientWidth;
+  const cardEl = pileChoices[0].querySelector('.card');
+  const cardWidth = cardEl ? cardEl.getBoundingClientRect().width : pileChoices[0].getBoundingClientRect().width;
+  if (!containerWidth || !cardWidth) return;
+
+  const pileCount = pileChoices.length;
+  const isMobile = window.matchMedia('(max-width: 600px)').matches;
+  const fanMode = isMobile && pileCount >= 4;
+  $drawOptions.classList.toggle('mobile-fan', fanMode);
+
+  const baseGapPx = fanMode ? 1 : 6;
+  const outlineAllowancePx = 12;
+  const availableWidth = Math.max(containerWidth - outlineAllowancePx, 0);
+
+  let gapPx = baseGapPx;
+  if (pileCount > 3) {
+    const fitGapPx = (availableWidth - (pileCount * cardWidth)) / (pileCount - 1);
+    const minGapPx = fanMode ? -Math.round(cardWidth * 0.58) : -Math.round(cardWidth * 0.45);
+    if (fanMode) {
+      const fanTargetGapPx = pileCount >= 5
+        ? -Math.round(cardWidth * 0.34)
+        : -Math.round(cardWidth * 0.24);
+      gapPx = Math.max(minGapPx, Math.min(fanTargetGapPx, fitGapPx));
+    } else {
+      gapPx = Math.max(minGapPx, Math.min(baseGapPx, fitGapPx));
+    }
+  }
+
+  // Flex gap cannot be negative. Use negative margin overlap when needed.
+  if (gapPx >= 0) {
+    $drawOptions.style.setProperty('--pile-gap', `${gapPx}px`);
+    $drawOptions.style.setProperty('--pile-overlap', '0px');
+  } else {
+    $drawOptions.style.setProperty('--pile-gap', '0px');
+    $drawOptions.style.setProperty('--pile-overlap', `${gapPx}px`);
+  }
+
+  const fanCenter = (pileCount - 1) / 2;
+  pileChoices.forEach((choice, index) => {
+    if (fanMode) {
+      const spread = index - fanCenter;
+      const tiltDeg = spread * 4.3;
+      const liftPx = Math.abs(spread) * -2.4;
+      choice.style.setProperty('--fan-tilt', `${tiltDeg.toFixed(2)}deg`);
+      choice.style.setProperty('--fan-lift', `${liftPx.toFixed(2)}px`);
+      choice.style.zIndex = String(100 + index);
+    } else {
+      choice.style.removeProperty('--fan-tilt');
+      choice.style.removeProperty('--fan-lift');
+      choice.style.removeProperty('z-index');
+    }
+  });
+}
+
+window.addEventListener('resize', schedulePileSqueezeLayout);
 
 function showGameOver(s) {
   resetRoundResultState();

@@ -1,6 +1,10 @@
 /* ── Reset & Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; }
+:root {
+  --card-width: 60px;
+  --card-height: 88px;
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #1a5c38;
@@ -481,8 +485,8 @@ body.round-modal-open { overflow: hidden; }
 
 /* ── Cards ── */
 .card {
-  width: 60px;
-  height: 88px;
+  width: var(--card-width);
+  height: var(--card-height);
   border-radius: 8px;
   background: #fff;
   color: #222;
@@ -547,9 +551,19 @@ body.round-modal-open { overflow: hidden; }
 .draw-section-inner { display: flex; gap: 1.2rem; align-items: flex-start; }
 .draw-group { display: flex; flex-direction: column; }
 .draw-group:first-child { flex-shrink: 0; }
-.draw-group:last-child { flex: 1; }
+.draw-group:last-child { flex: 1; min-width: 0; }
 .pile-hint { font-size: .7rem; opacity: .6; text-transform: none; letter-spacing: 0; margin-left: .2rem; }
-.draw-row { align-items: center; min-height: unset; flex-wrap: wrap; }
+.draw-row {
+  --pile-gap: .4rem;
+  --pile-overlap: 0px;
+  width: 100%;
+  justify-content: flex-start;
+  align-items: center;
+  min-height: unset;
+  flex-wrap: nowrap;
+  gap: var(--pile-gap);
+  overflow: visible;
+}
 .draw-label { font-size: .7rem; }
 .draw-choice {
   display: flex;
@@ -558,16 +572,45 @@ body.round-modal-open { overflow: hidden; }
   gap: .2rem;
   cursor: pointer;
   font-size: .7rem;
-  opacity: .75;
-  transition: opacity .15s, transform .15s;
+  transition: transform .15s;
+  flex: 0 0 auto;
+  width: calc(var(--card-width) * 1.25);
+  margin-left: var(--pile-overlap);
 }
-.draw-choice:hover { opacity: 1; transform: scale(1.05); }
-.draw-choice.selected { opacity: 1; outline: 3px solid #f4d03f; border-radius: 8px; }
-.draw-choice.selected .card { outline: 3px solid #f4d03f; }
-.draw-choice.pile-inactive { opacity: 0.3; cursor: default; pointer-events: none; }
+.draw-row .draw-choice:first-child { margin-left: 0; }
+.draw-label {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+.draw-choice:hover:not(.selected) { transform: scale(1.05); }
+.draw-choice.selected {
+  outline: 3px solid #f4d03f;
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.draw-choice.pile-inactive { cursor: default; pointer-events: none; }
+.draw-choice .card {
+  width: calc(var(--card-width) * 1.25);
+  height: calc(var(--card-height) * 1.25);
+}
+.draw-choice:not(.pile-inactive) .card { background: #fff; }
+.draw-choice.pile-inactive .card { background: #b7c4b7; }
+.draw-row.mobile-fan {
+  align-items: flex-end;
+}
+.draw-row.mobile-fan .draw-choice .card {
+  transform: rotate(var(--fan-tilt, 0deg)) translateY(var(--fan-lift, 0px));
+  transform-origin: center bottom;
+}
+.draw-row.mobile-fan .draw-choice:hover:not(.selected) {
+  transform: none;
+}
 .deck-choice .deck-icon {
-  width: 60px;
-  height: 88px;
+  width: calc(var(--card-width) * 1.25);
+  height: calc(var(--card-height) * 1.25);
   border-radius: 8px;
   background: linear-gradient(135deg, #1a3a6e, #0d2240);
   display: flex;
@@ -638,8 +681,8 @@ body.round-modal-open { overflow: hidden; }
   position: fixed;
   z-index: 1000;
   pointer-events: none;
-  width: 60px;
-  height: 88px;
+  width: var(--card-width);
+  height: var(--card-height);
   border-radius: 8px;
   background: #fff;
   color: #222;
@@ -742,6 +785,7 @@ body.round-modal-open { overflow: hidden; }
     border-top: none;
     padding: 0 0 env(safe-area-inset-bottom, 0px);
     gap: .22rem;
+    margin-top: 0;
   }
 
   .board {
@@ -768,6 +812,10 @@ body.round-modal-open { overflow: hidden; }
   }
 
   .draw-section {
+    width: 100%;
+    align-self: stretch;
+    margin-top: auto;
+    margin-bottom: auto;
     padding: .4rem .5rem;
   }
   .draw-section-inner {
@@ -804,8 +852,11 @@ body.round-modal-open { overflow: hidden; }
 
 /* Mobile tweaks */
 @media (max-width: 400px) {
-  .card { width: 52px; height: 76px; }
-  .deck-choice .deck-icon { width: 52px; height: 76px; font-size: 1.6rem; }
+  :root {
+    --card-width: 52px;
+    --card-height: 76px;
+  }
+  .deck-choice .deck-icon { font-size: 1.6rem; }
   .logo { font-size: 2.8rem; }
   .board { padding: .44rem .5rem .5rem; }
   .turn-log {
