@@ -99,6 +99,10 @@ class AIPlayer extends Player {
           hand_count: 5,
           known_cards: [],
           estimated_score: 50,
+          pickup_history: [],
+          discard_history: [],
+          collected_ranks: {},
+          collected_suit_ranks: {},
         };
       }
     }
@@ -118,10 +122,19 @@ class AIPlayer extends Player {
 
       for (const card of discarded_cards) {
         removeFirstMatchingCard(playerInfo.known_cards, card);
+        playerInfo.discard_history.push(card);
       }
 
       if (drawn_card !== null && drawn_card !== undefined) {
         playerInfo.known_cards.push(drawn_card);
+        playerInfo.pickup_history.push(drawn_card);
+        if (drawn_card.rank !== 'Joker') {
+          playerInfo.collected_ranks[drawn_card.rank] = (playerInfo.collected_ranks[drawn_card.rank] || 0) + 1;
+          if (!playerInfo.collected_suit_ranks[drawn_card.suit]) {
+            playerInfo.collected_suit_ranks[drawn_card.suit] = new Set();
+          }
+          playerInfo.collected_suit_ranks[drawn_card.suit].add(drawn_card.rank_index());
+        }
       }
 
       this.estimate_hand_values();
@@ -206,7 +219,7 @@ class AIPlayer extends Player {
 
       for (let i = 0; i < this.draw_options.length; i += 1) {
         const draw_card = this.draw_options[i];
-        const [future_score] = this._simulate_action(post_discard_hand, draw_card, false);
+        const [future_score, best_next_discard] = this._simulate_action(post_discard_hand, draw_card, false);
         const immediate_points = post_turn_without_draw + draw_card.value;
         const heuristic_cost = this._heuristic_action_cost(
           context.threat,
@@ -215,7 +228,14 @@ class AIPlayer extends Player {
           joker_discard_penalty,
         );
         const reset_bonus = this._reset_bonus(immediate_points, context.yaniv_next_turn_prob);
-        const action_score = future_score + heuristic_cost - reset_bonus;
+        // Bonus for keeping cards with good set/run potential
+        let composition_bonus = 0;
+        if (best_next_discard) {
+          const new_hand = [...post_discard_hand, draw_card];
+          const remaining = new_hand.filter((c) => !containsCard(best_next_discard, c));
+          composition_bonus = 0.18 * this._hand_composition_bonus(remaining);
+        }
+        const action_score = future_score + heuristic_cost - reset_bonus - composition_bonus;
 
         yield [{ discard: discard_option, draw: i }, action_score, discard_value];
       }
@@ -237,14 +257,28 @@ class AIPlayer extends Player {
         feed_penalty,
         joker_discard_penalty,
       );
-      const action_score = expected_future + heuristic_cost + uncertainty_cost - expected_reset_bonus;
+      // Average composition bonus from deck draws
+      let deck_composition_bonus = 0;
+      if (context.sampled_cards.length > 0) {
+        let total_bonus = 0;
+        for (const draw_card of context.sampled_cards) {
+          const [, best_next] = this._simulate_action(post_discard_hand, draw_card, false);
+          if (best_next) {
+            const new_hand = [...post_discard_hand, draw_card];
+            const remaining = new_hand.filter((c) => !containsCard(best_next, c));
+            total_bonus += this._hand_composition_bonus(remaining);
+          }
+        }
+        deck_composition_bonus = 0.18 * (total_bonus / context.sampled_cards.length);
+      }
+      const action_score = expected_future + heuristic_cost + uncertainty_cost - expected_reset_bonus - deck_composition_bonus;
 
       yield [{ discard: discard_option, draw: 'deck' }, action_score, discard_value];
     }
   }
 
   _heuristic_action_cost(threat, immediate_points, feed_penalty, joker_discard_penalty) {
-    return (0.06 * threat * immediate_points) + (0.12 * feed_penalty) + (0.08 * joker_discard_penalty);
+    return (0.06 * threat * immediate_points) + (0.30 * feed_penalty) + (0.08 * joker_discard_penalty);
   }
 
   _opponent_yaniv_next_turn_probability() {
@@ -551,6 +585,12 @@ class AIPlayer extends Player {
       return own_hand_value <= 2;
     }
 
+    // Check for assaf hunting opportunity: if an opponent is likely to call Yaniv
+    // soon and our hand would assaf them, wait instead of calling ourselves.
+    if (this._should_wait_for_assaf(own_hand_value)) {
+      return false;
+    }
+
     const unseen = this._get_unseen_cards();
     const [mean_value, var_value] = this._mean_and_variance(unseen);
 
@@ -575,7 +615,96 @@ class AIPlayer extends Player {
     risk_threshold *= (1 - 0.35 * score_pressure);
     risk_threshold = Math.max(0.03, risk_threshold);
 
+    // Boost threshold (more willing to call) if it would eliminate an opponent
+    const elimination_bonus = this._evaluate_elimination_potential();
+    risk_threshold += elimination_bonus * 0.08;
+
+    // Reduce threshold (less willing to call) if it would give an opponent a reset
+    const reset_penalty = this._evaluate_yaniv_reset_impact();
+    risk_threshold -= reset_penalty * 0.08;
+    risk_threshold = Math.max(0.03, risk_threshold);
+
     return assaf_risk <= risk_threshold;
+  }
+
+  _should_wait_for_assaf(own_hand_value) {
+    // If an opponent is estimated close to calling Yaniv and we'd assaf them,
+    // it's better to wait (+30 penalty to them) than to call ourselves (0 to us).
+    // IMPORTANT: We must still play a turn (discard+draw), so our hand will change.
+    // Only wait if we can likely maintain a low enough hand through the mandatory trade.
+    for (const player_info of Object.values(this.other_players)) {
+      const estimated = player_info.estimated_score ?? 50;
+      const hand_count = player_info.hand_count ?? 5;
+
+      // Opponent likely to call Yaniv soon?
+      if (estimated > 5.5 || hand_count > 3) continue;
+
+      // Would we assaf them? (our hand <= their hand when they call)
+      if (own_hand_value > estimated) continue;
+
+      // Confidence that they'll actually call: higher when few cards, low estimate
+      let confidence = 0;
+      if (hand_count <= 1) confidence = 0.7;
+      else if (hand_count <= 2) confidence = 0.5;
+      else confidence = 0.25;
+
+      if (estimated <= 3) confidence += 0.15;
+
+      // Estimate post-trade hand value: we must discard+draw.
+      // Best case: discard highest card, draw a low card.
+      // Check if we can maintain a hand that still assafs the opponent.
+      const max_card_value = Math.max(...this.hand.map((c) => c.value));
+      const min_post_discard = own_hand_value - max_card_value;
+      // After drawing, expected hand = min_post_discard + average_draw_value.
+      // With unseen cards averaging ~5, our hand would be roughly min_post_discard + 5.
+      // But we might draw from discard pile too. Be conservative: estimate post-trade ≈ min_post_discard + 3.
+      const estimated_post_trade = min_post_discard + 3;
+
+      // Only wait if post-trade hand would still likely assaf them
+      if (confidence >= 0.40 && own_hand_value <= 2 && estimated_post_trade <= estimated + 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _evaluate_elimination_potential() {
+    // Returns a bonus for calling Yaniv if it would eliminate opponents (push past 100)
+    let bonus = 0;
+    for (const player_info of Object.values(this.other_players)) {
+      const opponent_score = player_info.current_score;
+      const estimated_hand = player_info.estimated_score ?? 50;
+      const new_score = opponent_score + estimated_hand;
+
+      if (new_score > 100) {
+        bonus += 3.0;
+      } else if (new_score > 85) {
+        bonus += 0.8;
+      }
+    }
+    return Math.min(5.0, bonus);
+  }
+
+  _evaluate_yaniv_reset_impact() {
+    // Returns a penalty for calling Yaniv if it would give opponents a beneficial reset
+    let penalty = 0;
+    for (const player_info of Object.values(this.other_players)) {
+      const opponent_score = player_info.current_score;
+      const estimated_hand = player_info.estimated_score ?? 50;
+      const new_score = opponent_score + estimated_hand;
+
+      // Would they land on a reset threshold?
+      if ((new_score === 50 || new_score === 100) && opponent_score < new_score) {
+        penalty += 2.5;
+      }
+      // Close to a reset threshold (might land on it with actual hand)
+      else if (Math.abs(new_score - 50) <= 3 && opponent_score < 50) {
+        penalty += 0.8;
+      } else if (Math.abs(new_score - 100) <= 3 && opponent_score < 100) {
+        penalty += 0.8;
+      }
+    }
+    return Math.min(4.0, penalty);
   }
 
   _estimate_assaf_probability(player_info, own_hand_value, mean_value, var_value) {
@@ -747,6 +876,49 @@ class AIPlayer extends Player {
     return best_residual;
   }
 
+  _hand_composition_bonus(hand) {
+    // Returns a bonus for hands with good set/run potential.
+    // Higher bonus = better hand composition = prefer keeping these cards together.
+    let bonus = 0;
+    const non_jokers = hand.filter((c) => c.rank !== 'Joker');
+    const joker_count = hand.length - non_jokers.length;
+
+    // Pairs/trips have strong set-discard potential
+    const rankCounts = {};
+    for (const card of non_jokers) {
+      rankCounts[card.rank] = (rankCounts[card.rank] || 0) + 1;
+    }
+    for (const [rank, count] of Object.entries(rankCounts)) {
+      if (count >= 2) {
+        const card_value = non_jokers.find((c) => c.rank === rank).value;
+        bonus += 1.2 + 0.08 * card_value * count;
+      }
+    }
+
+    // Consecutive same-suit cards have run potential
+    const suitCards = {};
+    for (const card of non_jokers) {
+      if (!suitCards[card.suit]) suitCards[card.suit] = [];
+      suitCards[card.suit].push(card);
+    }
+    for (const cards of Object.values(suitCards)) {
+      if (cards.length < 2) continue;
+      cards.sort((a, b) => a.rank_index() - b.rank_index());
+      for (let i = 0; i < cards.length - 1; i += 1) {
+        const gap = cards[i + 1].rank_index() - cards[i].rank_index();
+        if (gap === 1) {
+          // Directly consecutive: strong run potential
+          bonus += 1.5 + 0.06 * (cards[i].value + cards[i + 1].value);
+        } else if (gap === 2 && joker_count > 0) {
+          // One-gap bridgeable by joker
+          bonus += 0.8;
+        }
+      }
+    }
+
+    return Math.min(6.0, bonus);
+  }
+
   _opponent_threat_score() {
     let threat = 0;
     for (const player_info of Object.values(this.other_players)) {
@@ -800,6 +972,32 @@ class AIPlayer extends Player {
         || suit_ranks.has(card_rank + 1)
       ) {
         penalty += 0.8;
+      }
+
+      // Enhanced: penalize based on opponent collection patterns
+      for (const player_info of Object.values(this.other_players)) {
+        // Heavy penalty if opponent has been picking up this rank
+        const collected_count = player_info.collected_ranks[card.rank] || 0;
+        if (collected_count > 0) {
+          penalty += 3.0 * collected_count;
+        }
+
+        // Penalty if card is adjacent to opponent's suit-run collection
+        const opp_suit_ranks = player_info.collected_suit_ranks[card.suit];
+        if (opp_suit_ranks) {
+          if (opp_suit_ranks.has(card_rank) || opp_suit_ranks.has(card_rank - 1) || opp_suit_ranks.has(card_rank + 1)) {
+            penalty += 2.0;
+          }
+          // Extra penalty if this card would bridge two collected cards
+          if (opp_suit_ranks.has(card_rank - 1) && opp_suit_ranks.has(card_rank + 1)) {
+            penalty += 3.0;
+          }
+        }
+
+        // Mild safety bonus if opponent recently discarded this rank (they don't want it)
+        if (player_info.discard_history.some((d) => d.rank === card.rank)) {
+          penalty -= 0.4;
+        }
       }
     }
 

@@ -55,6 +55,10 @@ class AIPlayer(Player):
                     'hand_count': 5,
                     'known_cards': [],
                     'estimated_score': 50,
+                    'pickup_history': [],
+                    'discard_history': [],
+                    'collected_ranks': {},
+                    'collected_suit_ranks': {},
                 }
 
     def observe_turn(self, turn_info, discard_pile, draw_options):
@@ -80,9 +84,16 @@ class AIPlayer(Player):
             for card in discarded_cards:
                 if card in self.other_players[player_name]['known_cards']:
                     self.other_players[player_name]['known_cards'].remove(card)
+                self.other_players[player_name]['discard_history'].append(card)
 
             if drawn_card is not None:
                 self.other_players[player_name]['known_cards'].append(drawn_card)
+                self.other_players[player_name]['pickup_history'].append(drawn_card)
+                if drawn_card.rank != 'Joker':
+                    ranks = self.other_players[player_name]['collected_ranks']
+                    ranks[drawn_card.rank] = ranks.get(drawn_card.rank, 0) + 1
+                    suit_ranks = self.other_players[player_name]['collected_suit_ranks']
+                    suit_ranks.setdefault(drawn_card.suit, set()).add(drawn_card.rank_index())
 
             self.estimate_hand_values()
 
@@ -156,7 +167,7 @@ class AIPlayer(Player):
                 1 for card in discard_option if card.rank == 'Joker')
 
             for i, draw_card in enumerate(self.draw_options):
-                future_score, _best_discard = self._simulate_action(
+                future_score, best_next_discard = self._simulate_action(
                     post_discard_hand, draw_card, prune_to_best_discard=False)
                 immediate_points = post_turn_without_draw + draw_card.value
                 heuristic_cost = self._heuristic_action_cost(
@@ -169,7 +180,12 @@ class AIPlayer(Player):
                     immediate_points,
                     context.yaniv_next_turn_prob,
                 )
-                action_score = future_score + heuristic_cost - reset_bonus
+                composition_bonus = 0.0
+                if best_next_discard:
+                    new_hand = post_discard_hand + [draw_card]
+                    remaining = [c for c in new_hand if c not in best_next_discard]
+                    composition_bonus = 0.18 * self._hand_composition_bonus(remaining)
+                action_score = future_score + heuristic_cost - reset_bonus - composition_bonus
                 yield {'discard': discard_option, 'draw': i}, action_score, discard_value
 
             expected_future, expected_immediate = self._evaluate_deck_draw_samples(
@@ -190,14 +206,25 @@ class AIPlayer(Player):
                 feed_penalty=feed_penalty,
                 joker_discard_penalty=joker_discard_penalty,
             )
+            deck_composition_bonus = 0.0
+            if context.sampled_cards:
+                total_bonus = 0.0
+                for draw_card in context.sampled_cards:
+                    _fs, best_next = self._simulate_action(
+                        post_discard_hand, draw_card, prune_to_best_discard=False)
+                    if best_next:
+                        new_hand = post_discard_hand + [draw_card]
+                        remaining = [c for c in new_hand if c not in best_next]
+                        total_bonus += self._hand_composition_bonus(remaining)
+                deck_composition_bonus = 0.18 * (total_bonus / len(context.sampled_cards))
             action_score = expected_future + heuristic_cost + \
-                uncertainty_cost - expected_reset_bonus
+                uncertainty_cost - expected_reset_bonus - deck_composition_bonus
             yield {'discard': discard_option, 'draw': 'deck'}, action_score, discard_value
 
     def _heuristic_action_cost(self, threat, immediate_points, feed_penalty, joker_discard_penalty):
         return (
             (0.06 * threat * immediate_points)
-            + (0.12 * feed_penalty)
+            + (0.30 * feed_penalty)
             + (0.08 * joker_discard_penalty)
         )
 
@@ -462,6 +489,11 @@ class AIPlayer(Player):
         if not self.other_players:
             return own_hand_value <= 2
 
+        # Check for assaf hunting opportunity: if an opponent is likely to call Yaniv
+        # soon and our hand would assaf them, wait instead of calling ourselves.
+        if self._should_wait_for_assaf(own_hand_value):
+            return False
+
         unseen = self._get_unseen_cards()
         mean_value, var_value = self._mean_and_variance(unseen)
 
@@ -486,7 +518,82 @@ class AIPlayer(Player):
         risk_threshold *= (1.0 - 0.35 * score_pressure)
         risk_threshold = max(0.03, risk_threshold)
 
+        # Boost threshold (more willing to call) if it would eliminate an opponent
+        elimination_bonus = self._evaluate_elimination_potential()
+        risk_threshold += elimination_bonus * 0.08
+
+        # Reduce threshold (less willing to call) if it would give an opponent a reset
+        reset_penalty = self._evaluate_yaniv_reset_impact()
+        risk_threshold -= reset_penalty * 0.08
+        risk_threshold = max(0.03, risk_threshold)
+
         return assaf_risk <= risk_threshold
+
+    def _should_wait_for_assaf(self, own_hand_value):
+        """If an opponent is about to call Yaniv and we'd assaf them, wait.
+        IMPORTANT: We must still play a turn (discard+draw), so our hand will change.
+        Only wait if we can likely maintain a low enough hand through the mandatory trade.
+        """
+        for player_info in self.other_players.values():
+            estimated = player_info.get('estimated_score', 50)
+            hand_count = player_info.get('hand_count', 5)
+
+            if estimated > 5.5 or hand_count > 3:
+                continue
+            if own_hand_value > estimated:
+                continue
+
+            confidence = 0.0
+            if hand_count <= 1:
+                confidence = 0.7
+            elif hand_count <= 2:
+                confidence = 0.5
+            else:
+                confidence = 0.25
+
+            if estimated <= 3:
+                confidence += 0.15
+
+            # Estimate post-trade hand value: we must discard+draw.
+            max_card_value = max((c.value for c in self.hand), default=0)
+            min_post_discard = own_hand_value - max_card_value
+            # Conservative estimate: post-trade ≈ min_post_discard + 3
+            estimated_post_trade = min_post_discard + 3
+
+            # Only wait if post-trade hand would still likely assaf them
+            if confidence >= 0.40 and own_hand_value <= 2 and estimated_post_trade <= estimated + 1:
+                return True
+        return False
+
+    def _evaluate_elimination_potential(self):
+        """Returns a bonus for calling Yaniv if it would eliminate opponents."""
+        bonus = 0.0
+        for player_info in self.other_players.values():
+            opponent_score = player_info['current_score']
+            estimated_hand = player_info.get('estimated_score', 50)
+            new_score = opponent_score + estimated_hand
+
+            if new_score > 100:
+                bonus += 3.0
+            elif new_score > 85:
+                bonus += 0.8
+        return min(5.0, bonus)
+
+    def _evaluate_yaniv_reset_impact(self):
+        """Returns a penalty for calling Yaniv if it would give opponents a reset."""
+        penalty = 0.0
+        for player_info in self.other_players.values():
+            opponent_score = player_info['current_score']
+            estimated_hand = player_info.get('estimated_score', 50)
+            new_score = opponent_score + estimated_hand
+
+            if (new_score in (50, 100)) and opponent_score < new_score:
+                penalty += 2.5
+            elif abs(new_score - 50) <= 3 and opponent_score < 50:
+                penalty += 0.8
+            elif abs(new_score - 100) <= 3 and opponent_score < 100:
+                penalty += 0.8
+        return min(4.0, penalty)
 
     def _estimate_assaf_probability(self, player_info, own_hand_value, mean_value, var_value):
         known_sum = sum(card.value for card in player_info['known_cards'])
@@ -628,6 +735,38 @@ class AIPlayer(Player):
         self._cache_set(self._best_residual_cache, signature, best_residual)
         return best_residual
 
+    def _hand_composition_bonus(self, hand):
+        """Returns a bonus for hands with good set/run potential."""
+        bonus = 0.0
+        non_jokers = [c for c in hand if c.rank != 'Joker']
+        joker_count = len(hand) - len(non_jokers)
+
+        # Pairs/trips have strong set-discard potential
+        rank_counts = {}
+        for card in non_jokers:
+            rank_counts[card.rank] = rank_counts.get(card.rank, 0) + 1
+        for rank, count in rank_counts.items():
+            if count >= 2:
+                card_value = next(c.value for c in non_jokers if c.rank == rank)
+                bonus += 1.2 + 0.08 * card_value * count
+
+        # Consecutive same-suit cards have run potential
+        suit_cards = {}
+        for card in non_jokers:
+            suit_cards.setdefault(card.suit, []).append(card)
+        for cards in suit_cards.values():
+            if len(cards) < 2:
+                continue
+            cards.sort(key=lambda c: c.rank_index())
+            for i in range(len(cards) - 1):
+                gap = cards[i + 1].rank_index() - cards[i].rank_index()
+                if gap == 1:
+                    bonus += 1.5 + 0.06 * (cards[i].value + cards[i + 1].value)
+                elif gap == 2 and joker_count > 0:
+                    bonus += 0.8
+
+        return min(6.0, bonus)
+
     def _opponent_threat_score(self):
         threat = 0.0
         for player_info in self.other_players.values():
@@ -669,5 +808,29 @@ class AIPlayer(Player):
                 or (card_rank + 1) in suit_ranks
             ):
                 penalty += 0.8
+
+            # Enhanced: penalize based on opponent collection patterns
+            for player_info in self.other_players.values():
+                # Heavy penalty if opponent has been picking up this rank
+                collected_count = player_info['collected_ranks'].get(card.rank, 0)
+                if collected_count > 0:
+                    penalty += 3.0 * collected_count
+
+                # Penalty if card is adjacent to opponent's suit-run collection
+                opp_suit_ranks = player_info['collected_suit_ranks'].get(card.suit)
+                if opp_suit_ranks:
+                    if (
+                        card_rank in opp_suit_ranks
+                        or (card_rank - 1) in opp_suit_ranks
+                        or (card_rank + 1) in opp_suit_ranks
+                    ):
+                        penalty += 2.0
+                    # Extra penalty if this card would bridge two collected cards
+                    if (card_rank - 1) in opp_suit_ranks and (card_rank + 1) in opp_suit_ranks:
+                        penalty += 3.0
+
+                # Mild safety bonus if opponent recently discarded this rank
+                if any(d.rank == card.rank for d in player_info['discard_history']):
+                    penalty -= 0.4
 
         return penalty
