@@ -2,7 +2,7 @@
 
 async function fetchState() {
   try {
-    const res  = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
+    const res = await fetch(`/api/room/${code}?pid=${encodeURIComponent(pid)}`);
     const data = await res.json();
     onState(data);
   } catch (_) {}
@@ -78,10 +78,10 @@ function selectDraw(val) {
 
 function toggleCard(id) {
   selectedCards = selectedCards.includes(id)
-    ? selectedCards.filter(x => x !== id)
+    ? selectedCards.filter((x) => x !== id)
     : [...selectedCards, id];
 
-  $hand.querySelectorAll('.card').forEach(el => {
+  $hand.querySelectorAll('.card').forEach((el) => {
     el.classList.toggle('selected', selectedCards.includes(parseInt(el.dataset.id, 10)));
   });
 
@@ -95,14 +95,21 @@ function toggleCard(id) {
 function isValidDiscard(ids) {
   const me = getSelfPlayer();
   if (!me?.hand) return { valid: false };
-  const cards = ids.map(id => me.hand.find(c => c.id === id)).filter(Boolean);
+  const cards = ids.map((id) => me.hand.find((c) => c.id === id)).filter(Boolean);
   return validateDiscard(cards);
 }
 
 function updatePlayBtn() {
   const g = state && state.game;
-  if (!g || !g.isMyTurn || actionInFlight) { $playBtn.disabled = true; return; }
-  if (!selectedCards.length) { $playBtn.disabled = true; clearError(); return; }
+  if (!g || !g.isMyTurn || actionInFlight) {
+    $playBtn.disabled = true;
+    return;
+  }
+  if (!selectedCards.length) {
+    $playBtn.disabled = true;
+    clearError();
+    return;
+  }
 
   const { valid, reason } = isValidDiscard(selectedCards);
   $playBtn.disabled = !valid || selectedDraw === null;
@@ -131,8 +138,14 @@ async function playTurn() {
   if (isRoundResultModalOpen()) return;
   if (actionInFlight) return;
   if (!state?.game?.isMyTurn) return;
-  if (!selectedCards.length)  { showError('Select cards to discard'); return; }
-  if (selectedDraw === null)  { showError('Choose where to draw from'); return; }
+  if (!selectedCards.length) {
+    showError('Select cards to discard');
+    return;
+  }
+  if (selectedDraw === null) {
+    showError('Choose where to draw from');
+    return;
+  }
   updatePlayBtn();
   await submitAction({ discard: selectedCards, draw: selectedDraw });
 }
@@ -140,17 +153,20 @@ async function playTurn() {
 function bindEventHandlers() {
   $joinBtn.addEventListener('click', async () => {
     const name = $joinNameInput.value.trim() || 'Player';
-    const res  = await fetch('/api/join', {
-      method:  'POST',
+    const res = await fetch('/api/join', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ pid, code, name }),
+      body: JSON.stringify({ pid, code, name }),
     });
     const data = await res.json();
-    if (data.error) { $joinError.textContent = data.error; return; }
+    if (data.error) {
+      $joinError.textContent = data.error;
+      return;
+    }
     fetchState();
   });
 
-  $joinNameInput.addEventListener('keydown', e => {
+  $joinNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') $joinBtn.click();
   });
 
@@ -188,8 +204,8 @@ function bindEventHandlers() {
     $slamdownsCheckbox.addEventListener('change', async () => {
       if (!state || state.status !== 'waiting') return;
 
-      const firstHuman = state.members.find(m => !m.isAi);
-      const hasAi = state.members.some(m => m.isAi);
+      const firstHuman = state.members.find((m) => !m.isAi);
+      const hasAi = state.members.some((m) => m.isAi);
       const canEdit = !!firstHuman && firstHuman.pid === pid && !hasAi;
       if (!canEdit) {
         $slamdownsCheckbox.checked = false;
@@ -233,10 +249,10 @@ function bindEventHandlers() {
     $playAgainBtn.disabled = true;
     $playAgainBtn.textContent = 'Starting…';
     try {
-      const res  = await fetch('/api/playAgain', {
-        method:  'POST',
+      const res = await fetch('/api/playAgain', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ code, pid }),
+        body: JSON.stringify({ code, pid }),
       });
       const data = await res.json();
       if (data.nextRoom) {
@@ -254,7 +270,7 @@ function bindEventHandlers() {
   $roundResultClose?.addEventListener('click', dismissRoundResultModal);
   $roundResultContinue?.addEventListener('click', dismissRoundResultModal);
 
-  document.addEventListener('keydown', e => {
+  document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isRoundResultModalOpen()) {
       e.preventDefault();
       dismissRoundResultModal();

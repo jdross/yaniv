@@ -1,6 +1,6 @@
 // Shared state, DOM refs, and utility helpers for the game client.
 const code = location.pathname.split('/').pop().toLowerCase();
-const pid  = getYanivPid();
+const pid = getYanivPid();
 const { sortHand, suitSymbol, cardColor, validateDiscard } = window.YanivGameLogic;
 
 const UI_TEXT = {
@@ -14,9 +14,9 @@ const DRAW_ANIMATION = {
   fadeEase: 'cubic-bezier(0.55, 0, 1, 1)',
 };
 
-let state         = null;
+let state = null;
 let selectedCards = [];
-let selectedDraw  = null;
+let selectedDraw = null;
 // ⚠️  DEDUP KEYS — canonical strings, NOT JSON.stringify()
 //
 // State arrives from two sources:
@@ -28,52 +28,52 @@ let selectedDraw  = null;
 // produces different strings depending on its source. Every dedup key
 // below must therefore be built by extracting named fields in a fixed,
 // explicit order — never by stringifying the whole object.
-let prevTurnKey     = null; // fingerprint of the last rendered turn
-let prevRoundKey    = null; // fingerprint of the last rendered round banner
+let prevTurnKey = null; // fingerprint of the last rendered turn
+let prevRoundKey = null; // fingerprint of the last rendered round banner
 let prevAnimTurnKey = null; // lastTurn key we've already animated
-let prevYanivKey    = null; // lastRound key we've already announced
-let prevHandKey     = null; // hand fingerprint we've already highlighted
+let prevYanivKey = null; // lastRound key we've already announced
+let prevHandKey = null; // hand fingerprint we've already highlighted
 let activeRoundModalKey = null;
 let dismissedRoundModalKey = null;
 
 let actionInFlight = false; // true while a play/yaniv POST is in-flight
-let newCardId      = null;  // id of the card just drawn (highlighted briefly)
+let newCardId = null; // id of the card just drawn (highlighted briefly)
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const $joinScreen   = document.getElementById('join-screen');
-const $joinCode     = document.getElementById('join-code');
-const $joinPlayers  = document.getElementById('join-players');
-const $joinForm     = document.getElementById('join-form');
-const $joinBtn      = document.getElementById('join-btn');
+const $joinScreen = document.getElementById('join-screen');
+const $joinCode = document.getElementById('join-code');
+const $joinPlayers = document.getElementById('join-players');
+const $joinForm = document.getElementById('join-form');
+const $joinBtn = document.getElementById('join-btn');
 const $joinNameInput = document.getElementById('join-name-input');
-const $joinFullMsg  = document.getElementById('join-full-msg');
+const $joinFullMsg = document.getElementById('join-full-msg');
 const $joinStartedMsg = document.getElementById('join-started-msg');
-const $joinError    = document.getElementById('join-error');
-const $lobby        = document.getElementById('lobby');
-const $board        = document.getElementById('board');
-const $gameover     = document.getElementById('gameover');
-const $lobbyCode    = document.getElementById('lobby-code');
-const $shareBtn     = document.getElementById('share-btn');
+const $joinError = document.getElementById('join-error');
+const $lobby = document.getElementById('lobby');
+const $board = document.getElementById('board');
+const $gameover = document.getElementById('gameover');
+const $lobbyCode = document.getElementById('lobby-code');
+const $shareBtn = document.getElementById('share-btn');
 const $lobbyPlayers = document.getElementById('lobby-players');
-const $startBtn     = document.getElementById('start-btn');
+const $startBtn = document.getElementById('start-btn');
 const $slamdownsCheckbox = document.getElementById('slamdowns-checkbox');
-const $scoreBar     = document.getElementById('score-bar');
-const $turnLog      = document.getElementById('turn-log');
-const $turnStatus   = document.getElementById('turn-status');
-const $drawSection  = document.getElementById('draw-section');
-const $drawOptions  = document.getElementById('draw-options');
-const $deckBtn      = document.getElementById('deck-btn');
+const $scoreBar = document.getElementById('score-bar');
+const $turnLog = document.getElementById('turn-log');
+const $turnStatus = document.getElementById('turn-status');
+const $drawSection = document.getElementById('draw-section');
+const $drawOptions = document.getElementById('draw-options');
+const $deckBtn = document.getElementById('deck-btn');
 const $deckSizeLabel = document.getElementById('deck-size-label');
-const $pileHint     = document.getElementById('pile-hint');
-const $hand         = document.getElementById('hand');
-const $handValue    = document.getElementById('hand-value');
-const $yanivBtn     = document.getElementById('yaniv-btn');
-const $slamdownBtn  = document.getElementById('slamdown-btn');
-const $playBtn      = document.getElementById('play-btn');
+const $pileHint = document.getElementById('pile-hint');
+const $hand = document.getElementById('hand');
+const $handValue = document.getElementById('hand-value');
+const $yanivBtn = document.getElementById('yaniv-btn');
+const $slamdownBtn = document.getElementById('slamdown-btn');
+const $playBtn = document.getElementById('play-btn');
 const $lobbyOptions = document.getElementById('lobby-options');
-const $gameError    = document.getElementById('game-error');
-const $winnerText   = document.getElementById('winner-text');
-const $finalScores  = document.getElementById('final-scores');
+const $gameError = document.getElementById('game-error');
+const $winnerText = document.getElementById('winner-text');
+const $finalScores = document.getElementById('final-scores');
 const $playAgainBtn = document.getElementById('play-again-btn');
 const $roundResultModal = document.getElementById('round-result-modal');
 const $roundResultContent = document.getElementById('round-result-content');
@@ -146,4 +146,4 @@ function esc(s) {
 function show(el) { el.classList.remove('hidden'); }
 function hide(el) { el.classList.add('hidden'); }
 function showError(msg) { $gameError.textContent = msg; }
-function clearError()   { $gameError.textContent = ''; }
+function clearError() { $gameError.textContent = ''; }

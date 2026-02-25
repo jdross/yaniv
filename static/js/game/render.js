@@ -27,7 +27,7 @@ function showLobby(s) {
   resetRoundResultState();
   showScreen($lobby);
   $lobbyCode.textContent = s.code;
-  $shareBtn.textContent  = getShareButtonLabel();
+  $shareBtn.textContent = getShareButtonLabel();
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
@@ -58,7 +58,7 @@ function showLobby(s) {
 function showBoard(s) {
   showScreen($board);
 
-  const g  = s.game;
+  const g = s.game;
   const me = getSelfPlayer(s);
 
   // Scores.
@@ -95,12 +95,14 @@ function showBoard(s) {
   if (me && me.hand) {
     const hand = sortHand(me.hand);
     $hand.innerHTML = hand.map((c, i) => {
-      const classes = ['card', cardColor(c),
+      const classes = [
+        'card',
+        cardColor(c),
         selectedCards.includes(c.id) ? 'selected' : '',
-        c.id === newCardId            ? 'card-new'  : '',
+        c.id === newCardId ? 'card-new' : '',
       ].filter(Boolean).join(' ');
       return `<div class="${classes}" data-id="${c.id}">
-         <span class="card-num">${i+1}</span>
+         <span class="card-num">${i + 1}</span>
          <span class="card-rank">${esc(c.rank)}</span>
          <span class="card-suit">${c.suit ? suitSymbol(c.suit) : '🃏'}</span>
          <span class="card-rank-bot">${esc(c.rank)}</span>
@@ -313,7 +315,7 @@ function formatRoundResultModal(round, currentState) {
   let headline;
   if (round.assaf) {
     const assafedStr = myName === round.assaf.assafed ? 'You' : `<strong>${esc(round.assaf.assafed)}</strong>`;
-    const byStr      = myName === round.assaf.by      ? 'you'  : `<strong>${esc(round.assaf.by)}</strong>`;
+    const byStr = myName === round.assaf.by ? 'you' : `<strong>${esc(round.assaf.by)}</strong>`;
     headline = `😱 ${assafedStr} called Yaniv${handPts} but got Assaf'd by ${byStr}!`;
   } else {
     const who = myName === round.declarer ? 'You' : `<strong>${esc(round.declarer)}</strong>`;
@@ -323,25 +325,26 @@ function formatRoundResultModal(round, currentState) {
   let rowsHtml = '';
   if (round.scoreChanges?.length) {
     rowsHtml = round.scoreChanges.map(sc => {
-      const isMe       = myName === sc.name;
-      const name       = isMe ? 'You' : esc(sc.name);
-      const isAssafed  = round.assaf?.assafed === sc.name;
-      const finalHand  = Array.isArray(sc.finalHand) ? sc.finalHand : [];
+      const isMe = myName === sc.name;
+      const name = isMe ? 'You' : esc(sc.name);
+      const isAssafed = round.assaf?.assafed === sc.name;
+      const finalHand = Array.isArray(sc.finalHand) ? sc.finalHand : [];
 
       let delta;
-      if (sc.added === 0)  delta = `→ ${sc.newScore}`;
-      else if (sc.reset)   delta = `+${sc.added} → reset to ${sc.newScore}`;
-      else                 delta = `+${sc.added} → ${sc.newScore}`;
-      if (sc.eliminated)   delta += ' ❌ eliminated';
+      if (sc.added === 0) delta = `→ ${sc.newScore}`;
+      else if (sc.reset) delta = `+${sc.added} → reset to ${sc.newScore}`;
+      else delta = `+${sc.added} → ${sc.newScore}`;
+      if (sc.eliminated) delta += ' ❌ eliminated';
 
       const handHtml = finalHand.length
         ? `<span class="round-hand-cards">${finalHand.map(card => `<span class="round-hand-card">${cardShortHtml(card)}</span>`).join('')}</span>`
         : '<span class="round-hand-empty">no cards</span>';
 
-      const cls = ['round-player-row',
-        isAssafed   ? 'assafed' : '',
-        sc.reset    ? 'reset'   : '',
-        sc.eliminated ? 'elim'  : '',
+      const cls = [
+        'round-player-row',
+        isAssafed ? 'assafed' : '',
+        sc.reset ? 'reset' : '',
+        sc.eliminated ? 'elim' : '',
       ].filter(Boolean).join(' ');
 
       return `<div class="${cls}">
@@ -357,7 +360,7 @@ function formatRoundResultModal(round, currentState) {
 
 function formatLastTurn(t, me) {
   const isYou = me && me.name === t.player;
-  const who   = isYou ? 'You' : esc(t.player);
+  const who = isYou ? 'You' : esc(t.player);
   if (t.isSlamdown) {
     const card = t.discarded[0];
     return `💥 ${who} slammed down <strong>${cardShortHtml(card)}</strong>`;
