@@ -54,15 +54,14 @@ function showLobby(s) {
   }
 }
 
-function fanHtml(cardCount) {
-  if (cardCount === 0) return '<div class="player-fan"></div>';
+function fanCardHtml(cardCount) {
+  if (cardCount === 0) return '';
   const n = Math.min(cardCount, 10);
   const maxAngle = Math.min(35, n * 7);
-  const cards = Array.from({ length: n }, (_, i) => {
+  return Array.from({ length: n }, (_, i) => {
     const angle = n === 1 ? 0 : -maxAngle + (i * 2 * maxAngle / (n - 1));
     return `<div class="fan-card" style="transform:rotate(${angle.toFixed(1)}deg)"></div>`;
   }).join('');
-  return `<div class="player-fan">${cards}</div>`;
 }
 
 function showBoard(s) {
@@ -71,17 +70,19 @@ function showBoard(s) {
   const g  = s.game;
   const me = getSelfPlayer(s);
 
-  // Opponents bar — only other players, shown as fanned card hands.
+  // Opponents bar — only other players, shown as fanned card hands with info overlaid.
   $scoreBar.innerHTML = g.players
     .filter(p => !p.is_self)
     .map(p =>
       `<div class="opponent-player ${p.is_current ? 'current' : ''}">
-         <div class="opp-info">
-           <div class="opp-name">${esc(p.name)}</div>
-           <div class="opp-score">${p.score}</div>
-           <div class="opp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
+         <div class="player-fan">
+           ${fanCardHtml(p.hand_count)}
+           <div class="opp-info">
+             <div class="opp-name">${esc(p.name)}</div>
+             <div class="opp-score">${p.score}</div>
+             <div class="opp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
+           </div>
          </div>
-         ${fanHtml(p.hand_count)}
        </div>`
     ).join('');
 
