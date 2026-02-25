@@ -2,10 +2,10 @@
 
 function onState(s) {
   if (s.error) { window.location.href = '/'; return; }
-  if (s.next_room) { window.location.href = `/game/${s.next_room}`; return; }
+  if (s.nextRoom) { window.location.href = `/game/${s.nextRoom}`; return; }
 
   // Compare hands using an order-independent fingerprint so server-side sorting
-  // (start_turn) doesn't falsely look like a hand change. Only clear the
+  // (startTurn) doesn't falsely look like a hand change. Only clear the
   // pre-selection when the actual set of cards changes (cards played/drawn).
   const oldHandKey = handKey(state);
   const newHandKey = handKey(s);
@@ -22,23 +22,23 @@ function onState(s) {
     prevHandKey   = newHandKey;
   }
 
-  // Draw animation — fires once per unique last_turn when drawn from deck or pile.
-  if (s.last_turn && s.status === 'playing') {
-    const t = s.last_turn;
+  // Draw animation — fires once per unique lastTurn when drawn from deck or pile.
+  if (s.lastTurn && s.status === 'playing') {
+    const t = s.lastTurn;
     const animKey = [
       t.player,
       (t.discarded || []).map(c => c.id).sort((a, b) => a - b).join(','),
-      t.drawn_from,
-      t.drawn_card ? t.drawn_card.id : '',
+      t.drawnFrom,
+      t.drawnCard ? t.drawnCard.id : '',
     ].join('|');
     if (animKey !== prevAnimTurnKey) {
-      const df = s.last_turn.drawn_from;
+      const df = s.lastTurn.drawnFrom;
       if (df === 'deck' || df === 'pile') {
         const me = getSelfPlayer(s);
-        const isMyDraw = !!(me && me.name === s.last_turn.player);
+        const isMyDraw = !!(me && me.name === s.lastTurn.player);
         // Pile draw is always visible; deck draw is only known on your own turn.
         const cardToShow = df === 'pile'
-          ? s.last_turn.drawn_card
+          ? s.lastTurn.drawnCard
           : (isMyDraw ? drawnCard : null);
         animateCardDraw(isMyDraw, cardToShow, df === 'pile');
       }
@@ -47,17 +47,17 @@ function onState(s) {
   }
 
   // Yaniv / Assaf announcement animation — guard against first-load replay.
-  if (s.last_round) {
-    const r = s.last_round;
+  if (s.lastRound) {
+    const r = s.lastRound;
     const yanivKey = roundResultKey(r);
-    if (yanivKey !== prevYanivKey && state !== null) animateYaniv(s.last_round);
+    if (yanivKey !== prevYanivKey && state !== null) animateYaniv(s.lastRound);
     prevYanivKey = yanivKey;
   }
 
   // Clear draw-source selection whenever it's not our turn.
-  if (!s.game?.is_my_turn) selectedDraw = null;
+  if (!s.game?.isMyTurn) selectedDraw = null;
 
-  const roundKey = s.status === 'playing' ? roundResultKey(s.last_round) : null;
+  const roundKey = s.status === 'playing' ? roundResultKey(s.lastRound) : null;
   if (roundKey !== activeRoundModalKey) {
     activeRoundModalKey = roundKey;
     dismissedRoundModalKey = null;
@@ -65,7 +65,7 @@ function onState(s) {
   if (!roundKey) {
     hideRoundResultModal();
   } else if (dismissedRoundModalKey !== roundKey) {
-    showRoundResultModal(s.last_round, s);
+    showRoundResultModal(s.lastRound, s);
   }
 
   state          = s;

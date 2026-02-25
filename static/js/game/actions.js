@@ -72,7 +72,7 @@ async function copyTextToClipboard(text) {
 
 function selectDraw(val) {
   selectedDraw = val;
-  renderDrawOptions(state.game.draw_options, state.game.discard_top, state.game.is_my_turn);
+  renderDrawOptions(state.game.drawOptions, state.game.discardTop, state.game.isMyTurn);
   updatePlayBtn();
 }
 
@@ -101,7 +101,7 @@ function isValidDiscard(ids) {
 
 function updatePlayBtn() {
   const g = state && state.game;
-  if (!g || !g.is_my_turn || actionInFlight) { $playBtn.disabled = true; return; }
+  if (!g || !g.isMyTurn || actionInFlight) { $playBtn.disabled = true; return; }
   if (!selectedCards.length) { $playBtn.disabled = true; clearError(); return; }
 
   const { valid, reason } = isValidDiscard(selectedCards);
@@ -130,7 +130,7 @@ async function submitAction(payload, { hideSlamdown = false } = {}) {
 async function playTurn() {
   if (isRoundResultModalOpen()) return;
   if (actionInFlight) return;
-  if (!state?.game?.is_my_turn) return;
+  if (!state?.game?.isMyTurn) return;
   if (!selectedCards.length)  { showError('Select cards to discard'); return; }
   if (selectedDraw === null)  { showError('Choose where to draw from'); return; }
   updatePlayBtn();
@@ -180,16 +180,16 @@ function bindEventHandlers() {
   });
 
   $startBtn.addEventListener('click', () => {
-    const slamdowns_allowed = $slamdownsCheckbox ? $slamdownsCheckbox.checked : false;
-    post('/api/start', { code, pid, slamdowns_allowed });
+    const slamdownsAllowed = $slamdownsCheckbox ? $slamdownsCheckbox.checked : false;
+    post('/api/start', { code, pid, slamdownsAllowed });
   });
 
   if ($slamdownsCheckbox) {
     $slamdownsCheckbox.addEventListener('change', async () => {
       if (!state || state.status !== 'waiting') return;
 
-      const firstHuman = state.members.find(m => !m.is_ai);
-      const hasAi = state.members.some(m => m.is_ai);
+      const firstHuman = state.members.find(m => !m.isAi);
+      const hasAi = state.members.some(m => m.isAi);
       const canEdit = !!firstHuman && firstHuman.pid === pid && !hasAi;
       if (!canEdit) {
         $slamdownsCheckbox.checked = false;
@@ -203,7 +203,7 @@ function bindEventHandlers() {
           body: JSON.stringify({
             code,
             pid,
-            slamdowns_allowed: $slamdownsCheckbox.checked,
+            slamdownsAllowed: $slamdownsCheckbox.checked,
           }),
         });
         const data = await res.json();
@@ -212,7 +212,7 @@ function bindEventHandlers() {
           return;
         }
         if (data.options) {
-          $slamdownsCheckbox.checked = !!data.options.slamdowns_allowed;
+          $slamdownsCheckbox.checked = !!data.options.slamdownsAllowed;
         }
       } catch (_) {
         fetchState();
@@ -222,25 +222,25 @@ function bindEventHandlers() {
 
   $playBtn.addEventListener('click', playTurn);
   $yanivBtn.addEventListener('click', async () => {
-    await submitAction({ declare_yaniv: true });
+    await submitAction({ declareYaniv: true });
   });
 
   $slamdownBtn.addEventListener('click', async () => {
-    await submitAction({ declare_slamdown: true }, { hideSlamdown: true });
+    await submitAction({ declareSlamdown: true }, { hideSlamdown: true });
   });
 
   $playAgainBtn.addEventListener('click', async () => {
     $playAgainBtn.disabled = true;
     $playAgainBtn.textContent = 'Starting…';
     try {
-      const res  = await fetch('/api/play_again', {
+      const res  = await fetch('/api/playAgain', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ code, pid }),
       });
       const data = await res.json();
-      if (data.next_room) {
-        window.location.href = `/game/${data.next_room}`;
+      if (data.nextRoom) {
+        window.location.href = `/game/${data.nextRoom}`;
       } else {
         $playAgainBtn.disabled = false;
         $playAgainBtn.textContent = 'Play again';
@@ -279,10 +279,10 @@ function bindEventHandlers() {
     }
 
     // Draw / play / Yaniv shortcuts: only on your turn.
-    if (!g.is_my_turn) return;
+    if (!g.isMyTurn) return;
     if (e.key === 'd' || e.key === 'D') {
       e.preventDefault();
-      const opts = state.game.draw_options;
+      const opts = state.game.drawOptions;
       if (opts.length === 0 || selectedDraw === null) {
         selectDraw('deck');
       } else if (selectedDraw === 'deck') {
@@ -297,8 +297,8 @@ function bindEventHandlers() {
       if (!$playBtn.disabled) playTurn();
     } else if (e.key === 'y' || e.key === 'Y') {
       e.preventDefault();
-      if (me.can_yaniv && !actionInFlight) {
-        submitAction({ declare_yaniv: true });
+      if (me.canYaniv && !actionInFlight) {
+        submitAction({ declareYaniv: true });
       }
     }
   });

@@ -8,12 +8,12 @@ function showJoin(s) {
 
   $joinPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
-       <span class="player-icon">${m.is_ai ? '🤖' : '👤'}</span>
+       <span class="player-icon">${m.isAi ? '🤖' : '👤'}</span>
        <span class="player-name">${esc(m.name)}</span>
      </div>`
   ).join('');
 
-  const humanCount = s.members.filter(m => !m.is_ai).length;
+  const humanCount = s.members.filter(m => !m.isAi).length;
   if (s.status !== 'waiting') {
     hide($joinForm); hide($joinFullMsg); show($joinStartedMsg);
   } else if (humanCount >= 4) {
@@ -31,7 +31,7 @@ function showLobby(s) {
 
   $lobbyPlayers.innerHTML = s.members.map(m =>
     `<div class="lobby-player">
-       <span class="player-icon">${m.is_ai ? '🤖' : '👤'}</span>
+       <span class="player-icon">${m.isAi ? '🤖' : '👤'}</span>
        <span class="player-name">${esc(m.name)}${m.pid === pid ? ' (you)' : ''}</span>
        ${m.pid === pid ? '<button class="btn-leave">Leave</button>' : ''}
      </div>`
@@ -45,10 +45,10 @@ function showLobby(s) {
   });
 
   // Show slamdown option only to the creator when there are no AIs.
-  const firstHuman = s.members.find(m => !m.is_ai);
-  const hasAi = s.members.some(m => m.is_ai);
+  const firstHuman = s.members.find(m => !m.isAi);
+  const hasAi = s.members.some(m => m.isAi);
   if (firstHuman && firstHuman.pid === pid && !hasAi) {
-    if ($slamdownsCheckbox) $slamdownsCheckbox.checked = s.options?.slamdowns_allowed !== false;
+    if ($slamdownsCheckbox) $slamdownsCheckbox.checked = s.options?.slamdownsAllowed !== false;
     show($lobbyOptions);
   } else {
     hide($lobbyOptions);
@@ -63,18 +63,18 @@ function showBoard(s) {
 
   // Scores.
   $scoreBar.innerHTML = g.players.map(p =>
-    `<div class="score-player ${p.is_current ? 'current' : ''} ${p.is_self ? 'self' : ''}">
+    `<div class="score-player ${p.isCurrent ? 'current' : ''} ${p.isSelf ? 'self' : ''}">
        <div class="sp-name">${esc(p.name)}</div>
        <div class="sp-score">${p.score}</div>
-       <div class="sp-cards">${p.hand_count} card${p.hand_count !== 1 ? 's' : ''}</div>
+       <div class="sp-cards">${p.handCount} card${p.handCount !== 1 ? 's' : ''}</div>
      </div>`
   ).join('');
 
   // Turn log (last 3 plays, animated).
-  renderTurnLog(s.last_turn, s.last_round);
+  renderTurnLog(s.lastTurn, s.lastRound);
 
   // Turn status — only shown when it's your turn.
-  if (g.is_my_turn) {
+  if (g.isMyTurn) {
     $turnStatus.textContent = UI_TEXT.turnPrompt;
     show($turnStatus);
   } else {
@@ -83,12 +83,12 @@ function showBoard(s) {
 
   // Draw section — always visible; interactive only on your turn.
   show($drawSection);
-  $deckSizeLabel.textContent = `${g.deck_size} left`;
-  if (g.is_my_turn) {
+  $deckSizeLabel.textContent = `${g.deckSize} left`;
+  if (g.isMyTurn) {
     if (selectedDraw === null) selectedDraw = 'deck';
-    renderDrawOptions(g.draw_options, g.discard_top, true);
+    renderDrawOptions(g.drawOptions, g.discardTop, true);
   } else {
-    renderDrawOptions([], g.discard_top, false);
+    renderDrawOptions([], g.discardTop, false);
   }
 
   // Hand — always sorted client-side; click handlers always attached for pre-selection.
@@ -114,8 +114,8 @@ function showBoard(s) {
       el.onclick = () => toggleCard(parseInt(el.dataset.id, 10));
     });
 
-    (g.is_my_turn && me.can_yaniv) ? show($yanivBtn) : hide($yanivBtn);
-    (g.slamdowns_allowed && g.can_slamdown && !g.is_my_turn) ? show($slamdownBtn) : hide($slamdownBtn);
+    (g.isMyTurn && me.canYaniv) ? show($yanivBtn) : hide($yanivBtn);
+    (g.slamdownsAllowed && g.canSlamdown && !g.isMyTurn) ? show($slamdownBtn) : hide($slamdownBtn);
   } else {
     $hand.innerHTML = UI_TEXT.waitingHand;
     $handValue.textContent = '';
@@ -290,8 +290,8 @@ function renderTurnLog(lastTurn, lastRound) {
   const key = [
     lastTurn.player,
     (lastTurn.discarded || []).map(c => c.id).sort((a, b) => a - b).join(','),
-    lastTurn.drawn_from,
-    lastTurn.drawn_card ? lastTurn.drawn_card.id : '',
+    lastTurn.drawnFrom,
+    lastTurn.drawnCard ? lastTurn.drawnCard.id : '',
     roundKey,
   ].join('|');
   if (key === prevTurnKey) return;
@@ -308,7 +308,7 @@ function renderTurnLog(lastTurn, lastRound) {
 
 function formatRoundResultModal(round, currentState) {
   const myName = getSelfPlayer(currentState)?.name;
-  const handPts = round.declarer_hand_value != null ? ` (${round.declarer_hand_value} pts)` : '';
+  const handPts = round.declarerHandValue != null ? ` (${round.declarerHandValue} pts)` : '';
 
   let headline;
   if (round.assaf) {
@@ -321,17 +321,17 @@ function formatRoundResultModal(round, currentState) {
   }
 
   let rowsHtml = '';
-  if (round.score_changes?.length) {
-    rowsHtml = round.score_changes.map(sc => {
+  if (round.scoreChanges?.length) {
+    rowsHtml = round.scoreChanges.map(sc => {
       const isMe       = myName === sc.name;
       const name       = isMe ? 'You' : esc(sc.name);
       const isAssafed  = round.assaf?.assafed === sc.name;
-      const finalHand  = Array.isArray(sc.final_hand) ? sc.final_hand : [];
+      const finalHand  = Array.isArray(sc.finalHand) ? sc.finalHand : [];
 
       let delta;
-      if (sc.added === 0)  delta = `→ ${sc.new_score}`;
-      else if (sc.reset)   delta = `+${sc.added} → reset to ${sc.new_score}`;
-      else                 delta = `+${sc.added} → ${sc.new_score}`;
+      if (sc.added === 0)  delta = `→ ${sc.newScore}`;
+      else if (sc.reset)   delta = `+${sc.added} → reset to ${sc.newScore}`;
+      else                 delta = `+${sc.added} → ${sc.newScore}`;
       if (sc.eliminated)   delta += ' ❌ eliminated';
 
       const handHtml = finalHand.length
@@ -358,15 +358,15 @@ function formatRoundResultModal(round, currentState) {
 function formatLastTurn(t, me) {
   const isYou = me && me.name === t.player;
   const who   = isYou ? 'You' : esc(t.player);
-  if (t.is_slamdown) {
+  if (t.isSlamdown) {
     const card = t.discarded[0];
     return `💥 ${who} slammed down <strong>${cardShortHtml(card)}</strong>`;
   }
   const cards = t.discarded.map(cardShortHtml).join(' ');
   const drew =
-    t.drawn_from === 'pile'
-      ? t.drawn_card
-        ? `<strong>${cardShortHtml(t.drawn_card)}</strong> from pile`
+    t.drawnFrom === 'pile'
+      ? t.drawnCard
+        ? `<strong>${cardShortHtml(t.drawnCard)}</strong> from pile`
         : 'from pile'
       : 'from deck';
   return `${who} discarded <strong>${cards}</strong> · drew ${drew}`;

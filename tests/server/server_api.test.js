@@ -68,7 +68,7 @@ async function createStartedGame() {
     body: {
     name: 'P1',
     pid: 'pid-1',
-    ai_count: 0,
+    aiCount: 0,
     },
   });
   assert.equal(create.status, 200);
@@ -98,7 +98,7 @@ async function currentTurnIdentity(code) {
   });
   assert.equal(roomView.status, 200);
 
-  const current = roomView.body.game.players.find((player) => player.is_current);
+  const current = roomView.body.game.players.find((player) => player.isCurrent);
   assert.ok(current, 'Expected a current player in room state');
   assert.ok(current.pid, 'Expected current player PID in room state');
   return current.pid;
@@ -113,7 +113,7 @@ test('action with non-integer draw returns 400', async () => {
     query: { pid: currentPid },
   });
   assert.equal(state.status, 200);
-  const me = state.body.game.players.find((player) => player.is_self);
+  const me = state.body.game.players.find((player) => player.isSelf);
   const firstCard = me.hand[0].id;
 
   const action = await callRoute('post', '/api/action', {
@@ -137,7 +137,7 @@ test('valid action sets last turn', async () => {
     params: { code },
     query: { pid: currentPid },
   });
-  const me = state.body.game.players.find((player) => player.is_self);
+  const me = state.body.game.players.find((player) => player.isSelf);
   const firstCard = me.hand[0].id;
 
   const action = await callRoute('post', '/api/action', {
@@ -163,7 +163,7 @@ test('waiting room options persist across join and start', async () => {
     body: {
       name: 'P1',
       pid: 'pid-1',
-      ai_count: 0,
+      aiCount: 0,
     },
   });
   const code = create.body.code;
@@ -172,11 +172,11 @@ test('waiting room options persist across join and start', async () => {
     body: {
       code,
       pid: 'pid-1',
-      slamdowns_allowed: true,
+      slamdownsAllowed: true,
     },
   });
   assert.equal(options.status, 200);
-  assert.equal(options.body.options.slamdowns_allowed, true);
+  assert.equal(options.body.options.slamdownsAllowed, true);
 
   const join = await callRoute('post', '/api/join', {
     body: {
@@ -191,7 +191,7 @@ test('waiting room options persist across join and start', async () => {
     params: { code },
     query: { pid: 'pid-2' },
   });
-  assert.equal(state.body.options.slamdowns_allowed, true);
+  assert.equal(state.body.options.slamdownsAllowed, true);
 
   const start = await callRoute('post', '/api/start', {
     body: {
@@ -208,7 +208,7 @@ test('only creator can change waiting options', async () => {
     body: {
       name: 'P1',
       pid: 'pid-1',
-      ai_count: 0,
+      aiCount: 0,
     },
   });
   const code = create.body.code;
@@ -226,7 +226,7 @@ test('only creator can change waiting options', async () => {
     body: {
       code,
       pid: 'pid-2',
-      slamdowns_allowed: true,
+      slamdownsAllowed: true,
     },
   });
   assert.equal(options.status, 400);
@@ -262,7 +262,7 @@ test('yaniv round payload includes final hands before redeal', async () => {
   const code = await createStartedGame();
   const room = rooms.get(code);
   const game = room.game;
-  const declarer = game._getPlayer();
+  const declarer = game.getCurrentPlayer();
   const opponent = game.players.find((player) => player !== declarer);
 
   declarer.hand = [new Card('A', 'Clubs')];
@@ -271,10 +271,10 @@ test('yaniv round payload includes final hands before redeal', async () => {
   applyYanivOutcome(room, game, declarer);
   const lastRound = room.lastRound;
 
-  const changes = Object.fromEntries(lastRound.score_changes.map((change) => [change.name, change]));
+  const changes = Object.fromEntries(lastRound.scoreChanges.map((change) => [change.name, change]));
   const declarerChange = changes[declarer.name];
   const opponentChange = changes[opponent.name];
 
-  assert.deepEqual(declarerChange.final_hand.map((card) => card.rank), ['A']);
-  assert.deepEqual(opponentChange.final_hand.map((card) => card.rank), ['K', 'Q']);
+  assert.deepEqual(declarerChange.finalHand.map((card) => card.rank), ['A']);
+  assert.deepEqual(opponentChange.finalHand.map((card) => card.rank), ['K', 'Q']);
 });

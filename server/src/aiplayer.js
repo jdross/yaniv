@@ -18,11 +18,11 @@ function combinations(values, size) {
 }
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function removeFirstMatchingCard(cards, target) {
-  const idx = cards.findIndex((card) => card._card === target._card);
+  const idx = cards.findIndex((card) => card.id === target.id);
   if (idx !== -1) {
     cards.splice(idx, 1);
     return true;
@@ -70,78 +70,78 @@ class AIPlayer extends Player {
   static _FULL_DECK = Card.createDeck();
   static _MAX_CACHE_ENTRIES = 50000;
 
-  constructor(name, rollout_samples = 24) {
+  constructor(name, rolloutSamples = 24) {
     super(name);
-    this.rollout_samples = Math.max(4, Number.parseInt(rollout_samples, 10));
-    this.other_players = {};
-    this.draw_options = [];
-    this.public_discard_pile = [];
+    this.rolloutSamples = Math.max(4, Number.parseInt(rolloutSamples, 10));
+    this.otherPlayers = {};
+    this.drawOptions = [];
+    this.publicDiscardPile = [];
 
-    this._discard_options_cache = new Map();
-    this._best_residual_cache = new Map();
-    this._best_discard_options_cache = new Map();
-    this._simulate_action_cache = new Map();
+    this._discardOptionsCache = new Map();
+    this._bestResidualCache = new Map();
+    this._bestDiscardOptionsCache = new Map();
+    this._simulateActionCache = new Map();
   }
 
-  observe_round(round_info) {
-    this.other_players = {};
-    this.draw_options = [];
-    this.public_discard_pile = [];
-    this._discard_options_cache.clear();
-    this._best_residual_cache.clear();
-    this._best_discard_options_cache.clear();
-    this._simulate_action_cache.clear();
+  observeRound(roundInfo) {
+    this.otherPlayers = {};
+    this.drawOptions = [];
+    this.publicDiscardPile = [];
+    this._discardOptionsCache.clear();
+    this._bestResidualCache.clear();
+    this._bestDiscardOptionsCache.clear();
+    this._simulateActionCache.clear();
 
-    for (const player_info of round_info) {
-      if (player_info.name !== this.name) {
-        this.other_players[player_info.name] = {
-          current_score: player_info.score,
-          hand_count: 5,
-          known_cards: [],
-          estimated_score: 50,
-          pickup_history: [],
-          discard_history: [],
-          collected_ranks: {},
-          collected_suit_ranks: {},
+    for (const playerInfo of roundInfo) {
+      if (playerInfo.name !== this.name) {
+        this.otherPlayers[playerInfo.name] = {
+          currentScore: playerInfo.score,
+          handCount: 5,
+          knownCards: [],
+          estimatedScore: 50,
+          pickupHistory: [],
+          discardHistory: [],
+          collectedRanks: {},
+          collectedSuitRanks: {},
         };
       }
     }
   }
 
-  observe_turn(turn_info, discard_pile, draw_options) {
-    const player_name = turn_info.player.name;
-    this.draw_options = [...draw_options];
-    this.public_discard_pile = [...discard_pile];
+  observeTurn(turnInfo, discardPile, drawOptions) {
+    const playerName = turnInfo.player.name;
+    this.drawOptions = [...drawOptions];
+    this.publicDiscardPile = [...discardPile];
 
-    if (Object.prototype.hasOwnProperty.call(this.other_players, player_name)) {
-      const playerInfo = this.other_players[player_name];
-      playerInfo.hand_count = turn_info.hand_count;
+    if (Object.prototype.hasOwnProperty.call(this.otherPlayers, playerName)) {
+      const playerInfo = this.otherPlayers[playerName];
+      playerInfo.handCount = turnInfo.handCount;
 
-      const discarded_cards = turn_info.discarded_cards;
-      const drawn_card = turn_info.drawn_card;
+      const discardedCards = turnInfo.discardedCards;
+      const drawnCard = turnInfo.drawnCard;
 
-      for (const card of discarded_cards) {
-        removeFirstMatchingCard(playerInfo.known_cards, card);
-        playerInfo.discard_history.push(card);
+      for (const card of discardedCards) {
+        removeFirstMatchingCard(playerInfo.knownCards, card);
+        playerInfo.discardHistory.push(card);
       }
 
-      if (drawn_card !== null && drawn_card !== undefined) {
-        playerInfo.known_cards.push(drawn_card);
-        playerInfo.pickup_history.push(drawn_card);
-        if (drawn_card.rank !== 'Joker') {
-          playerInfo.collected_ranks[drawn_card.rank] = (playerInfo.collected_ranks[drawn_card.rank] || 0) + 1;
-          if (!playerInfo.collected_suit_ranks[drawn_card.suit]) {
-            playerInfo.collected_suit_ranks[drawn_card.suit] = new Set();
+      if (drawnCard !== null && drawnCard !== undefined) {
+        playerInfo.knownCards.push(drawnCard);
+        playerInfo.pickupHistory.push(drawnCard);
+        if (drawnCard.rank !== 'Joker') {
+          playerInfo.collectedRanks[drawnCard.rank] = (playerInfo.collectedRanks[drawnCard.rank] || 0) + 1;
+          if (!playerInfo.collectedSuitRanks[drawnCard.suit]) {
+            playerInfo.collectedSuitRanks[drawnCard.suit] = new Set();
           }
-          playerInfo.collected_suit_ranks[drawn_card.suit].add(drawn_card.rank_index());
+          playerInfo.collectedSuitRanks[drawnCard.suit].add(drawnCard.rankIndex());
         }
       }
 
-      this.estimate_hand_values();
+      this.estimateHandValues();
     }
   }
 
-  _cache_set(cache, key, value) {
+  _cacheSet(cache, key, value) {
     if (cache.has(key)) {
       cache.delete(key);
     } else if (cache.size >= AIPlayer._MAX_CACHE_ENTRIES) {
@@ -151,7 +151,7 @@ class AIPlayer extends Player {
     cache.set(key, value);
   }
 
-  _cache_get(cache, key) {
+  _cacheGet(cache, key) {
     if (!cache.has(key)) {
       return null;
     }
@@ -161,136 +161,136 @@ class AIPlayer extends Player {
     return value;
   }
 
-  decide_action() {
-    for (const player_info of Object.values(this.other_players)) {
-      if (player_info.estimated_score <= 5) {
-        const reset_action = this.action_to_reset();
-        if (reset_action !== null) {
-          return reset_action;
+  decideAction() {
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      if (playerInfo.estimatedScore <= 5) {
+        const resetAction = this.actionToReset();
+        if (resetAction !== null) {
+          return resetAction;
         }
       }
     }
 
-    const context = this._build_action_context();
-    let best_action = null;
-    let best_score = Number.POSITIVE_INFINITY;
-    let best_discard_value = -1;
+    const context = this._buildActionContext();
+    let bestAction = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestDiscardValue = -1;
 
-    for (const [action, action_score, discard_value] of this._iter_candidate_actions(context)) {
-      if (action_score < best_score || (action_score === best_score && discard_value > best_discard_value)) {
-        best_score = action_score;
-        best_discard_value = discard_value;
-        best_action = action;
+    for (const [action, actionScore, discardValue] of this._iterCandidateActions(context)) {
+      if (actionScore < bestScore || (actionScore === bestScore && discardValue > bestDiscardValue)) {
+        bestScore = actionScore;
+        bestDiscardValue = discardValue;
+        bestAction = action;
       }
     }
 
-    if (best_action === null) {
-      return this.action_to_minimize_score();
+    if (bestAction === null) {
+      return this.actionToMinimizeScore();
     }
-    return best_action;
+    return bestAction;
   }
 
-  _build_action_context() {
-    const unseen_cards = this._get_unseen_cards();
-    const [sampled_cards, deck_variance] = this._deck_rollout_context(unseen_cards);
-    const [known_ranks, known_suit_ranks] = this._known_card_indexes();
-    const threat = this._opponent_threat_score();
-    const yaniv_next_turn_prob = this._opponent_yaniv_next_turn_probability();
+  _buildActionContext() {
+    const unseenCards = this._getUnseenCards();
+    const [sampledCards, deckVariance] = this._deckRolloutContext(unseenCards);
+    const [knownRanks, knownSuitRanks] = this._knownCardIndexes();
+    const threat = this._opponentThreatScore();
+    const yanivNextTurnProb = this._opponentYanivNextTurnProbability();
 
     return {
-      sampled_cards,
-      deck_variance,
-      known_ranks,
-      known_suit_ranks,
+      sampledCards,
+      deckVariance,
+      knownRanks,
+      knownSuitRanks,
       threat,
-      yaniv_next_turn_prob,
+      yanivNextTurnProb,
     };
   }
 
-  *_iter_candidate_actions(context) {
-    const discard_options = this._get_discard_options_cached(this.hand);
+  *_iterCandidateActions(context) {
+    const discardOptions = this._getDiscardOptionsCached(this.hand);
 
-    for (const discard_option of discard_options) {
-      const post_discard_hand = this.hand.filter((card) => !containsCard(discard_option, card));
-      const post_turn_without_draw = post_discard_hand.reduce((sum, card) => sum + card.value, 0);
-      const discard_value = discard_option.reduce((sum, card) => sum + card.value, 0);
-      const feed_penalty = this._feed_penalty(discard_option, context.known_ranks, context.known_suit_ranks);
-      const joker_discard_penalty = 1.5 * discard_option.filter((card) => card.rank === 'Joker').length;
+    for (const discardOption of discardOptions) {
+      const postDiscardHand = this.hand.filter((card) => !containsCard(discardOption, card));
+      const postTurnWithoutDraw = postDiscardHand.reduce((sum, card) => sum + card.value, 0);
+      const discardValue = discardOption.reduce((sum, card) => sum + card.value, 0);
+      const feedPenalty = this._feedPenalty(discardOption, context.knownRanks, context.knownSuitRanks);
+      const jokerDiscardPenalty = 1.5 * discardOption.filter((card) => card.rank === 'Joker').length;
 
-      for (let i = 0; i < this.draw_options.length; i += 1) {
-        const draw_card = this.draw_options[i];
-        const [future_score, best_next_discard] = this._simulate_action(post_discard_hand, draw_card, false);
-        const immediate_points = post_turn_without_draw + draw_card.value;
-        const heuristic_cost = this._heuristic_action_cost(
+      for (let i = 0; i < this.drawOptions.length; i += 1) {
+        const drawCard = this.drawOptions[i];
+        const [futureScore, bestNextDiscard] = this._simulateAction(postDiscardHand, drawCard, false);
+        const immediatePoints = postTurnWithoutDraw + drawCard.value;
+        const heuristicCost = this._heuristicActionCost(
           context.threat,
-          immediate_points,
-          feed_penalty,
-          joker_discard_penalty,
+          immediatePoints,
+          feedPenalty,
+          jokerDiscardPenalty,
         );
-        const reset_bonus = this._reset_bonus(immediate_points, context.yaniv_next_turn_prob);
+        const resetBonus = this._resetBonus(immediatePoints, context.yanivNextTurnProb);
         // Bonus for keeping cards with good set/run potential
-        let composition_bonus = 0;
-        if (best_next_discard) {
-          const new_hand = [...post_discard_hand, draw_card];
-          const remaining = new_hand.filter((c) => !containsCard(best_next_discard, c));
-          composition_bonus = 0.10 * this._hand_composition_bonus(remaining);
+        let compositionBonus = 0;
+        if (bestNextDiscard) {
+          const newHand = [...postDiscardHand, drawCard];
+          const remaining = newHand.filter((c) => !containsCard(bestNextDiscard, c));
+          compositionBonus = 0.10 * this._handCompositionBonus(remaining);
         }
-        const action_score = future_score + heuristic_cost - reset_bonus - composition_bonus;
+        const actionScore = futureScore + heuristicCost - resetBonus - compositionBonus;
 
-        yield [{ discard: discard_option, draw: i }, action_score, discard_value];
+        yield [{ discard: discardOption, draw: i }, actionScore, discardValue];
       }
 
-      const [expected_future, expected_immediate] = this._evaluate_deck_draw_samples(
-        post_discard_hand,
-        context.sampled_cards,
+      const [expectedFuture, expectedImmediate] = this._evaluateDeckDrawSamples(
+        postDiscardHand,
+        context.sampledCards,
         false,
       );
-      const expected_reset_bonus = this._expected_reset_bonus_from_samples(
-        post_turn_without_draw,
-        context.sampled_cards,
-        context.yaniv_next_turn_prob,
+      const expectedResetBonus = this._expectedResetBonusFromSamples(
+        postTurnWithoutDraw,
+        context.sampledCards,
+        context.yanivNextTurnProb,
       );
-      const uncertainty_cost = 0.04 * Math.sqrt(context.deck_variance) * (1 + context.threat);
-      const heuristic_cost = this._heuristic_action_cost(
+      const uncertaintyCost = 0.04 * Math.sqrt(context.deckVariance) * (1 + context.threat);
+      const heuristicCost = this._heuristicActionCost(
         context.threat,
-        expected_immediate,
-        feed_penalty,
-        joker_discard_penalty,
+        expectedImmediate,
+        feedPenalty,
+        jokerDiscardPenalty,
       );
       // Average composition bonus from deck draws
-      let deck_composition_bonus = 0;
-      if (context.sampled_cards.length > 0) {
-        let total_bonus = 0;
-        for (const draw_card of context.sampled_cards) {
-          const [, best_next] = this._simulate_action(post_discard_hand, draw_card, false);
-          if (best_next) {
-            const new_hand = [...post_discard_hand, draw_card];
-            const remaining = new_hand.filter((c) => !containsCard(best_next, c));
-            total_bonus += this._hand_composition_bonus(remaining);
+      let deckCompositionBonus = 0;
+      if (context.sampledCards.length > 0) {
+        let totalBonus = 0;
+        for (const drawCard of context.sampledCards) {
+          const [, bestNext] = this._simulateAction(postDiscardHand, drawCard, false);
+          if (bestNext) {
+            const newHand = [...postDiscardHand, drawCard];
+            const remaining = newHand.filter((c) => !containsCard(bestNext, c));
+            totalBonus += this._handCompositionBonus(remaining);
           }
         }
-        deck_composition_bonus = 0.10 * (total_bonus / context.sampled_cards.length);
+        deckCompositionBonus = 0.10 * (totalBonus / context.sampledCards.length);
       }
-      const action_score = expected_future + heuristic_cost + uncertainty_cost - expected_reset_bonus - deck_composition_bonus;
+      const actionScore = expectedFuture + heuristicCost + uncertaintyCost - expectedResetBonus - deckCompositionBonus;
 
-      yield [{ discard: discard_option, draw: 'deck' }, action_score, discard_value];
+      yield [{ discard: discardOption, draw: 'deck' }, actionScore, discardValue];
     }
   }
 
-  _heuristic_action_cost(threat, immediate_points, feed_penalty, joker_discard_penalty) {
-    return (0.06 * threat * immediate_points) + (0.22 * feed_penalty) + (0.08 * joker_discard_penalty);
+  _heuristicActionCost(threat, immediatePoints, feedPenalty, jokerDiscardPenalty) {
+    return (0.06 * threat * immediatePoints) + (0.22 * feedPenalty) + (0.08 * jokerDiscardPenalty);
   }
 
-  _opponent_yaniv_next_turn_probability() {
-    const opponents = Object.values(this.other_players);
+  _opponentYanivNextTurnProbability() {
+    const opponents = Object.values(this.otherPlayers);
     if (opponents.length === 0) {
       return 0;
     }
 
-    let not_yaniv_prob = 1;
-    for (const player_info of opponents) {
-      const estimated = player_info.estimated_score ?? 50;
-      const hand_count = player_info.hand_count ?? 5;
+    let notYanivProb = 1;
+    for (const playerInfo of opponents) {
+      const estimated = playerInfo.estimatedScore ?? 50;
+      const handCount = playerInfo.handCount ?? 5;
 
       if (estimated > 6.5) {
         continue;
@@ -303,62 +303,62 @@ class AIPlayer extends Player {
         p = 0.18 + (6.5 - estimated) * 0.25;
       }
 
-      if (hand_count <= 2) {
+      if (handCount <= 2) {
         p += 0.10;
-      } else if (hand_count === 3) {
+      } else if (handCount === 3) {
         p += 0.05;
       }
 
-      const low_known = player_info.known_cards.filter((card) => card.value <= 3).length;
-      p += 0.03 * low_known;
+      const lowKnown = playerInfo.knownCards.filter((card) => card.value <= 3).length;
+      p += 0.03 * lowKnown;
       p = clamp(p, 0, 0.92);
-      not_yaniv_prob *= (1 - p);
+      notYanivProb *= (1 - p);
     }
 
-    return 1 - not_yaniv_prob;
+    return 1 - notYanivProb;
   }
 
-  _reset_bonus(hand_total, yaniv_next_turn_prob) {
-    const projected_score = this.score + hand_total;
-    if (projected_score !== 50 && projected_score !== 100) {
+  _resetBonus(handTotal, yanivNextTurnProb) {
+    const projectedScore = this.score + handTotal;
+    if (projectedScore !== 50 && projectedScore !== 100) {
       return 0;
     }
 
-    let success_factor;
-    if (hand_total <= 5) {
-      success_factor = 0.25;
-    } else if (hand_total <= 7) {
-      success_factor = 0.55;
+    let successFactor;
+    if (handTotal <= 5) {
+      successFactor = 0.25;
+    } else if (handTotal <= 7) {
+      successFactor = 0.55;
     } else {
-      success_factor = 0.75;
+      successFactor = 0.75;
     }
 
-    const expected_reset_value = 50 * yaniv_next_turn_prob * success_factor;
-    return Math.min(24, expected_reset_value);
+    const expectedResetValue = 50 * yanivNextTurnProb * successFactor;
+    return Math.min(24, expectedResetValue);
   }
 
-  _expected_reset_bonus_from_samples(post_turn_without_draw, sampled_cards, yaniv_next_turn_prob) {
-    if (sampled_cards.length === 0) {
+  _expectedResetBonusFromSamples(postTurnWithoutDraw, sampledCards, yanivNextTurnProb) {
+    if (sampledCards.length === 0) {
       return 0;
     }
 
-    let total_bonus = 0;
-    for (const draw_card of sampled_cards) {
-      const hand_total = post_turn_without_draw + draw_card.value;
-      total_bonus += this._reset_bonus(hand_total, yaniv_next_turn_prob);
+    let totalBonus = 0;
+    for (const drawCard of sampledCards) {
+      const handTotal = postTurnWithoutDraw + drawCard.value;
+      totalBonus += this._resetBonus(handTotal, yanivNextTurnProb);
     }
-    return total_bonus / sampled_cards.length;
+    return totalBonus / sampledCards.length;
   }
 
-  action_to_reset() {
-    for (const discard_option of this._get_discard_options_cached(this.hand)) {
-      const discard_value = discard_option.reduce((sum, card) => sum + card.value, 0);
-      for (let draw_idx = 0; draw_idx < this.draw_options.length; draw_idx += 1) {
-        const draw_card = this.draw_options[draw_idx];
-        if ((discard_value - draw_card.value + this.score) % 50 === 0) {
+  actionToReset() {
+    for (const discardOption of this._getDiscardOptionsCached(this.hand)) {
+      const discardValue = discardOption.reduce((sum, card) => sum + card.value, 0);
+      for (let drawIndex = 0; drawIndex < this.drawOptions.length; drawIndex += 1) {
+        const drawCard = this.drawOptions[drawIndex];
+        if ((discardValue - drawCard.value + this.score) % 50 === 0) {
           return {
-            discard: discard_option,
-            draw: draw_idx,
+            discard: discardOption,
+            draw: drawIndex,
           };
         }
       }
@@ -366,234 +366,234 @@ class AIPlayer extends Player {
     return null;
   }
 
-  action_to_minimize_score() {
-    const action = this._simulate_next_turn();
+  actionToMinimizeScore() {
+    const action = this._simulateNextTurn();
     return {
       discard: action.discard,
       draw: action.draw,
     };
   }
 
-  _get_discard_options(hand = this.hand) {
-    const discard_options = hand.map((card) => [card]);
+  _getDiscardOptions(hand = this.hand) {
+    const discardOptions = hand.map((card) => [card]);
 
     const jokers = hand.filter((card) => card.rank === 'Joker');
-    const non_jokers = hand.filter((card) => card.rank !== 'Joker');
-    const joker_count = jokers.length;
+    const nonJokers = hand.filter((card) => card.rank !== 'Joker');
+    const jokerCount = jokers.length;
 
-    const rank_index_by_id = {};
+    const rankIndexById = {};
     for (const card of hand) {
-      rank_index_by_id[card._card] = card.rank_index();
+      rankIndexById[card.id] = card.rankIndex();
     }
 
-    for (let combo_size = 2; combo_size <= non_jokers.length; combo_size += 1) {
-      const combos = combinations(non_jokers, combo_size);
+    for (let comboSize = 2; comboSize <= nonJokers.length; comboSize += 1) {
+      const combos = combinations(nonJokers, comboSize);
       for (const combo of combos) {
-        const first_rank = combo[0].rank;
-        if (combo.every((card) => card.rank === first_rank)) {
-          for (let num_jokers = 0; num_jokers <= joker_count; num_jokers += 1) {
-            const joker_combos = combinations(jokers, num_jokers);
-            for (const joker_combo of joker_combos) {
-              discard_options.push([...combo, ...joker_combo]);
+        const firstRank = combo[0].rank;
+        if (combo.every((card) => card.rank === firstRank)) {
+          for (let numJokers = 0; numJokers <= jokerCount; numJokers += 1) {
+            const jokerCombos = combinations(jokers, numJokers);
+            for (const jokerCombo of jokerCombos) {
+              discardOptions.push([...combo, ...jokerCombo]);
             }
           }
           continue;
         }
 
-        const first_suit = combo[0].suit;
-        if (combo.every((card) => card.suit === first_suit)) {
-          let sorted_combo = [...combo].sort((a, b) => rank_index_by_id[a._card] - rank_index_by_id[b._card]);
+        const firstSuit = combo[0].suit;
+        if (combo.every((card) => card.suit === firstSuit)) {
+          let sortedCombo = [...combo].sort((a, b) => rankIndexById[a.id] - rankIndexById[b.id]);
           const gaps = [];
-          for (let i = 0; i < sorted_combo.length - 1; i += 1) {
-            const gap = rank_index_by_id[sorted_combo[i + 1]._card] - rank_index_by_id[sorted_combo[i]._card] - 1;
+          for (let i = 0; i < sortedCombo.length - 1; i += 1) {
+            const gap = rankIndexById[sortedCombo[i + 1].id] - rankIndexById[sortedCombo[i].id] - 1;
             if (gap > 0) {
               gaps.push([i, gap]);
             }
           }
 
           const totalGaps = gaps.reduce((sum, [, gap]) => sum + gap, 0);
-          if (totalGaps <= joker_count) {
-            sorted_combo = [...sorted_combo];
-            let joker_index = 0;
+          if (totalGaps <= jokerCount) {
+            sortedCombo = [...sortedCombo];
+            let jokerIndex = 0;
             for (const [i, gap] of gaps) {
               for (let j = 0; j < gap; j += 1) {
-                if (joker_index < joker_count) {
-                  sorted_combo.splice(i + 1, 0, jokers[joker_index]);
-                  joker_index += 1;
+                if (jokerIndex < jokerCount) {
+                  sortedCombo.splice(i + 1, 0, jokers[jokerIndex]);
+                  jokerIndex += 1;
                 }
               }
             }
 
-            const remaining_jokers = jokers.slice(joker_index);
-            for (const joker of remaining_jokers) {
-              if (rank_index_by_id[sorted_combo[0]._card] > 1) {
-                discard_options.push([joker, ...sorted_combo]);
+            const remainingJokers = jokers.slice(jokerIndex);
+            for (const joker of remainingJokers) {
+              if (rankIndexById[sortedCombo[0].id] > 1) {
+                discardOptions.push([joker, ...sortedCombo]);
               }
-              if (rank_index_by_id[sorted_combo[sorted_combo.length - 1]._card] < 13) {
-                discard_options.push([...sorted_combo, joker]);
+              if (rankIndexById[sortedCombo[sortedCombo.length - 1].id] < 13) {
+                discardOptions.push([...sortedCombo, joker]);
               }
             }
 
-            if (sorted_combo.length >= 3) {
-              discard_options.push(sorted_combo);
+            if (sortedCombo.length >= 3) {
+              discardOptions.push(sortedCombo);
             }
           }
         }
       }
     }
 
-    return discard_options;
+    return discardOptions;
   }
 
-  _get_discard_options_cached(hand) {
-    const signature = this._hand_signature(hand);
-    let cached = this._cache_get(this._discard_options_cache, signature);
+  _getDiscardOptionsCached(hand) {
+    const signature = this._handSignature(hand);
+    let cached = this._cacheGet(this._discardOptionsCache, signature);
     if (cached === null) {
-      cached = this._get_discard_options(hand);
-      this._cache_set(this._discard_options_cache, signature, cached);
+      cached = this._getDiscardOptions(hand);
+      this._cacheSet(this._discardOptionsCache, signature, cached);
     }
     return cached;
   }
 
-  _hand_signature(hand) {
-    return hand.map((card) => card._card).sort((a, b) => a - b).join(',');
+  _handSignature(hand) {
+    return hand.map((card) => card.id).sort((a, b) => a - b).join(',');
   }
 
-  _get_best_discard_options_cached(hand) {
-    const signature = this._hand_signature(hand);
-    let cached = this._cache_get(this._best_discard_options_cache, signature);
+  _getBestDiscardOptionsCached(hand) {
+    const signature = this._handSignature(hand);
+    let cached = this._cacheGet(this._bestDiscardOptionsCache, signature);
     if (cached === null) {
-      const discard_options = this._get_discard_options_cached(hand);
-      cached = this._get_best_discard_options(discard_options);
-      this._cache_set(this._best_discard_options_cache, signature, cached);
+      const discardOptions = this._getDiscardOptionsCached(hand);
+      cached = this._getBestDiscardOptions(discardOptions);
+      this._cacheSet(this._bestDiscardOptionsCache, signature, cached);
     }
     return cached;
   }
 
-  _simulate_action(potential_hand, draw_card, prune_to_best_discard = true) {
-    const new_hand = [...potential_hand, draw_card];
-    const signature = this._hand_signature(new_hand);
-    const cache_key = `${signature}|${prune_to_best_discard ? 1 : 0}`;
-    const cached = this._cache_get(this._simulate_action_cache, cache_key);
+  _simulateAction(potentialHand, drawCard, pruneToBestDiscard = true) {
+    const newHand = [...potentialHand, drawCard];
+    const signature = this._handSignature(newHand);
+    const cacheKey = `${signature}|${pruneToBestDiscard ? 1 : 0}`;
+    const cached = this._cacheGet(this._simulateActionCache, cacheKey);
     if (cached !== null) {
       return cached;
     }
 
-    const candidate_discard_options = prune_to_best_discard
-      ? this._get_best_discard_options_cached(new_hand)
-      : this._get_discard_options_cached(new_hand);
+    const candidateDiscardOptions = pruneToBestDiscard
+      ? this._getBestDiscardOptionsCached(newHand)
+      : this._getDiscardOptionsCached(newHand);
 
-    let future_expected_points = Number.POSITIVE_INFINITY;
-    let best_next_discard_option = null;
+    let futureExpectedPoints = Number.POSITIVE_INFINITY;
+    let bestNextDiscardOption = null;
 
-    for (const discard_option of candidate_discard_options) {
-      const expected_points = this._calculate_new_total_points(new_hand, discard_option);
-      if (expected_points <= future_expected_points) {
-        future_expected_points = expected_points;
-        best_next_discard_option = discard_option;
+    for (const discardOption of candidateDiscardOptions) {
+      const expectedPoints = this._calculateNewTotalPoints(newHand, discardOption);
+      if (expectedPoints <= futureExpectedPoints) {
+        futureExpectedPoints = expectedPoints;
+        bestNextDiscardOption = discardOption;
       }
     }
 
-    const out = [future_expected_points, best_next_discard_option];
-    this._cache_set(this._simulate_action_cache, cache_key, out);
+    const out = [futureExpectedPoints, bestNextDiscardOption];
+    this._cacheSet(this._simulateActionCache, cacheKey, out);
     return out;
   }
 
-  _get_best_action(post_discard_hand) {
-    let best_score = Number.POSITIVE_INFINITY;
-    let best_draw_card = 'deck';
+  _getBestAction(postDiscardHand) {
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestDrawCard = 'deck';
 
-    for (let i = 0; i < this.draw_options.length; i += 1) {
-      const draw_card = this.draw_options[i];
-      const [score] = this._simulate_action(post_discard_hand, draw_card);
-      if (score < best_score) {
-        best_score = score;
-        best_draw_card = i;
+    for (let i = 0; i < this.drawOptions.length; i += 1) {
+      const drawCard = this.drawOptions[i];
+      const [score] = this._simulateAction(postDiscardHand, drawCard);
+      if (score < bestScore) {
+        bestScore = score;
+        bestDrawCard = i;
       }
     }
 
-    return [best_draw_card, best_score];
+    return [bestDrawCard, bestScore];
   }
 
-  _simulate_next_turn() {
-    const discard_options = this._get_discard_options_cached(this.hand);
-    let best_discard = this._get_best_discard_options(discard_options)[0];
-    let best_score = this.hand.reduce((sum, card) => sum + card.value, 0)
-      - best_discard.reduce((sum, card) => sum + card.value, 0)
+  _simulateNextTurn() {
+    const discardOptions = this._getDiscardOptionsCached(this.hand);
+    let bestDiscard = this._getBestDiscardOptions(discardOptions)[0];
+    let bestScore = this.hand.reduce((sum, card) => sum + card.value, 0)
+      - bestDiscard.reduce((sum, card) => sum + card.value, 0)
       + 0;
-    let best_draw_card = 'deck';
+    let bestDrawCard = 'deck';
 
-    for (const discard_option of discard_options) {
-      const post_discard_hand = this.hand.filter((card) => !containsCard(discard_option, card));
-      const [draw_card, score] = this._get_best_action(post_discard_hand);
+    for (const discardOption of discardOptions) {
+      const postDiscardHand = this.hand.filter((card) => !containsCard(discardOption, card));
+      const [drawCard, score] = this._getBestAction(postDiscardHand);
 
-      if (score < best_score) {
-        best_score = score;
-        best_draw_card = draw_card;
-        best_discard = discard_option;
+      if (score < bestScore) {
+        bestScore = score;
+        bestDrawCard = drawCard;
+        bestDiscard = discardOption;
       }
-      if (score === best_score) {
-        const discardSum = discard_option.reduce((sum, card) => sum + card.value, 0);
-        const bestDiscardSum = best_discard.reduce((sum, card) => sum + card.value, 0);
+      if (score === bestScore) {
+        const discardSum = discardOption.reduce((sum, card) => sum + card.value, 0);
+        const bestDiscardSum = bestDiscard.reduce((sum, card) => sum + card.value, 0);
         if (discardSum < bestDiscardSum) {
-          best_score = score;
-          best_draw_card = draw_card;
-          best_discard = discard_option;
+          bestScore = score;
+          bestDrawCard = drawCard;
+          bestDiscard = discardOption;
         }
       }
     }
 
-    return { draw: best_draw_card, discard: best_discard, points: best_score };
+    return { draw: bestDrawCard, discard: bestDiscard, points: bestScore };
   }
 
-  _get_best_discard_options(discard_options) {
-    const best_discard_options = [];
-    let best_points = 0;
+  _getBestDiscardOptions(discardOptions) {
+    const bestDiscardOptions = [];
+    let bestPoints = 0;
 
-    for (const option of discard_options) {
-      const discard_points = option.reduce((sum, card) => sum + card.value, 0);
-      if (discard_points > best_points) {
-        best_points = discard_points;
-        best_discard_options.length = 0;
-        best_discard_options.push(option);
-      } else if (discard_points === best_points && best_discard_options.length > 0) {
-        if (option.length < best_discard_options[0].length) {
-          best_discard_options.length = 0;
-          best_discard_options.push(option);
-        } else if (option.length === best_discard_options[0].length) {
-          best_discard_options.push(option);
+    for (const option of discardOptions) {
+      const discardPoints = option.reduce((sum, card) => sum + card.value, 0);
+      if (discardPoints > bestPoints) {
+        bestPoints = discardPoints;
+        bestDiscardOptions.length = 0;
+        bestDiscardOptions.push(option);
+      } else if (discardPoints === bestPoints && bestDiscardOptions.length > 0) {
+        if (option.length < bestDiscardOptions[0].length) {
+          bestDiscardOptions.length = 0;
+          bestDiscardOptions.push(option);
+        } else if (option.length === bestDiscardOptions[0].length) {
+          bestDiscardOptions.push(option);
         }
       }
     }
 
-    return best_discard_options;
+    return bestDiscardOptions;
   }
 
-  _calculate_new_total_points(potential_hand, discard_option) {
-    return potential_hand
-      .filter((card) => !containsCard(discard_option, card))
+  _calculateNewTotalPoints(potentialHand, discardOption) {
+    return potentialHand
+      .filter((card) => !containsCard(discardOption, card))
       .reduce((sum, card) => sum + card.value, 0);
   }
 
-  should_declare_yaniv() {
-    const own_hand_value = this.hand.reduce((sum, card) => sum + card.value, 0);
-    if (own_hand_value > 5) {
+  shouldDeclareYaniv() {
+    const ownHandValue = this.hand.reduce((sum, card) => sum + card.value, 0);
+    if (ownHandValue > 5) {
       return false;
     }
 
-    if (Object.keys(this.other_players).length === 0) {
-      return own_hand_value <= 2;
+    if (Object.keys(this.otherPlayers).length === 0) {
+      return ownHandValue <= 2;
     }
 
-    const unseen = this._get_unseen_cards();
-    const [mean_value, var_value] = this._mean_and_variance(unseen);
+    const unseen = this._getUnseenCards();
+    const [meanValue, varValue] = this._meanAndVariance(unseen);
 
-    let not_assaf_prob = 1;
-    for (const player_info of Object.values(this.other_players)) {
-      const p = this._estimate_assaf_probability(player_info, own_hand_value, mean_value, var_value);
-      not_assaf_prob *= (1 - p);
+    let notAssafProb = 1;
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      const p = this._estimateAssafProbability(playerInfo, ownHandValue, meanValue, varValue);
+      notAssafProb *= (1 - p);
     }
-    const assaf_risk = 1 - not_assaf_prob;
+    const assafRisk = 1 - notAssafProb;
 
     const thresholdMap = {
       0: 0.60,
@@ -603,138 +603,138 @@ class AIPlayer extends Player {
       4: 0.20,
       5: 0.12,
     };
-    let risk_threshold = thresholdMap[own_hand_value] ?? 0.10;
+    let riskThreshold = thresholdMap[ownHandValue] ?? 0.10;
 
-    const score_pressure = clamp(this.score / 100, 0, 1);
-    risk_threshold *= (1 - 0.35 * score_pressure);
-    risk_threshold = Math.max(0.03, risk_threshold);
+    const scorePressure = clamp(this.score / 100, 0, 1);
+    riskThreshold *= (1 - 0.35 * scorePressure);
+    riskThreshold = Math.max(0.03, riskThreshold);
 
     // Reduce threshold (less willing to call) if it would give an opponent a reset.
     // Giving someone a -50 reset is very costly and worth avoiding.
-    const reset_penalty = this._evaluate_yaniv_reset_impact();
-    risk_threshold -= reset_penalty * 0.04;
-    risk_threshold = Math.max(0.03, risk_threshold);
+    const resetPenalty = this._evaluateYanivResetImpact();
+    riskThreshold -= resetPenalty * 0.04;
+    riskThreshold = Math.max(0.03, riskThreshold);
 
-    return assaf_risk <= risk_threshold;
+    return assafRisk <= riskThreshold;
   }
 
-  _evaluate_yaniv_reset_impact() {
+  _evaluateYanivResetImpact() {
     // Returns a penalty for calling Yaniv if it would give opponents a beneficial reset
     let penalty = 0;
-    for (const player_info of Object.values(this.other_players)) {
-      const opponent_score = player_info.current_score;
-      const estimated_hand = player_info.estimated_score ?? 50;
-      const new_score = opponent_score + estimated_hand;
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      const opponentScore = playerInfo.currentScore;
+      const estimatedHand = playerInfo.estimatedScore ?? 50;
+      const newScore = opponentScore + estimatedHand;
 
       // Would they land on a reset threshold?
-      if ((new_score === 50 || new_score === 100) && opponent_score < new_score) {
+      if ((newScore === 50 || newScore === 100) && opponentScore < newScore) {
         penalty += 2.5;
       }
       // Close to a reset threshold (might land on it with actual hand)
-      else if (Math.abs(new_score - 50) <= 3 && opponent_score < 50) {
+      else if (Math.abs(newScore - 50) <= 3 && opponentScore < 50) {
         penalty += 0.8;
-      } else if (Math.abs(new_score - 100) <= 3 && opponent_score < 100) {
+      } else if (Math.abs(newScore - 100) <= 3 && opponentScore < 100) {
         penalty += 0.8;
       }
     }
     return Math.min(4.0, penalty);
   }
 
-  _estimate_assaf_probability(player_info, own_hand_value, mean_value, var_value) {
-    const known_sum = player_info.known_cards.reduce((sum, card) => sum + card.value, 0);
-    const unknown_count = Math.max(0, player_info.hand_count - player_info.known_cards.length);
+  _estimateAssafProbability(playerInfo, ownHandValue, meanValue, varValue) {
+    const knownSum = playerInfo.knownCards.reduce((sum, card) => sum + card.value, 0);
+    const unknownCount = Math.max(0, playerInfo.handCount - playerInfo.knownCards.length);
 
-    if (unknown_count === 0) {
-      return known_sum <= own_hand_value ? 1 : 0;
+    if (unknownCount === 0) {
+      return knownSum <= ownHandValue ? 1 : 0;
     }
 
-    const expected = known_sum + unknown_count * mean_value;
-    const variance = Math.max(0.01, unknown_count * var_value);
+    const expected = knownSum + unknownCount * meanValue;
+    const variance = Math.max(0.01, unknownCount * varValue);
     const stddev = Math.sqrt(variance);
-    const z = ((own_hand_value + 0.5) - expected) / stddev;
+    const z = ((ownHandValue + 0.5) - expected) / stddev;
     const cdf = 0.5 * (1 + erf(z / Math.sqrt(2)));
     return clamp(cdf, 0.01, 0.99);
   }
 
-  estimate_hand_values() {
-    for (const player_info of Object.values(this.other_players)) {
-      const unknown_cards_count = player_info.hand_count - player_info.known_cards.length;
-      const estimated_unknown_card_score = this.estimate_unknown_cards(unknown_cards_count);
-      player_info.estimated_score = player_info.known_cards.reduce((sum, card) => sum + card.value, 0)
-        + estimated_unknown_card_score;
+  estimateHandValues() {
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      const unknownCardsCount = playerInfo.handCount - playerInfo.knownCards.length;
+      const estimatedUnknownCardScore = this.estimateUnknownCards(unknownCardsCount);
+      playerInfo.estimatedScore = playerInfo.knownCards.reduce((sum, card) => sum + card.value, 0)
+        + estimatedUnknownCardScore;
     }
   }
 
-  estimate_unknown_cards(num_unknown_cards) {
-    if (num_unknown_cards <= 0) {
+  estimateUnknownCards(numUnknownCards) {
+    if (numUnknownCards <= 0) {
       return 0;
     }
 
-    const unseen_cards = this._get_unseen_cards();
-    const [mean_value] = this._mean_and_variance(unseen_cards);
-    return num_unknown_cards * mean_value;
+    const unseenCards = this._getUnseenCards();
+    const [meanValue] = this._meanAndVariance(unseenCards);
+    return numUnknownCards * meanValue;
   }
 
-  _get_unseen_cards() {
-    const visible_ids = new Set(this.hand.map((card) => card._card));
-    for (const card of this.draw_options) {
-      visible_ids.add(card._card);
+  _getUnseenCards() {
+    const visibleIds = new Set(this.hand.map((card) => card.id));
+    for (const card of this.drawOptions) {
+      visibleIds.add(card.id);
     }
-    for (const card of this.public_discard_pile) {
-      visible_ids.add(card._card);
+    for (const card of this.publicDiscardPile) {
+      visibleIds.add(card.id);
     }
-    for (const player_info of Object.values(this.other_players)) {
-      for (const card of player_info.known_cards) {
-        visible_ids.add(card._card);
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      for (const card of playerInfo.knownCards) {
+        visibleIds.add(card.id);
       }
     }
 
-    return AIPlayer._FULL_DECK.filter((card) => !visible_ids.has(card._card));
+    return AIPlayer._FULL_DECK.filter((card) => !visibleIds.has(card.id));
   }
 
-  _known_card_indexes() {
-    const known_ranks = new Set();
-    const known_suit_ranks = new Map();
+  _knownCardIndexes() {
+    const knownRanks = new Set();
+    const knownSuitRanks = new Map();
 
-    for (const player_info of Object.values(this.other_players)) {
-      for (const card of player_info.known_cards) {
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      for (const card of playerInfo.knownCards) {
         if (card.rank === 'Joker') {
           continue;
         }
-        known_ranks.add(card.rank);
-        if (!known_suit_ranks.has(card.suit)) {
-          known_suit_ranks.set(card.suit, new Set());
+        knownRanks.add(card.rank);
+        if (!knownSuitRanks.has(card.suit)) {
+          knownSuitRanks.set(card.suit, new Set());
         }
-        known_suit_ranks.get(card.suit).add(card.rank_index());
+        knownSuitRanks.get(card.suit).add(card.rankIndex());
       }
     }
 
-    return [known_ranks, known_suit_ranks];
+    return [knownRanks, knownSuitRanks];
   }
 
-  _mean_and_variance(cards) {
+  _meanAndVariance(cards) {
     if (cards.length === 0) {
       return [5.0, 8.0];
     }
 
     const values = cards.map((card) => card.value);
-    const mean_value = values.reduce((sum, value) => sum + value, 0) / values.length;
-    const variance = values.reduce((sum, value) => sum + ((value - mean_value) ** 2), 0) / values.length;
-    return [mean_value, variance];
+    const meanValue = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const variance = values.reduce((sum, value) => sum + ((value - meanValue) ** 2), 0) / values.length;
+    return [meanValue, variance];
   }
 
-  _state_seed() {
+  _stateSeed() {
     let seed = 2166136261;
 
-    const handCounts = Object.entries(this.other_players)
+    const handCounts = Object.entries(this.otherPlayers)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([, player_info]) => player_info.hand_count);
+      .map(([, playerInfo]) => playerInfo.handCount);
 
     const values = [
       this.score,
-      ...this.hand.map((card) => card._card).sort((a, b) => a - b),
-      ...this.draw_options.map((card) => card._card).sort((a, b) => a - b),
-      this.public_discard_pile.length,
+      ...this.hand.map((card) => card.id).sort((a, b) => a - b),
+      ...this.drawOptions.map((card) => card.id).sort((a, b) => a - b),
+      this.publicDiscardPile.length,
       ...handCounts,
     ];
 
@@ -747,102 +747,102 @@ class AIPlayer extends Player {
     return seed >>> 0;
   }
 
-  _deck_rollout_context(unseen_cards) {
-    if (unseen_cards.length === 0) {
+  _deckRolloutContext(unseenCards) {
+    if (unseenCards.length === 0) {
       return [[], 8.0];
     }
 
-    const sample_count = Math.min(this.rollout_samples, unseen_cards.length);
-    let sampled_cards;
-    if (sample_count < unseen_cards.length) {
-      const rng = mulberry32(this._state_seed());
-      sampled_cards = sampleWithoutReplacement(unseen_cards, sample_count, rng);
+    const sampleCount = Math.min(this.rolloutSamples, unseenCards.length);
+    let sampledCards;
+    if (sampleCount < unseenCards.length) {
+      const rng = mulberry32(this._stateSeed());
+      sampledCards = sampleWithoutReplacement(unseenCards, sampleCount, rng);
     } else {
-      sampled_cards = unseen_cards;
+      sampledCards = unseenCards;
     }
 
-    const [, variance] = this._mean_and_variance(unseen_cards);
-    return [sampled_cards, variance];
+    const [, variance] = this._meanAndVariance(unseenCards);
+    return [sampledCards, variance];
   }
 
-  _evaluate_deck_draw_samples(post_discard_hand, sampled_cards, prune_to_best_discard = true) {
-    if (sampled_cards.length === 0) {
-      const baseline_residual = this._best_residual_points(post_discard_hand);
-      const immediate = post_discard_hand.reduce((sum, card) => sum + card.value, 0) + 5.0;
-      return [baseline_residual, immediate];
+  _evaluateDeckDrawSamples(postDiscardHand, sampledCards, pruneToBestDiscard = true) {
+    if (sampledCards.length === 0) {
+      const baselineResidual = this._bestResidualPoints(postDiscardHand);
+      const immediate = postDiscardHand.reduce((sum, card) => sum + card.value, 0) + 5.0;
+      return [baselineResidual, immediate];
     }
 
-    const post_turn_without_draw = post_discard_hand.reduce((sum, card) => sum + card.value, 0);
-    let future_total = 0;
-    let immediate_total = 0;
+    const postTurnWithoutDraw = postDiscardHand.reduce((sum, card) => sum + card.value, 0);
+    let futureTotal = 0;
+    let immediateTotal = 0;
 
-    for (const draw_card of sampled_cards) {
-      const [future_score] = this._simulate_action(post_discard_hand, draw_card, prune_to_best_discard);
-      future_total += future_score;
-      immediate_total += post_turn_without_draw + draw_card.value;
+    for (const drawCard of sampledCards) {
+      const [futureScore] = this._simulateAction(postDiscardHand, drawCard, pruneToBestDiscard);
+      futureTotal += futureScore;
+      immediateTotal += postTurnWithoutDraw + drawCard.value;
     }
 
-    const sample_size = sampled_cards.length;
-    return [future_total / sample_size, immediate_total / sample_size];
+    const sampleSize = sampledCards.length;
+    return [futureTotal / sampleSize, immediateTotal / sampleSize];
   }
 
-  _best_residual_points(hand) {
-    const signature = this._hand_signature(hand);
-    const cached = this._cache_get(this._best_residual_cache, signature);
+  _bestResidualPoints(hand) {
+    const signature = this._handSignature(hand);
+    const cached = this._cacheGet(this._bestResidualCache, signature);
     if (cached !== null) {
       return cached;
     }
 
     const total = hand.reduce((sum, card) => sum + card.value, 0);
-    const discard_options = this._get_discard_options_cached(hand);
-    let best_residual = total;
+    const discardOptions = this._getDiscardOptionsCached(hand);
+    let bestResidual = total;
 
-    for (const option of discard_options) {
+    for (const option of discardOptions) {
       const optionSum = option.reduce((sum, card) => sum + card.value, 0);
       const residual = total - optionSum;
-      if (residual < best_residual) {
-        best_residual = residual;
+      if (residual < bestResidual) {
+        bestResidual = residual;
       }
     }
 
-    this._cache_set(this._best_residual_cache, signature, best_residual);
-    return best_residual;
+    this._cacheSet(this._bestResidualCache, signature, bestResidual);
+    return bestResidual;
   }
 
-  _hand_composition_bonus(hand) {
+  _handCompositionBonus(hand) {
     // Returns a bonus for hands with good set/run potential.
     // Higher bonus = better hand composition = prefer keeping these cards together.
     let bonus = 0;
-    const non_jokers = hand.filter((c) => c.rank !== 'Joker');
-    const joker_count = hand.length - non_jokers.length;
+    const nonJokers = hand.filter((c) => c.rank !== 'Joker');
+    const jokerCount = hand.length - nonJokers.length;
 
     // Pairs/trips have strong set-discard potential
     const rankCounts = {};
-    for (const card of non_jokers) {
+    for (const card of nonJokers) {
       rankCounts[card.rank] = (rankCounts[card.rank] || 0) + 1;
     }
     for (const [rank, count] of Object.entries(rankCounts)) {
       if (count >= 2) {
-        const card_value = non_jokers.find((c) => c.rank === rank).value;
-        bonus += 1.2 + 0.08 * card_value * count;
+        const cardValue = nonJokers.find((c) => c.rank === rank).value;
+        bonus += 1.2 + 0.08 * cardValue * count;
       }
     }
 
     // Consecutive same-suit cards have run potential
     const suitCards = {};
-    for (const card of non_jokers) {
+    for (const card of nonJokers) {
       if (!suitCards[card.suit]) suitCards[card.suit] = [];
       suitCards[card.suit].push(card);
     }
     for (const cards of Object.values(suitCards)) {
       if (cards.length < 2) continue;
-      cards.sort((a, b) => a.rank_index() - b.rank_index());
+      cards.sort((a, b) => a.rankIndex() - b.rankIndex());
       for (let i = 0; i < cards.length - 1; i += 1) {
-        const gap = cards[i + 1].rank_index() - cards[i].rank_index();
+        const gap = cards[i + 1].rankIndex() - cards[i].rankIndex();
         if (gap === 1) {
           // Directly consecutive: strong run potential
           bonus += 1.5 + 0.06 * (cards[i].value + cards[i + 1].value);
-        } else if (gap === 2 && joker_count > 0) {
+        } else if (gap === 2 && jokerCount > 0) {
           // One-gap bridgeable by joker
           bonus += 0.8;
         }
@@ -852,34 +852,34 @@ class AIPlayer extends Player {
     return Math.min(6.0, bonus);
   }
 
-  _opponent_threat_score() {
+  _opponentThreatScore() {
     let threat = 0;
-    for (const player_info of Object.values(this.other_players)) {
-      const estimated = player_info.estimated_score ?? 50;
-      const hand_count = player_info.hand_count ?? 5;
+    for (const playerInfo of Object.values(this.otherPlayers)) {
+      const estimated = playerInfo.estimatedScore ?? 50;
+      const handCount = playerInfo.handCount ?? 5;
 
-      let player_threat = Math.max(0, (8 - estimated) / 8);
-      if (hand_count <= 2) {
-        player_threat += 0.30;
+      let playerThreat = Math.max(0, (8 - estimated) / 8);
+      if (handCount <= 2) {
+        playerThreat += 0.30;
       }
-      if (hand_count <= 1) {
-        player_threat += 0.25;
+      if (handCount <= 1) {
+        playerThreat += 0.25;
       }
 
-      threat = Math.max(threat, player_threat);
+      threat = Math.max(threat, playerThreat);
     }
 
     return Math.min(1.5, threat);
   }
 
-  _feed_penalty(discard_option, known_ranks = null, known_suit_ranks = null) {
-    if (known_ranks === null || known_suit_ranks === null) {
-      [known_ranks, known_suit_ranks] = this._known_card_indexes();
+  _feedPenalty(discardOption, knownRanks = null, knownSuitRanks = null) {
+    if (knownRanks === null || knownSuitRanks === null) {
+      [knownRanks, knownSuitRanks] = this._knownCardIndexes();
     }
 
     let penalty = 0;
 
-    for (const card of discard_option) {
+    for (const card of discardOption) {
       if (card.rank === 'Joker') {
         penalty += 4.0;
         continue;
@@ -893,42 +893,42 @@ class AIPlayer extends Player {
         penalty += 0.2;
       }
 
-      if (known_ranks.has(card.rank)) {
+      if (knownRanks.has(card.rank)) {
         penalty += 1.3;
       }
 
-      const card_rank = card.rank_index();
-      const suit_ranks = known_suit_ranks.get(card.suit) ?? new Set();
+      const cardRank = card.rankIndex();
+      const suitRanks = knownSuitRanks.get(card.suit) ?? new Set();
       if (
-        suit_ranks.has(card_rank)
-        || suit_ranks.has(card_rank - 1)
-        || suit_ranks.has(card_rank + 1)
+        suitRanks.has(cardRank)
+        || suitRanks.has(cardRank - 1)
+        || suitRanks.has(cardRank + 1)
       ) {
         penalty += 0.8;
       }
 
       // Enhanced: penalize based on opponent collection patterns
-      for (const player_info of Object.values(this.other_players)) {
+      for (const playerInfo of Object.values(this.otherPlayers)) {
         // Penalty if opponent has been picking up this rank (building a set)
-        const collected_count = player_info.collected_ranks[card.rank] || 0;
-        if (collected_count > 0) {
-          penalty += 2.0 * collected_count;
+        const collectedCount = playerInfo.collectedRanks[card.rank] || 0;
+        if (collectedCount > 0) {
+          penalty += 2.0 * collectedCount;
         }
 
         // Penalty if card is adjacent to opponent's suit-run collection
-        const opp_suit_ranks = player_info.collected_suit_ranks[card.suit];
-        if (opp_suit_ranks) {
-          if (opp_suit_ranks.has(card_rank) || opp_suit_ranks.has(card_rank - 1) || opp_suit_ranks.has(card_rank + 1)) {
+        const opponentSuitRanks = playerInfo.collectedSuitRanks[card.suit];
+        if (opponentSuitRanks) {
+          if (opponentSuitRanks.has(cardRank) || opponentSuitRanks.has(cardRank - 1) || opponentSuitRanks.has(cardRank + 1)) {
             penalty += 1.5;
           }
           // Extra penalty if this card would bridge two collected cards (completes a run)
-          if (opp_suit_ranks.has(card_rank - 1) && opp_suit_ranks.has(card_rank + 1)) {
+          if (opponentSuitRanks.has(cardRank - 1) && opponentSuitRanks.has(cardRank + 1)) {
             penalty += 2.5;
           }
         }
 
         // Safety bonus if opponent recently discarded this rank (they don't want it)
-        if (player_info.discard_history.some((d) => d.rank === card.rank)) {
+        if (playerInfo.discardHistory.some((d) => d.rank === card.rank)) {
           penalty -= 0.6;
         }
       }

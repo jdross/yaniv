@@ -7,12 +7,12 @@
   }
 
   window.getYanivPid = function getYanivPid() {
-    let id = localStorage.getItem('yaniv_pid');
+    let id = localStorage.getItem('yanivPid');
     if (!id) {
       id = (typeof crypto.randomUUID === 'function')
         ? crypto.randomUUID()
         : fallbackUuidV4();
-      localStorage.setItem('yaniv_pid', id);
+      localStorage.setItem('yanivPid', id);
     }
     return id;
   };

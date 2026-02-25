@@ -4,9 +4,9 @@ class Card {
 
   constructor(rank, suit) {
     if (typeof rank === 'number' && (suit === undefined || suit === null)) {
-      this._card = rank;
-      this.rank = Card.ranks[this.rank_index()];
-      this.suit = Card.suits[this.suit_index()];
+      this.id = rank;
+      this.rank = Card.ranks[this.rankIndex()];
+      this.suit = Card.suits[this.suitIndex()];
     } else if (typeof rank === 'string' && typeof suit === 'string') {
       const rankIndex = Card.ranks.indexOf(rank);
       const suitIndex = Card.suits.indexOf(suit);
@@ -14,9 +14,9 @@ class Card {
         throw new Error('Invalid rank or suit');
       }
       if (rank === 'Joker') {
-        this._card = suitIndex - 2;
+        this.id = suitIndex - 2;
       } else {
-        this._card = (rankIndex - 1) * 4 + suitIndex + 2;
+        this.id = (rankIndex - 1) * 4 + suitIndex + 2;
       }
       this.rank = rank;
       this.suit = suit;
@@ -24,36 +24,36 @@ class Card {
       throw new Error('Invalid card input');
     }
 
-    this.value = Math.min(this.rank_index(), 10);
+    this.value = Math.min(this.rankIndex(), 10);
   }
 
-  rank_index() {
-    if (this._card < 2) {
+  rankIndex() {
+    if (this.id < 2) {
       return 0;
     }
-    return Math.floor((this._card - 2) / 4) + 1;
+    return Math.floor((this.id - 2) / 4) + 1;
   }
 
-  suit_index() {
-    if (this._card < 2) {
-      return this._card + 2;
+  suitIndex() {
+    if (this.id < 2) {
+      return this.id + 2;
     }
-    return (this._card - 2) % 4;
+    return (this.id - 2) % 4;
   }
 
   equals(other) {
-    return other instanceof Card && this._card === other._card;
+    return other instanceof Card && this.id === other.id;
   }
 
   toString() {
-    if (this._card < 2) {
+    if (this.id < 2) {
       return this.rank;
     }
     return `${this.rank} of ${this.suit}`;
   }
 
   serialize() {
-    return this._card;
+    return this.id;
   }
 
   static deserialize(card) {

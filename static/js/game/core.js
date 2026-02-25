@@ -30,8 +30,8 @@ let selectedDraw  = null;
 // explicit order — never by stringifying the whole object.
 let prevTurnKey     = null; // fingerprint of the last rendered turn
 let prevRoundKey    = null; // fingerprint of the last rendered round banner
-let prevAnimTurnKey = null; // last_turn key we've already animated
-let prevYanivKey    = null; // last_round key we've already announced
+let prevAnimTurnKey = null; // lastTurn key we've already animated
+let prevYanivKey    = null; // lastRound key we've already announced
 let prevHandKey     = null; // hand fingerprint we've already highlighted
 let activeRoundModalKey = null;
 let dismissedRoundModalKey = null;
@@ -83,7 +83,7 @@ const $roundResultContinue = document.getElementById('round-result-continue');
 const SCREEN_ELEMENTS = [$joinScreen, $lobby, $board, $gameover];
 
 function getSelfPlayer(st = state) {
-  return st?.game?.players?.find(p => p.is_self) ?? null;
+  return st?.game?.players?.find(p => p.isSelf) ?? null;
 }
 
 function getSelfHand(st = state) {
@@ -99,7 +99,7 @@ function roundResultKey(round) {
   if (!round) return null;
   return [
     round.declarer,
-    (round.score_changes || []).map(sc => `${sc.name}:${sc.new_score}`).sort().join(','),
+    (round.scoreChanges || []).map(sc => `${sc.name}:${sc.newScore}`).sort().join(','),
   ].join('|');
 }
 

@@ -28,7 +28,10 @@ app.use(express.static(staticFolder));
 const rooms = new Map();
 const sseClients = new Map();
 
-const DB_URL = process.env.DATABASE_URL || 'postgresql://jdross@localhost/yaniv';
+const DB_URL = process.env.DATABASE_URL || 'postgresql://localhost/yaniv';
+const DEFAULT_PORT = 5174;
+const MAX_AI_PLAYERS = 3;
+const HEARTBEAT_INTERVAL_MS = 25000;
 const DEFAULT_ROOM_OPTIONS = Object.freeze({
   slamdownsAllowed: false,
 });
@@ -93,7 +96,7 @@ function parseAiCount(rawAiCount) {
   if (Number.isNaN(parsed)) {
     return null;
   }
-  return Math.max(0, Math.min(3, parsed));
+  return Math.max(0, Math.min(MAX_AI_PLAYERS, parsed));
 }
 
 function parseDrawAction(rawDrawAction) {
@@ -111,8 +114,8 @@ function parseDrawAction(rawDrawAction) {
   return { ok: true, drawAction: parsed };
 }
 
-function parseSlamdownsRequested(payload = {}) {
-  return Boolean(payload.slamdownsAllowed ?? payload.slamdowns_allowed ?? false);
+function parseSlamdownsAllowed(payload = {}) {
+  return Boolean(payload.slamdownsAllowed ?? false);
 }
 
 function generateCode() {
@@ -137,9 +140,7 @@ function normalizeRoomOptions(rawOptions = null) {
     return { ...DEFAULT_ROOM_OPTIONS };
   }
   return {
-    slamdownsAllowed: Boolean(
-      rawOptions.slamdownsAllowed ?? rawOptions.slamdowns_allowed ?? false,
-    ),
+    slamdownsAllowed: Boolean(rawOptions.slamdownsAllowed ?? false),
   };
 }
 
@@ -152,7 +153,7 @@ function applySlamdownPolicy(options, hasAiPlayers) {
 
 function toWireRoomOptions(options = DEFAULT_ROOM_OPTIONS) {
   return {
-    slamdowns_allowed: Boolean(options.slamdownsAllowed),
+    slamdownsAllowed: Boolean(options.slamdownsAllowed),
   };
 }
 
@@ -218,7 +219,7 @@ function parseJsonish(value) {
 
 function cardToDict(card) {
   return {
-    id: card._card,
+    id: card.id,
     rank: card.rank,
     suit: card.rank === 'Joker' ? null : card.suit,
     value: card.value,
@@ -229,13 +230,13 @@ function roomState(room, pid = '') {
   const members = room.members.map((member) => ({
     pid: member.pid,
     name: member.name,
-    is_ai: member.is_ai,
+    isAi: member.isAi,
   }));
 
   const memberByName = new Map();
   const memberByPid = new Map();
   for (const member of room.members) {
-    if (!member.is_ai) {
+    if (!member.isAi) {
       memberByName.set(member.name, member);
     }
     memberByPid.set(member.pid, member);
@@ -250,19 +251,19 @@ function roomState(room, pid = '') {
         players: gameRef.players.map((player) => ({
           name: player.name,
           score: player.score,
-          hand_count: player.hand.length,
-          is_ai: player instanceof AIPlayer,
-          is_current: false,
+          handCount: player.hand.length,
+          isAi: player instanceof AIPlayer,
+          isCurrent: false,
           pid: memberByName.get(player.name)?.pid ?? null,
         })),
-        discard_top: [],
-        draw_options: [],
-        current_player_name: '',
-        is_my_turn: false,
-        deck_size: 0,
-        can_slamdown: false,
-        slamdown_card: null,
-        slamdowns_allowed: Boolean(room.options?.slamdownsAllowed),
+        discardTop: [],
+        drawOptions: [],
+        currentPlayerName: '',
+        isMyTurn: false,
+        deckSize: 0,
+        canSlamdown: false,
+        slamdownCard: null,
+        slamdownsAllowed: Boolean(room.options?.slamdownsAllowed),
       };
     } else {
       const [currentPlayer, drawOptions] = gameRef.startTurn();
@@ -274,32 +275,32 @@ function roomState(room, pid = '') {
           const base = {
             name: player.name,
             score: player.score,
-            hand_count: player.hand.length,
-            is_ai: player instanceof AIPlayer,
-            is_current: player === currentPlayer,
+            handCount: player.hand.length,
+            isAi: player instanceof AIPlayer,
+            isCurrent: player === currentPlayer,
             pid: humanMember?.pid ?? null,
           };
 
           if (me && humanMember && humanMember.pid === me.pid) {
             base.hand = player.hand.map(cardToDict);
-            base.is_self = true;
-            base.can_yaniv = gameRef.canDeclareYaniv(player);
+            base.isSelf = true;
+            base.canYaniv = gameRef.canDeclareYaniv(player);
           }
           return base;
         }),
-        discard_top: gameRef.last_discard.map(cardToDict),
-        draw_options: me && currentPlayer.name === me.name ? drawOptions.map(cardToDict) : [],
-        current_player_name: currentPlayer.name,
-        is_my_turn: Boolean(me && currentPlayer.name === me.name),
-        deck_size: gameRef.deck.length,
-        can_slamdown: Boolean(
-          me && gameRef.slamdown_player === me.name && gameRef.slamdown_card,
+        discardTop: gameRef.lastDiscard.map(cardToDict),
+        drawOptions: me && currentPlayer.name === me.name ? drawOptions.map(cardToDict) : [],
+        currentPlayerName: currentPlayer.name,
+        isMyTurn: Boolean(me && currentPlayer.name === me.name),
+        deckSize: gameRef.deck.length,
+        canSlamdown: Boolean(
+          me && gameRef.slamdownPlayer === me.name && gameRef.slamdownCard,
         ),
-        slamdown_card:
-          me && gameRef.slamdown_player === me.name && gameRef.slamdown_card
-            ? cardToDict(gameRef.slamdown_card)
+        slamdownCard:
+          me && gameRef.slamdownPlayer === me.name && gameRef.slamdownCard
+            ? cardToDict(gameRef.slamdownCard)
             : null,
-        slamdowns_allowed: Boolean(room.options?.slamdownsAllowed),
+        slamdownsAllowed: Boolean(room.options?.slamdownsAllowed),
       };
     }
   }
@@ -310,9 +311,9 @@ function roomState(room, pid = '') {
     members,
     game,
     winner: room.winner,
-    last_round: room.lastRound,
-    last_turn: room.lastTurn,
-    next_room: room.nextRoom,
+    lastRound: room.lastRound,
+    lastTurn: room.lastTurn,
+    nextRoom: room.nextRoom,
     options: toWireRoomOptions(room.options),
   };
 }
@@ -326,35 +327,35 @@ function formatRoundResult(
   finalHandsByName,
   declarerHandValue = 0,
 ) {
-  const resetNames = new Set((updateInfo.reset_players || []).map((player) => player.name));
+  const resetNames = new Set((updateInfo.resetPlayers || []).map((player) => player.name));
   const eliminatedNames = new Set((eliminated || []).map((player) => player.name));
 
   const result = {
     declarer: declarerName,
-    declarer_hand_value: declarerHandValue,
+    declarerHandValue: declarerHandValue,
     assaf: null,
     resets: [...resetNames],
     eliminated: [...eliminatedNames],
-    score_changes: [],
+    scoreChanges: [],
   };
 
   if (updateInfo.assaf) {
     result.assaf = {
       assafed: updateInfo.assaf.assafed.name,
-      by: updateInfo.assaf.assafed_by.name,
+      by: updateInfo.assaf.assafedBy.name,
     };
   }
 
   for (const player of allPlayersBefore) {
     const oldScore = scoresBefore[player.name];
     const net = player.score - oldScore;
-    result.score_changes.push({
+    result.scoreChanges.push({
       name: player.name,
       added: resetNames.has(player.name) ? net + 50 : net,
-      new_score: player.score,
+      newScore: player.score,
       reset: resetNames.has(player.name),
       eliminated: eliminatedNames.has(player.name),
-      final_hand: finalHandsByName[player.name] || [],
+      finalHand: finalHandsByName[player.name] || [],
     });
   }
 
@@ -370,9 +371,9 @@ function makeLastTurn(playerName, discardCards, drawAction, drawOptionsBefore) {
   return {
     player: playerName,
     discarded: discardCards.map(cardToDict),
-    drawn_from: drawFromDeck ? 'deck' : 'pile',
-    drawn_card: drawnCard,
-    is_slamdown: false,
+    drawnFrom: drawFromDeck ? 'deck' : 'pile',
+    drawnCard: drawnCard,
+    isSlamdown: false,
   };
 }
 
@@ -380,9 +381,9 @@ function makeLastTurnSlamdown(playerName, slammedCard) {
   return {
     player: playerName,
     discarded: [cardToDict(slammedCard)],
-    drawn_from: 'slamdown',
-    drawn_card: null,
-    is_slamdown: true,
+    drawnFrom: 'slamdown',
+    drawnCard: null,
+    isSlamdown: true,
   };
 }
 
@@ -448,7 +449,7 @@ async function processAiTurns(code) {
       return;
     }
 
-    if (game.canDeclareYaniv(currentPlayer) && currentPlayer.should_declare_yaniv()) {
+    if (game.canDeclareYaniv(currentPlayer) && currentPlayer.shouldDeclareYaniv()) {
       const winner = applyYanivOutcome(room, game, currentPlayer);
       await pushState(code);
       if (winner) {
@@ -574,20 +575,20 @@ async function saveRoom(code) {
       if (room.members.length > 0) {
         await client.query(
           `
-          INSERT INTO members (code, pid, name, is_ai)
-          SELECT
-            $1::text,
-            member.pid,
-            member.name,
-            member.is_ai
-          FROM UNNEST($2::text[], $3::text[], $4::boolean[]) AS member(pid, name, is_ai)
-          ON CONFLICT (code, pid) DO NOTHING
-          `,
+        INSERT INTO members (code, pid, name, is_ai)
+        SELECT
+          $1::text,
+          member.pid,
+          member.name,
+          member.is_ai
+        FROM UNNEST($2::text[], $3::text[], $4::boolean[]) AS member(pid, name, is_ai)
+        ON CONFLICT (code, pid) DO NOTHING
+        `,
           [
             code,
             room.members.map((member) => member.pid),
             room.members.map((member) => member.name),
-            room.members.map((member) => member.is_ai),
+            room.members.map((member) => member.isAi),
           ],
         );
       }
@@ -638,7 +639,7 @@ async function loadRooms() {
     const codes = roomRows.map((row) => row.code);
     const memberResult = await client.query(
       `
-      SELECT code, pid, name, is_ai
+      SELECT code, pid, name, is_ai AS "isAi"
       FROM members
       WHERE code = ANY($1::text[])
       ORDER BY code
@@ -647,7 +648,13 @@ async function loadRooms() {
     );
     const gameStateResult = await client.query(
       `
-      SELECT code, game_json, last_round, last_turn, round_banner_turns_left, options
+      SELECT
+        code,
+        game_json AS "gameJson",
+        last_round AS "lastRound",
+        last_turn AS "lastTurn",
+        round_banner_turns_left AS "roundBannerTurnsLeft",
+        options
       FROM game_state
       WHERE code = ANY($1::text[])
       `,
@@ -662,7 +669,7 @@ async function loadRooms() {
       membersByCode.get(row.code).push({
         pid: row.pid,
         name: row.name,
-        is_ai: row.is_ai,
+        isAi: row.isAi,
       });
     }
 
@@ -671,9 +678,9 @@ async function loadRooms() {
     for (const roomRow of roomRows) {
       const gs = gameStateByCode.get(roomRow.code);
       let game = null;
-      if (gs && gs.game_json !== null) {
+      if (gs && gs.gameJson !== null) {
         try {
-          game = YanivGame.fromDict(parseJsonish(gs.game_json));
+          game = YanivGame.fromDict(parseJsonish(gs.gameJson));
         } catch (error) {
           console.log(`[DB] Could not restore game ${roomRow.code}: ${error.message || error}`);
         }
@@ -687,9 +694,9 @@ async function loadRooms() {
         winner: roomRow.winner,
         options: normalizeRoomOptions(parseJsonish(gs?.options)),
       });
-      room.lastRound = parseJsonish(gs?.last_round);
-      room.lastTurn = parseJsonish(gs?.last_turn);
-      room.roundBannerTurnsLeft = gs?.round_banner_turns_left || 0;
+      room.lastRound = parseJsonish(gs?.lastRound);
+      room.lastTurn = parseJsonish(gs?.lastTurn);
+      room.roundBannerTurnsLeft = gs?.roundBannerTurnsLeft || 0;
       rooms.set(room.code, room);
     }
   } finally {
@@ -730,8 +737,8 @@ app.get('/game/:code', (_req, res) => {
   res.sendFile(path.join(staticFolder, 'game.html'));
 });
 
-app.get('/api/events/:code_/:pid', (req, res) => {
-  const code = parseRoomCode(req.params.code_);
+app.get('/api/events/:code/:pid', (req, res) => {
+  const code = parseRoomCode(req.params.code);
   const pid = parsePid(req.params.pid);
 
   res.set({
@@ -763,7 +770,7 @@ app.get('/api/events/:code_/:pid', (req, res) => {
     } catch (_error) {
       // no-op
     }
-  }, 25000);
+  }, HEARTBEAT_INTERVAL_MS);
 
   req.on('close', () => {
     if (client.heartbeat) {
@@ -777,15 +784,15 @@ app.post('/api/create', async (req, res) => {
   const payload = req.body || {};
   const pid = parsePid(payload.pid, randomPid);
   const name = parsePlayerName(payload.name);
-  const aiCount = parseAiCount(payload.ai_count);
+  const aiCount = parseAiCount(payload.aiCount);
 
   if (aiCount === null) {
     return errorResponse(res, 'Invalid AI player count');
   }
 
-  const members = [{ pid, name, is_ai: false }];
+  const members = [{ pid, name, isAi: false }];
   for (let i = 0; i < aiCount; i += 1) {
-    members.push({ pid: `ai-${i}`, name: `AI ${i + 1}`, is_ai: true });
+    members.push({ pid: `ai-${i}`, name: `AI ${i + 1}`, isAi: true });
   }
 
   const code = generateUniqueCode();
@@ -812,12 +819,12 @@ app.post('/api/join', async (req, res) => {
   if (room.status !== 'waiting') {
     return errorResponse(res, 'Game already started');
   }
-  if (room.members.filter((member) => !member.is_ai).length >= 4) {
+  if (room.members.filter((member) => !member.isAi).length >= 4) {
     return errorResponse(res, 'Room is full');
   }
 
   if (!room.members.some((member) => member.pid === pid)) {
-    room.members.push({ pid, name, is_ai: false });
+    room.members.push({ pid, name, isAi: false });
   }
 
   await pushState(code);
@@ -857,7 +864,7 @@ app.post('/api/options', async (req, res) => {
   const payload = req.body || {};
   const code = parseRoomCode(payload.code);
   const pid = parsePid(payload.pid);
-  const requestedSlamdowns = parseSlamdownsRequested(payload);
+  const requestedSlamdowns = parseSlamdownsAllowed(payload);
 
   const room = rooms.get(code);
   if (!room) {
@@ -872,12 +879,12 @@ app.post('/api/options', async (req, res) => {
     return errorResponse(res, 'Not a member of this game');
   }
 
-  const creator = room.members.find((entry) => !entry.is_ai);
+  const creator = room.members.find((entry) => !entry.isAi);
   if (!creator || creator.pid !== pid) {
     return errorResponse(res, 'Only the room creator can change options');
   }
 
-  const hasAiPlayers = room.members.some((entry) => entry.is_ai);
+  const hasAiPlayers = room.members.some((entry) => entry.isAi);
   room.options = applySlamdownPolicy(
     {
       ...normalizeRoomOptions(room.options),
@@ -902,11 +909,10 @@ app.post('/api/start', async (req, res) => {
     return errorResponse(res, 'Need at least 2 players');
   }
 
-  const hasAiPlayers = room.members.some((entry) => entry.is_ai);
-  const requestedSlamdowns = parseSlamdownsRequested(payload);
+  const hasAiPlayers = room.members.some((entry) => entry.isAi);
+  const requestedSlamdowns = parseSlamdownsAllowed(payload);
   const explicitlySetSlamdowns =
-    Object.prototype.hasOwnProperty.call(payload, 'slamdowns_allowed')
-    || Object.prototype.hasOwnProperty.call(payload, 'slamdownsAllowed');
+    Object.prototype.hasOwnProperty.call(payload, 'slamdownsAllowed');
 
   room.options = applySlamdownPolicy(
     {
@@ -919,7 +925,7 @@ app.post('/api/start', async (req, res) => {
   );
 
   const players = room.members.map((member) => (
-    member.is_ai ? new AIPlayer(member.name) : new Player(member.name)
+    member.isAi ? new AIPlayer(member.name) : new Player(member.name)
   ));
   const game = new YanivGame(players);
   game.startGame();
@@ -955,11 +961,11 @@ app.post('/api/action', async (req, res) => {
     return errorResponse(res, 'Not a member of this game');
   }
 
-  if (payload.declare_slamdown) {
+  if (payload.declareSlamdown) {
     if (!room.options?.slamdownsAllowed) {
       return errorResponse(res, 'Slamdowns not enabled in this game');
     }
-    if (game.slamdown_player !== member.name) {
+    if (game.slamdownPlayer !== member.name) {
       return errorResponse(res, 'Slamdown no longer available');
     }
 
@@ -985,7 +991,7 @@ app.post('/api/action', async (req, res) => {
   }
 
   let shouldKickAi = false;
-  if (payload.declare_yaniv) {
+  if (payload.declareYaniv) {
     if (!game.canDeclareYaniv(currentPlayer)) {
       return errorResponse(res, 'Cannot declare Yaniv');
     }
@@ -1003,7 +1009,7 @@ app.post('/api/action', async (req, res) => {
     const handCopy = [...currentPlayer.hand];
     for (const cardId of cardIds) {
       const numericCardId = Number(cardId);
-      const index = handCopy.findIndex((card) => card._card === numericCardId);
+      const index = handCopy.findIndex((card) => card.id === numericCardId);
       if (index === -1) {
         return errorResponse(res, 'Card not in hand');
       }
@@ -1044,7 +1050,7 @@ app.post('/api/action', async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.post('/api/play_again', async (req, res) => {
+app.post('/api/playAgain', async (req, res) => {
   const payload = req.body || {};
   const code = parseRoomCode(payload.code);
 
@@ -1053,14 +1059,14 @@ app.post('/api/play_again', async (req, res) => {
     return errorResponse(res, 'Game not finished');
   }
   if (room.nextRoom) {
-    return res.json({ next_room: room.nextRoom });
+    return res.json({ nextRoom: room.nextRoom });
   }
 
   const members = room.members.map((member) => ({ ...member }));
   const options = normalizeRoomOptions(room.options);
 
   const players = members.map((member) => (
-    member.is_ai ? new AIPlayer(member.name) : new Player(member.name)
+    member.isAi ? new AIPlayer(member.name) : new Player(member.name)
   ));
   const game = new YanivGame(players);
   game.startGame();
@@ -1077,13 +1083,13 @@ app.post('/api/play_again', async (req, res) => {
   room.nextRoom = newCode;
 
   console.log(
-    `[Server] Game started code=${newCode} rematch_of=${code} players=${members.map((m) => m.name).join(',')} slamdowns=${options.slamdownsAllowed}`,
+    `[Server] Game started code=${newCode} rematchOf=${code} players=${members.map((m) => m.name).join(',')} slamdowns=${options.slamdownsAllowed}`,
   );
 
   await saveRoom(newCode);
   await pushState(code);
   startAiWorker(newCode);
-  return res.json({ next_room: newCode });
+  return res.json({ nextRoom: newCode });
 });
 
 async function initDb() {
@@ -1116,7 +1122,7 @@ async function initDb() {
   }
 }
 
-async function startServer(port = 5174) {
+async function startServer(port = DEFAULT_PORT) {
   await initDb();
 
   return new Promise((resolve) => {
@@ -1128,7 +1134,7 @@ async function startServer(port = 5174) {
 }
 
 if (require.main === module) {
-  const port = Number.parseInt(process.env.PORT || '5174', 10);
+  const port = Number.parseInt(process.env.PORT || String(DEFAULT_PORT), 10);
   startServer(port).catch((error) => {
     console.error(error);
     process.exit(1);

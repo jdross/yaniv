@@ -12,15 +12,15 @@ const { AIPlayer } = require('../server/src/aiplayer');
 class RandomPolicyPlayer extends Player {}
 
 class TimedAIPlayer extends AIPlayer {
-  constructor(name, rollout_samples = 24) {
-    super(name, rollout_samples);
-    this.decision_times_ms = [];
+  constructor(name, rolloutSamples = 24) {
+    super(name, rolloutSamples);
+    this.decisionTimesMs = [];
   }
 
-  decide_action() {
+  decideAction() {
     const start = performance.now();
-    const action = super.decide_action();
-    this.decision_times_ms.push(performance.now() - start);
+    const action = super.decideAction();
+    this.decisionTimesMs.push(performance.now() - start);
     return action;
   }
 }
@@ -64,7 +64,7 @@ function percentile(values, p) {
 }
 
 function randomDiscardOptions(hand) {
-  return HELPER_AI._get_discard_options(hand);
+  return HELPER_AI._getDiscardOptions(hand);
 }
 
 function randomAction(player, drawOptions, rng) {
@@ -90,7 +90,7 @@ function buildPlayers(scenario, totalPlayers, rolloutSamples) {
   const players = [];
   const labelByName = {};
 
-  if (scenario === 'modern_vs_random') {
+  if (scenario === 'modernVsRandom') {
     const ai = new TimedAIPlayer('AI-Modern', rolloutSamples);
     players.push(ai);
     labelByName[ai.name] = 'modern';
@@ -108,11 +108,11 @@ function buildPlayers(scenario, totalPlayers, rolloutSamples) {
   return [players, labelByName];
 }
 
-function runSingleGame({ scenario, total_players, max_turns, seed, rollout_samples }) {
+function runSingleGame({ scenario, totalPlayers, maxTurns, seed, rolloutSamples }) {
   const rng = makeRng(seed);
   const gameRng = makeRng(seed + 1);
 
-  const [players, labelByName] = buildPlayers(scenario, total_players, rollout_samples);
+  const [players, labelByName] = buildPlayers(scenario, totalPlayers, rolloutSamples);
   const game = new YanivGame(players, gameRng);
 
   try {
@@ -120,13 +120,13 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
   } catch (err) {
     return {
       winner: null,
-      winner_label: null,
+      winnerLabel: null,
       turns: 0,
       error: `${err.name}: ${err.message}`,
-      ai_decision_ms: Object.fromEntries(
+      aiDecisionMs: Object.fromEntries(
         players
           .filter((p) => p instanceof TimedAIPlayer)
-          .map((p) => [p.name, [...p.decision_times_ms]]),
+          .map((p) => [p.name, [...p.decisionTimesMs]]),
       ),
     };
   }
@@ -135,7 +135,7 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
   let winner = null;
   let error = null;
 
-  while (turns < max_turns) {
+  while (turns < maxTurns) {
     if (game.players.length <= 1) {
       winner = game.players.length > 0 ? game.players[0] : null;
       break;
@@ -149,7 +149,7 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
       if (game.canDeclareYaniv(currentPlayer)) {
         let shouldDeclare = false;
         if (currentPlayer instanceof AIPlayer) {
-          shouldDeclare = currentPlayer.should_declare_yaniv();
+          shouldDeclare = currentPlayer.shouldDeclareYaniv();
         } else {
           shouldDeclare = randomShouldDeclare(currentPlayer, rng);
         }
@@ -183,15 +183,15 @@ function runSingleGame({ scenario, total_players, max_turns, seed, rollout_sampl
   const aiDecisionMs = Object.fromEntries(
     players
       .filter((p) => p instanceof TimedAIPlayer)
-      .map((p) => [p.name, [...p.decision_times_ms]]),
+      .map((p) => [p.name, [...p.decisionTimesMs]]),
   );
 
   return {
     winner: winner ? winner.name : null,
-    winner_label: winner ? labelByName[winner.name] : null,
+    winnerLabel: winner ? labelByName[winner.name] : null,
     turns,
     error,
-    ai_decision_ms: aiDecisionMs,
+    aiDecisionMs: aiDecisionMs,
   };
 }
 
@@ -204,15 +204,15 @@ function summarizeResults(rawGames) {
   for (const result of rawGames) {
     turns.push(result.turns);
 
-    if (result.winner_label !== null) {
-      wins[result.winner_label] = (wins[result.winner_label] || 0) + 1;
+    if (result.winnerLabel !== null) {
+      wins[result.winnerLabel] = (wins[result.winnerLabel] || 0) + 1;
     }
 
     if (result.error) {
       errors[result.error] = (errors[result.error] || 0) + 1;
     }
 
-    for (const values of Object.values(result.ai_decision_ms)) {
+    for (const values of Object.values(result.aiDecisionMs)) {
       if (!aiLatency.modern) aiLatency.modern = [];
       aiLatency.modern.push(...values);
     }
@@ -222,9 +222,9 @@ function summarizeResults(rawGames) {
   for (const [key, values] of Object.entries(aiLatency)) {
     latencySummary[key] = {
       count: values.length,
-      avg_ms: values.length ? Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(4)) : 0.0,
-      p95_ms: Number(percentile(values, 0.95).toFixed(4)),
-      max_ms: values.length ? Number(Math.max(...values).toFixed(4)) : 0.0,
+      avgMs: values.length ? Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(4)) : 0.0,
+      p95Ms: Number(percentile(values, 0.95).toFixed(4)),
+      maxMs: values.length ? Number(Math.max(...values).toFixed(4)) : 0.0,
     };
   }
 
@@ -237,14 +237,14 @@ function summarizeResults(rawGames) {
   return {
     games: gameCount,
     wins: Object.fromEntries(Object.entries(wins).sort(([a], [b]) => a.localeCompare(b))),
-    win_rates: winRates,
+    winRates,
     turns: {
       avg: turns.length ? Number((turns.reduce((a, b) => a + b, 0) / turns.length).toFixed(3)) : 0.0,
       p95: Number(percentile(turns, 0.95).toFixed(3)),
       max: turns.length ? Math.max(...turns) : 0,
     },
     errors: Object.fromEntries(Object.entries(errors).sort(([a], [b]) => a.localeCompare(b))),
-    ai_decision_latency_ms: latencySummary,
+    aiDecisionLatencyMs: latencySummary,
   };
 }
 
@@ -252,10 +252,10 @@ function parseArgs(argv) {
   const out = {
     games: 250,
     players: 3,
-    max_turns: 1000,
+    maxTurns: 1000,
     seed: 7,
-    rollout_samples: 24,
-    scenario: 'modern_vs_random',
+    rolloutSamples: 24,
+    scenario: 'modernVsRandom',
     jobs: 1,
     output: '',
   };
@@ -266,9 +266,9 @@ function parseArgs(argv) {
 
     if (token === '--games') out.games = Number.parseInt(value, 10);
     if (token === '--players') out.players = Number.parseInt(value, 10);
-    if (token === '--max-turns') out.max_turns = Number.parseInt(value, 10);
+    if (token === '--max-turns') out.maxTurns = Number.parseInt(value, 10);
     if (token === '--seed') out.seed = Number.parseInt(value, 10);
-    if (token === '--rollout-samples') out.rollout_samples = Number.parseInt(value, 10);
+    if (token === '--rollout-samples') out.rolloutSamples = Number.parseInt(value, 10);
     if (token === '--scenario') out.scenario = String(value);
     if (token === '--jobs') out.jobs = Number.parseInt(value, 10);
     if (token === '--output') out.output = String(value);
@@ -278,14 +278,14 @@ function parseArgs(argv) {
     }
   }
 
-  if (out.scenario !== 'modern_vs_random') {
-    throw new Error(`Unsupported scenario '${out.scenario}'. Supported: modern_vs_random`);
+  if (out.scenario !== 'modernVsRandom') {
+    throw new Error(`Unsupported scenario '${out.scenario}'. Supported: modernVsRandom`);
   }
 
   out.games = Math.max(1, out.games);
   out.players = Math.max(2, Math.min(4, out.players));
-  out.max_turns = Math.max(100, out.max_turns);
-  out.rollout_samples = Math.max(4, out.rollout_samples);
+  out.maxTurns = Math.max(100, out.maxTurns);
+  out.rolloutSamples = Math.max(4, out.rolloutSamples);
   out.jobs = Math.max(1, out.jobs);
   return out;
 }
@@ -316,10 +316,10 @@ async function runBenchmarks(config) {
   for (let i = 0; i < config.games; i += 1) {
     requests.push({
       scenario: config.scenario,
-      total_players: config.players,
-      max_turns: config.max_turns,
+      totalPlayers: config.players,
+      maxTurns: config.maxTurns,
       seed: config.seed + i,
-      rollout_samples: config.rollout_samples,
+      rolloutSamples: config.rolloutSamples,
     });
   }
 
@@ -344,17 +344,17 @@ async function main() {
   const results = await runBenchmarks(args);
 
   const payload = {
-    created_at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     config: {
-      games_per_scenario: args.games,
+      gamesPerScenario: args.games,
       players: args.players,
-      max_turns: args.max_turns,
+      maxTurns: args.maxTurns,
       seed: args.seed,
-      rollout_samples: args.rollout_samples,
+      rolloutSamples: args.rolloutSamples,
       scenario: args.scenario,
       jobs: args.jobs,
     },
-    runtime_seconds: Number(((performance.now() - started) / 1000).toFixed(3)),
+    runtimeSeconds: Number(((performance.now() - started) / 1000).toFixed(3)),
     results,
   };
 

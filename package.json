@@ -2,12 +2,20 @@
   "name": "yaniv",
   "version": "1.0.0",
   "private": true,
+  "type": "commonjs",
   "scripts": {
     "test": "npm run test:frontend && npm run test:server",
     "test:frontend": "node --test tests/frontend/*.test.js",
     "test:server": "node --test tests/server/*.test.js",
-    "server:install": "npm --prefix server install",
-    "server:dev": "npm --prefix server run dev",
-    "server:start": "npm --prefix server run start"
+    "dev": "node server/src/server.js",
+    "start": "NODE_ENV=production node server/src/server.js",
+    "server:install": "npm install",
+    "server:dev": "npm run dev",
+    "server:start": "npm run start"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
   }
 }

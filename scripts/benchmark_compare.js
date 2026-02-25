@@ -46,29 +46,29 @@ function makeRng(seed) {
 // ---------------------------------------------------------------------------
 
 class TimedModernAI extends AIPlayer {
-  constructor(name, rollout_samples) {
-    super(name, rollout_samples);
-    this.decision_times_ms = [];
+  constructor(name, rolloutSamples) {
+    super(name, rolloutSamples);
+    this.decisionTimesMs = [];
   }
 
-  decide_action() {
+  decideAction() {
     const start = performance.now();
-    const action = super.decide_action();
-    this.decision_times_ms.push(performance.now() - start);
+    const action = super.decideAction();
+    this.decisionTimesMs.push(performance.now() - start);
     return action;
   }
 }
 
 class TimedLegacyAI extends LegacyAIPlayer {
-  constructor(name, rollout_samples) {
-    super(name, rollout_samples);
-    this.decision_times_ms = [];
+  constructor(name, rolloutSamples) {
+    super(name, rolloutSamples);
+    this.decisionTimesMs = [];
   }
 
-  decide_action() {
+  decideAction() {
     const start = performance.now();
-    const action = super.decide_action();
-    this.decision_times_ms.push(performance.now() - start);
+    const action = super.decideAction();
+    this.decisionTimesMs.push(performance.now() - start);
     return action;
   }
 }
@@ -77,13 +77,13 @@ class TimedLegacyAI extends LegacyAIPlayer {
 // Single game
 // ---------------------------------------------------------------------------
 
-function runSingleGame({ seed, max_turns, rollout_samples }) {
+function runSingleGame({ seed, maxTurns, rolloutSamples }) {
   const gameRng = makeRng(seed);
 
   // Alternate who goes first to remove positional bias
   const modernFirst = (seed % 2) === 0;
-  const modern = new TimedModernAI('AI-Modern', rollout_samples);
-  const legacy = new TimedLegacyAI('AI-Legacy', rollout_samples);
+  const modern = new TimedModernAI('AI-Modern', rolloutSamples);
+  const legacy = new TimedLegacyAI('AI-Legacy', rolloutSamples);
   const players = modernFirst ? [modern, legacy] : [legacy, modern];
   const labelByName = { [modern.name]: 'modern', [legacy.name]: 'legacy' };
 
@@ -92,7 +92,7 @@ function runSingleGame({ seed, max_turns, rollout_samples }) {
   try {
     game.startGame();
   } catch (err) {
-    return { winner_label: null, turns: 0, rounds: 0, assafs: {}, resets: {}, scores: {}, error: err.message, decision_ms: {} };
+    return { winnerLabel: null, turns: 0, rounds: 0, assafs: {}, resets: {}, scores: {}, error: err.message, decisionMs: {} };
   }
 
   let turns = 0;
@@ -102,7 +102,7 @@ function runSingleGame({ seed, max_turns, rollout_samples }) {
   const assafs = { modern: 0, legacy: 0 };
   const resets = { modern: 0, legacy: 0 };
 
-  while (turns < max_turns) {
+  while (turns < maxTurns) {
     if (game.players.length <= 1) {
       winner = game.players.length > 0 ? game.players[0] : null;
       break;
@@ -114,7 +114,7 @@ function runSingleGame({ seed, max_turns, rollout_samples }) {
       const [currentPlayer] = game.startTurn();
 
       if (game.canDeclareYaniv(currentPlayer)) {
-        if (currentPlayer.should_declare_yaniv()) {
+        if (currentPlayer.shouldDeclareYaniv()) {
           const [info, , declaredWinner] = game.declareYaniv(currentPlayer);
           rounds += 1;
 
@@ -125,8 +125,8 @@ function runSingleGame({ seed, max_turns, rollout_samples }) {
           }
 
           // Track resets
-          if (info.reset_players) {
-            for (const rp of info.reset_players) {
+          if (info.resetPlayers) {
+            for (const rp of info.resetPlayers) {
               const rpLabel = labelByName[rp.name];
               if (rpLabel) resets[rpLabel] += 1;
             }
@@ -156,20 +156,20 @@ function runSingleGame({ seed, max_turns, rollout_samples }) {
     scores[labelByName[p.name]] = p.score;
   }
 
-  const decision_ms = {};
+  const decisionMs = {};
   for (const p of [modern, legacy]) {
-    decision_ms[labelByName[p.name]] = p.decision_times_ms;
+    decisionMs[labelByName[p.name]] = p.decisionTimesMs;
   }
 
   return {
-    winner_label: winner ? labelByName[winner.name] : null,
+    winnerLabel: winner ? labelByName[winner.name] : null,
     turns,
     rounds,
     assafs,
     resets,
     scores,
     error,
-    decision_ms,
+    decisionMs,
   };
 }
 
@@ -199,8 +199,8 @@ function summarize(results) {
     allTurns.push(r.turns);
     allRounds.push(r.rounds);
 
-    if (r.winner_label) {
-      wins[r.winner_label] += 1;
+    if (r.winnerLabel) {
+      wins[r.winnerLabel] += 1;
     } else {
       wins.draw += 1;
     }
@@ -211,7 +211,7 @@ function summarize(results) {
       totalAssafs[label] += r.assafs[label] || 0;
       totalResets[label] += r.resets[label] || 0;
       if (r.scores[label] !== undefined) finalScores[label].push(r.scores[label]);
-      if (r.decision_ms[label]) latency[label].push(...r.decision_ms[label]);
+      if (r.decisionMs[label]) latency[label].push(...r.decisionMs[label]);
     }
   }
 
@@ -222,35 +222,35 @@ function summarize(results) {
     const v = latency[label];
     latencySummary[label] = {
       decisions: v.length,
-      avg_ms: +avg(v).toFixed(4),
-      p95_ms: +percentile(v, 0.95).toFixed(4),
-      max_ms: v.length ? +Math.max(...v).toFixed(4) : 0,
+      avgMs: +avg(v).toFixed(4),
+      p95Ms: +percentile(v, 0.95).toFixed(4),
+      maxMs: v.length ? +Math.max(...v).toFixed(4) : 0,
     };
   }
 
   return {
     games: gameCount,
     wins,
-    win_rates: {
+    winRates: {
       modern: +(wins.modern / gameCount).toFixed(4),
       legacy: +(wins.legacy / gameCount).toFixed(4),
     },
-    assafs_received: totalAssafs,
-    resets_earned: totalResets,
-    avg_final_score: {
+    assafsReceived: totalAssafs,
+    resetsEarned: totalResets,
+    avgFinalScore: {
       modern: +avg(finalScores.modern).toFixed(2),
       legacy: +avg(finalScores.legacy).toFixed(2),
     },
-    rounds_per_game: {
+    roundsPerGame: {
       avg: +avg(allRounds).toFixed(1),
       p95: +percentile(allRounds, 0.95),
     },
-    turns_per_game: {
+    turnsPerGame: {
       avg: +avg(allTurns).toFixed(1),
       p95: +percentile(allTurns, 0.95),
     },
     errors,
-    decision_latency_ms: latencySummary,
+    decisionLatencyMs: latencySummary,
   };
 }
 
@@ -259,22 +259,22 @@ function summarize(results) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const out = { games: 200, max_turns: 1000, seed: 42, rollout_samples: 24, output: '' };
+  const out = { games: 200, maxTurns: 1000, seed: 42, rolloutSamples: 24, output: '' };
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     const value = argv[i + 1];
     if (token === '--games') out.games = Number.parseInt(value, 10);
-    if (token === '--max-turns') out.max_turns = Number.parseInt(value, 10);
+    if (token === '--max-turns') out.maxTurns = Number.parseInt(value, 10);
     if (token === '--seed') out.seed = Number.parseInt(value, 10);
-    if (token === '--rollout-samples') out.rollout_samples = Number.parseInt(value, 10);
+    if (token === '--rollout-samples') out.rolloutSamples = Number.parseInt(value, 10);
     if (token === '--output') out.output = String(value);
     if (token.startsWith('--')) i += 1;
   }
 
   out.games = Math.max(1, out.games);
-  out.max_turns = Math.max(100, out.max_turns);
-  out.rollout_samples = Math.max(4, out.rollout_samples);
+  out.maxTurns = Math.max(100, out.maxTurns);
+  out.rolloutSamples = Math.max(4, out.rolloutSamples);
   return out;
 }
 
@@ -288,8 +288,8 @@ function main() {
   for (let i = 0; i < args.games; i += 1) {
     raw.push(runSingleGame({
       seed: args.seed + i,
-      max_turns: args.max_turns,
-      rollout_samples: args.rollout_samples,
+      maxTurns: args.maxTurns,
+      rolloutSamples: args.rolloutSamples,
     }));
 
     // Progress indicator
@@ -303,9 +303,9 @@ function main() {
   const elapsed = ((performance.now() - started) / 1000).toFixed(3);
 
   const payload = {
-    created_at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     config: { ...args },
-    runtime_seconds: +elapsed,
+    runtimeSeconds: +elapsed,
     results: summary,
   };
 
@@ -315,29 +315,29 @@ function main() {
   console.log(`Runtime:        ${elapsed}s\n`);
 
   console.log('Win rates:');
-  console.log(`  Modern (new):  ${summary.wins.modern} wins (${(summary.win_rates.modern * 100).toFixed(1)}%)`);
-  console.log(`  Legacy (old):  ${summary.wins.legacy} wins (${(summary.win_rates.legacy * 100).toFixed(1)}%)`);
+  console.log(`  Modern (new):  ${summary.wins.modern} wins (${(summary.winRates.modern * 100).toFixed(1)}%)`);
+  console.log(`  Legacy (old):  ${summary.wins.legacy} wins (${(summary.winRates.legacy * 100).toFixed(1)}%)`);
   if (summary.wins.draw) console.log(`  Draws:         ${summary.wins.draw}`);
 
   console.log('\nAssafs received (got caught calling Yaniv):');
-  console.log(`  Modern: ${summary.assafs_received.modern}`);
-  console.log(`  Legacy: ${summary.assafs_received.legacy}`);
+  console.log(`  Modern: ${summary.assafsReceived.modern}`);
+  console.log(`  Legacy: ${summary.assafsReceived.legacy}`);
 
   console.log('\nScore resets earned (hit 50/100 exactly):');
-  console.log(`  Modern: ${summary.resets_earned.modern}`);
-  console.log(`  Legacy: ${summary.resets_earned.legacy}`);
+  console.log(`  Modern: ${summary.resetsEarned.modern}`);
+  console.log(`  Legacy: ${summary.resetsEarned.legacy}`);
 
   console.log('\nAvg final score (lower = better):');
-  console.log(`  Modern: ${summary.avg_final_score.modern}`);
-  console.log(`  Legacy: ${summary.avg_final_score.legacy}`);
+  console.log(`  Modern: ${summary.avgFinalScore.modern}`);
+  console.log(`  Legacy: ${summary.avgFinalScore.legacy}`);
 
-  console.log('\nAvg rounds/game: ' + summary.rounds_per_game.avg);
-  console.log('Avg turns/game:  ' + summary.turns_per_game.avg);
+  console.log('\nAvg rounds/game: ' + summary.roundsPerGame.avg);
+  console.log('Avg turns/game:  ' + summary.turnsPerGame.avg);
 
   console.log('\nDecision latency:');
   for (const label of ['modern', 'legacy']) {
-    const l = summary.decision_latency_ms[label];
-    console.log(`  ${label}: avg=${l.avg_ms.toFixed(3)}ms  p95=${l.p95_ms.toFixed(3)}ms  max=${l.max_ms.toFixed(3)}ms  (${l.decisions} decisions)`);
+    const l = summary.decisionLatencyMs[label];
+    console.log(`  ${label}: avg=${l.avgMs.toFixed(3)}ms  p95=${l.p95Ms.toFixed(3)}ms  max=${l.maxMs.toFixed(3)}ms  (${l.decisions} decisions)`);
   }
 
   if (summary.errors) {
