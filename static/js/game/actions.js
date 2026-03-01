@@ -150,7 +150,18 @@ async function playTurn() {
   await submitAction({ discard: selectedCards, draw: selectedDraw });
 }
 
+function preventNonInputSelection(event) {
+  const target = event.target;
+  if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  event.preventDefault();
+}
+
 function bindEventHandlers() {
+  if (isLikelyTouchDevice()) {
+    $board.addEventListener('selectstart', preventNonInputSelection);
+    $roundResultModal.addEventListener('selectstart', preventNonInputSelection);
+  }
+
   $joinBtn.addEventListener('click', async () => {
     const name = $joinNameInput.value.trim() || 'Player';
     const res = await fetch('/api/join', {

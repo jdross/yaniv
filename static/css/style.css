@@ -248,6 +248,24 @@ input[type="range"] {
   overflow: visible;
 }
 
+/* Fast-tap hardening for mobile gameplay surfaces. */
+.game-page .board,
+.game-page .board *:not(input):not(textarea):not(select),
+.game-page .round-result-modal,
+.game-page .round-result-modal *:not(input):not(textarea):not(select) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.game-page button,
+.game-page .btn,
+.game-page .draw-choice,
+.game-page .hand-row .card {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Score bar */
 .score-bar {
   display: flex;
