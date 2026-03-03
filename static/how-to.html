@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to Play Yaniv</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/how-to.css">
+</head>
+<body class="howto-page">
+  <main class="howto-wrap">
+    <header class="howto-hero">
+      <a class="back-link" href="/">Back to home</a>
+      <h1>How to Play Yaniv</h1>
+      <p class="hero-sub">Quick guide for your first game.</p>
+      <div class="quick-rules">
+        <div><strong>Goal:</strong> keep your score low.</div>
+        <div><strong>Your turn:</strong> discard, then draw.</div>
+        <div><strong>Say Yaniv:</strong> only at 5 points or less.</div>
+      </div>
+    </header>
+
+    <section class="guide-section" id="turn-flow">
+      <h2>1. What You Do Each Turn</h2>
+      <ol class="steps">
+        <li>
+          <strong>Discard cards.</strong> You can play one card, a set, or a run.
+        </li>
+        <li>
+          <strong>Draw one card.</strong> Take from the deck or from the discard pile choices.
+        </li>
+        <li>
+          <strong>Check your total.</strong> If your hand is 5 or less, you can call Yaniv.
+        </li>
+      </ol>
+    </section>
+
+    <section class="guide-section" id="discard-rules">
+      <h2>2. How Discards Work</h2>
+      <div class="examples-grid">
+        <article class="example ok">
+          <h3>Set (valid)</h3>
+          <p>Same number/letter. Suits do not matter. Joker can join.</p>
+          <div class="card-row">
+            <div class="example-card red">7♥</div>
+            <div class="example-card">7♣</div>
+            <div class="example-card">Joker</div>
+          </div>
+        </article>
+        <article class="example ok">
+          <h3>Run (valid)</h3>
+          <p>3 or more cards in order, all same suit. Joker can fill a gap.</p>
+          <div class="card-row">
+            <div class="example-card red">4♥</div>
+            <div class="example-card">Joker</div>
+            <div class="example-card red">6♥</div>
+          </div>
+        </article>
+        <article class="example bad">
+          <h3>Not valid</h3>
+          <p>These two cards are different ranks, so you cannot play them together.</p>
+          <div class="card-row">
+            <div class="example-card red">4♥</div>
+            <div class="example-card red">5♥</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="tool">
+        <h3>Try it</h3>
+        <p>Tap cards to see if that discard is allowed.</p>
+        <div id="discard-checker" class="checker-row"></div>
+        <p id="discard-result" class="result neutral">Select one or more cards.</p>
+      </div>
+    </section>
+
+    <section class="guide-section" id="yaniv-assaf">
+      <h2>3. Calling Yaniv</h2>
+      <p class="section-copy">
+        You can call Yaniv only when your hand is 5 or less.
+        If someone else has the same or lower total, you get +30 points (Assaf).
+      </p>
+      <div class="tool two-col">
+        <div>
+          <label for="my-total">Your hand points</label>
+          <input id="my-total" type="number" min="0" max="30" value="4">
+        </div>
+        <div>
+          <label for="opponent-total">Lowest other player</label>
+          <input id="opponent-total" type="number" min="0" max="30" value="6">
+        </div>
+        <p id="yaniv-result" class="result neutral"></p>
+      </div>
+    </section>
+
+    <section class="guide-section" id="scoring">
+      <h2>4. Score Rules</h2>
+      <ul class="rules-list">
+        <li>After each round, add points to your score.</li>
+        <li>If you land exactly on 50 or 100, subtract 50.</li>
+        <li>If your score goes over 100, you are out.</li>
+      </ul>
+      <div class="tool two-col">
+        <div>
+          <label for="current-score">Current score</label>
+          <input id="current-score" type="number" min="0" max="150" value="44">
+        </div>
+        <div>
+          <label for="round-points">Points gained this round</label>
+          <input id="round-points" type="number" min="0" max="80" value="6">
+        </div>
+        <p id="score-result" class="result neutral"></p>
+      </div>
+    </section>
+
+    <section class="guide-section" id="slamdown">
+      <h2>5. Optional Move: Slamdown</h2>
+      <p class="section-copy">
+        Some games use Slamdown. If your game has it, here is the simple version:
+      </p>
+      <ul class="rules-list">
+        <li>Play your discard, then draw from the deck.</li>
+        <li>If the drawn card continues your discard, you can slam it down right away.</li>
+        <li>You cannot slamdown your last card.</li>
+        <li>Slamdown is only for human-only games.</li>
+      </ul>
+      <p class="section-copy">
+        Example: you play 5♥ 6♥, draw 7♥, then slam down 7♥.
+      </p>
+    </section>
+
+    <footer class="howto-footer">
+      <a href="/" class="btn btn-primary">Start a game</a>
+    </footer>
+  </main>
+
+  <script src="/js/shared/game-logic.js"></script>
+  <script src="/js/how-to.js"></script>
+</body>
+</html>

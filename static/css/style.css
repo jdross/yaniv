@@ -44,17 +44,46 @@ header { text-align: center; margin-bottom: 2rem; }
 .logo { font-size: 3.5rem; font-weight: 900; letter-spacing: -.02em; color: #f4d03f; text-shadow: 0 3px 10px rgba(0,0,0,.4); }
 .tagline { color: rgba(255,255,255,.7); margin-top: .3rem; font-size: 1.1rem; }
 
-.rules-box {
-  background: rgba(0,0,0,.25);
-  border-radius: 12px;
-  padding: 1.2rem 1.5rem;
+.howto-link-box {
+  background:
+    radial-gradient(circle at 92% 18%, rgba(244, 208, 63, .28) 0%, rgba(244, 208, 63, 0) 34%),
+    linear-gradient(135deg, rgba(10, 39, 24, .78), rgba(18, 68, 42, .65));
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 16px;
+  padding: 1.2rem 1.3rem 1.3rem;
   margin-bottom: 2rem;
-  font-size: .92rem;
-  line-height: 1.7;
+  box-shadow: 0 16px 32px rgba(0,0,0,.24);
+  display: flex;
+  justify-content: center;
 }
-.rules-box h2 { margin-bottom: .6rem; font-size: 1rem; text-transform: uppercase; letter-spacing: .08em; opacity: .7; }
-.rules-box ul { padding-left: 1.2rem; }
-.rules-box li { margin-bottom: .2rem; }
+.howto-eyebrow {
+  font-size: .73rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(244,208,63,.95);
+  margin-bottom: .35rem;
+  font-weight: 700;
+}
+.howto-link-box h2 {
+  font-size: 1.24rem;
+  margin-bottom: .35rem;
+}
+.howto-copy {
+  color: rgba(255,255,255,.82);
+  font-size: .96rem;
+  line-height: 1.45;
+}
+.howto-link-btn {
+  width: auto;
+  min-width: 240px;
+  margin-top: 0;
+  border-color: rgba(244,208,63,.46);
+  color: #f8e7a0;
+  background: rgba(9, 25, 17, .44);
+}
+.howto-link-btn:hover {
+  background: rgba(244,208,63,.18);
+}
 
 .panels {
   display: flex;
