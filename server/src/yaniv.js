@@ -26,6 +26,10 @@ function containsCard(cards, target) {
   return cards.some((card) => card.id === target.id);
 }
 
+function isAiPlayer(player) {
+  return Boolean(player && player.is_ai === true);
+}
+
 class YanivGame {
   constructor(players = null, rng = null) {
     this.gameId = randomUuid();
@@ -67,7 +71,7 @@ class YanivGame {
         name: player.name,
         score: player.score,
         hand: player.hand.map((card) => card.serialize()),
-        isAi: player instanceof AIPlayer,
+        isAi: isAiPlayer(player),
       })),
       currentPlayerIndex: this.currentPlayerIndex,
       previousScores: [...this.previousScores],
@@ -84,7 +88,7 @@ class YanivGame {
 
     const players = [];
     for (const playerData of data.players || []) {
-      const isAi = Boolean(playerData.isAi || false);
+      const isAi = Boolean(playerData.isAi || playerData.is_ai || false);
       const player = isAi ? new AIPlayer(playerData.name) : new Player(playerData.name);
       player.score = playerData.score || 0;
       player.hand = (playerData.hand || []).map((cardData) => Card.deserialize(cardData));
@@ -115,8 +119,8 @@ class YanivGame {
 
     const roundInfo = game.players.map((player) => ({ name: player.name, score: player.score }));
     for (const player of game.players) {
-      if (player instanceof AIPlayer) {
-        player.observeRound(roundInfo);
+      if (isAiPlayer(player)) {
+        player.observe_round(roundInfo);
       }
     }
 
@@ -132,8 +136,8 @@ class YanivGame {
 
     const roundInfo = this.players.map((player) => ({ name: player.name, score: player.score }));
     for (const player of this.players) {
-      if (player instanceof AIPlayer) {
-        player.observeRound(roundInfo);
+      if (isAiPlayer(player)) {
+        player.observe_round(roundInfo);
       }
     }
   }
@@ -146,8 +150,8 @@ class YanivGame {
   }
 
   playTurn(player, action = null) {
-    if (player instanceof AIPlayer) {
-      action = player.decideAction();
+    if (isAiPlayer(player) && action === null) {
+      action = player.decide_action();
     }
 
     if (!Array.isArray(action.discard)) {
@@ -178,15 +182,15 @@ class YanivGame {
     this._checkSlamdown(player, action.discard, newlyDrawn, drewFromDeck);
 
     for (const otherPlayer of this.players) {
-      if (otherPlayer instanceof AIPlayer && otherPlayer !== player) {
+      if (isAiPlayer(otherPlayer) && otherPlayer !== player) {
         const turnInfo = {
           player,
           action,
-          handCount: player.hand.length,
-          discardedCards: action.discard,
-          drawnCard,
+          hand_count: player.hand.length,
+          discarded_cards: action.discard,
+          drawn_card: drawnCard,
         };
-        otherPlayer.observeTurn(turnInfo, this.discardPile, this._getDrawOptions());
+        otherPlayer.observe_turn(turnInfo, this.discardPile, this._getDrawOptions());
       }
     }
 
@@ -221,8 +225,8 @@ class YanivGame {
     this._dealNewHand();
     const roundInfo = this.players.map((p) => ({ name: p.name, score: p.score }));
     for (const remainingPlayer of this.players) {
-      if (remainingPlayer instanceof AIPlayer) {
-        remainingPlayer.observeRound(roundInfo);
+      if (isAiPlayer(remainingPlayer)) {
+        remainingPlayer.observe_round(roundInfo);
       }
     }
 
@@ -261,8 +265,8 @@ class YanivGame {
     this.lastDiscard.push(firstDiscard);
 
     for (const player of this.players) {
-      if (player instanceof AIPlayer) {
-        player.drawOptions.push(firstDiscard);
+      if (isAiPlayer(player)) {
+        player.draw_options.push(firstDiscard);
       }
     }
   }
@@ -328,7 +332,7 @@ class YanivGame {
     this.slamdownPlayer = null;
     this.slamdownCard = null;
 
-    if (player instanceof AIPlayer) {
+    if (isAiPlayer(player)) {
       return;
     }
 

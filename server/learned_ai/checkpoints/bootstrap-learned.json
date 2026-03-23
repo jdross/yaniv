@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "checkpoint_id": "bootstrap-learned",
+  "training_iteration": 0,
+  "created_at": "2026-03-22T00:00:00.000Z",
+  "action_model": {
+    "feature_names": [
+      "threat",
+      "yaniv_next_turn_prob",
+      "deck_variance",
+      "immediate_points",
+      "future_score",
+      "discard_value",
+      "discard_count",
+      "draw_value",
+      "drew_from_deck",
+      "feed_penalty",
+      "belief_danger",
+      "joker_discard_penalty",
+      "composition_bonus",
+      "reset_bonus",
+      "post_discard_total",
+      "hand_total_before",
+      "opponent_count"
+    ],
+    "weights": [
+      -0.07,
+      -0.09,
+      0,
+      -0.22,
+      -0.44,
+      0.14,
+      0.05,
+      -0.04,
+      -0.02,
+      -0.24,
+      -0.28,
+      -0.16,
+      0.18,
+      0.24,
+      -0.1,
+      0,
+      -0.01
+    ],
+    "bias": 0
+  },
+  "value_model": {
+    "feature_names": [
+      "resulting_hand_total",
+      "resulting_hand_count",
+      "threat",
+      "yaniv_next_turn_prob",
+      "deck_variance",
+      "composition_bonus",
+      "reset_bonus",
+      "feed_penalty",
+      "belief_danger",
+      "discard_value",
+      "drew_from_deck",
+      "opponent_count"
+    ],
+    "weights": [
+      -0.18,
+      -0.05,
+      -0.08,
+      -0.1,
+      0,
+      0.12,
+      0.2,
+      -0.1,
+      -0.1,
+      0.05,
+      -0.02,
+      0
+    ],
+    "bias": 0.04
+  },
+  "yaniv_model": {
+    "feature_names": [
+      "own_hand_value",
+      "assaf_risk",
+      "reset_penalty",
+      "threat",
+      "yaniv_next_turn_prob",
+      "score_pressure",
+      "max_low_card_bias",
+      "min_opponent_hand_count",
+      "known_low_cards",
+      "opponent_count"
+    ],
+    "weights": [
+      -0.82,
+      -2.3,
+      -0.45,
+      -0.18,
+      0.42,
+      0.3,
+      -0.12,
+      -0.1,
+      -0.08,
+      0
+    ],
+    "bias": 1.45,
+    "threshold": 0.5
+  }
+}

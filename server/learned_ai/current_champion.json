@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "checkpoint_id": "learned-py-20260323_130916",
+  "training_iteration": 6,
+  "created_at": "2026-03-23T13:09:16.101221+00:00",
+  "rating_2p": 1690.38,
+  "rating_3p": 1442.02,
+  "win_rate_vs_v3": 0.75,
+  "latency_summary": {
+    "avg_ms": 1.0967,
+    "p95_ms": 2.3081,
+    "max_ms": 12.3261
+  },
+  "model_path": "./checkpoints/learned-py-20260323_130916.json"
+}
