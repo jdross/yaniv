@@ -154,7 +154,7 @@ function cloneDeepWithPrototype(value, cache = new Map()) {
     return cache.get(value);
   }
   if (value instanceof Card) {
-    return new Card(value._card);
+    return new Card(value.id);
   }
   if (Array.isArray(value)) {
     const out = [];
@@ -198,7 +198,7 @@ function cloneTrainingGame(game, seed) {
 function cloneActionForPlayer(action, player) {
   const discard = [];
   for (const card of action.discard || []) {
-    const match = player.hand.find((candidate) => candidate._card === card._card);
+    const match = player.hand.find((candidate) => candidate.id === card.id);
     if (!match) {
       return null;
     }
@@ -376,6 +376,15 @@ function appendJsonl(jsonlPath, payload) {
   fs.appendFileSync(jsonlPath, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
+function maybeDeleteReplay(replayPath, shouldDelete) {
+  if (!shouldDelete || !replayPath) {
+    return;
+  }
+  if (fs.existsSync(replayPath)) {
+    fs.unlinkSync(replayPath);
+  }
+}
+
 function timestampTag() {
   return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '_');
 }
@@ -398,6 +407,7 @@ function parseArgs(argv) {
     jobs: Math.max(1, Math.min(os.cpus().length, 4)),
     learning_rate: 0.03,
     epochs: 6,
+    keep_replay: false,
     rollout_target_candidates: 4,
     rollout_target_samples: 2,
     rollout_target_turns: 18,
@@ -423,6 +433,10 @@ function parseArgs(argv) {
     if (token === '--learning-rate') out.learning_rate = Number(value);
     if (token === '--epochs') out.epochs = Number.parseInt(value, 10);
     if (token === '--candidate-manifest-path') out.candidate_manifest_path = path.resolve(process.cwd(), value);
+    if (token === '--keep-replay') {
+      out.keep_replay = true;
+      continue;
+    }
     if (token === '--rollout-target-candidates') out.rollout_target_candidates = Number.parseInt(value, 10);
     if (token === '--rollout-target-samples') out.rollout_target_samples = Number.parseInt(value, 10);
     if (token === '--rollout-target-turns') out.rollout_target_turns = Number.parseInt(value, 10);
@@ -1180,10 +1194,15 @@ async function runAll(config) {
   const mode = config.mode || (Number(currentManifest.training_iteration || 0) === 0 ? 'warmstart' : 'self-play');
   const generateConfig = { ...config, mode };
   const replay = generateReplay(generateConfig);
-  const trained = trainFromReplay(config, replay.path);
-  const evaluation = await evaluateCheckpoint(config, trained.manifestPath);
-  const plot = plotProgress(config);
-  return { replay, trained, evaluation, plot, mode };
+  const shouldDeleteReplay = !config.keep_replay && !config.replay_path;
+  try {
+    const trained = trainFromReplay(config, replay.path);
+    const evaluation = await evaluateCheckpoint(config, trained.manifestPath);
+    const plot = plotProgress(config);
+    return { replay, trained, evaluation, plot, mode };
+  } finally {
+    maybeDeleteReplay(replay.path, shouldDeleteReplay);
+  }
 }
 
 async function runBurst(config) {
@@ -1208,8 +1227,15 @@ async function runBurst(config) {
     };
 
     const replay = generateReplay(iterConfig);
-    const trained = trainFromReplay(iterConfig, replay.path);
-    const evaluation = await evaluateCheckpoint(iterConfig, trained.manifestPath);
+    const shouldDeleteReplay = !iterConfig.keep_replay && !iterConfig.replay_path;
+    let trained;
+    let evaluation;
+    try {
+      trained = trainFromReplay(iterConfig, replay.path);
+      evaluation = await evaluateCheckpoint(iterConfig, trained.manifestPath);
+    } finally {
+      maybeDeleteReplay(replay.path, shouldDeleteReplay);
+    }
     lastEvaluation = evaluation;
 
     const payload = evaluation.payload;

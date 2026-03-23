@@ -47,8 +47,8 @@ test('learned player chooses deterministic legal action for the same state', () 
   const actionOne = createPlayer().decide_action();
   const actionTwo = createPlayer().decide_action();
   assert.deepEqual(
-    { draw: actionOne.draw, discard: actionOne.discard.map((card) => card._card).sort((a, b) => a - b) },
-    { draw: actionTwo.draw, discard: actionTwo.discard.map((card) => card._card).sort((a, b) => a - b) },
+    { draw: actionOne.draw, discard: actionOne.discard.map((card) => card.id).sort((a, b) => a - b) },
+    { draw: actionTwo.draw, discard: actionTwo.discard.map((card) => card.id).sort((a, b) => a - b) },
   );
 
   fs.rmSync(tempDir, { recursive: true, force: true });

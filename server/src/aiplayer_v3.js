@@ -1,7 +1,7 @@
 const { AIPlayer: V1AIPlayer } = require('./aiplayer_v1');
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function clamp(value, min, max) {
@@ -158,7 +158,7 @@ class AIPlayerV3 extends V1AIPlayer {
       playerInfo.discard_refusals.by_suit_rank[card.suit] = {};
     }
     const suitMap = playerInfo.discard_refusals.by_suit_rank[card.suit];
-    const idx = card.rank_index();
+    const idx = card.rankIndex();
     suitMap[idx] = clamp((suitMap[idx] || 0) + amount, 0, 4);
   }
 
@@ -170,10 +170,10 @@ class AIPlayerV3 extends V1AIPlayer {
 
     const rank = drawn_card.rank;
     const suit = drawn_card.suit;
-    const rankIndex = drawn_card.rank_index();
+    const rankIndex = drawn_card.rankIndex();
     const repeatedRankPickups = playerInfo.pickup_history.filter((card) => card.rank === rank).length;
     const repeatedSuitPickups = playerInfo.pickup_history.filter(
-      (card) => card.suit === suit && Math.abs(card.rank_index() - rankIndex) <= 2,
+      (card) => card.suit === suit && Math.abs(card.rankIndex() - rankIndex) <= 2,
     ).length;
 
     this._boost_rank_need(playerInfo, rank, 1.35 + (0.18 * repeatedRankPickups));
@@ -202,7 +202,7 @@ class AIPlayerV3 extends V1AIPlayer {
       }
 
       const suitMap = playerInfo.need_by_suit_rank[card.suit];
-      const rankIndex = card.rank_index();
+      const rankIndex = card.rankIndex();
       if (suitMap) {
         const impacted = [rankIndex - 1, rankIndex, rankIndex + 1];
         for (const idx of impacted) {
@@ -341,7 +341,7 @@ class AIPlayerV3 extends V1AIPlayer {
     }
 
     let danger = 0;
-    const cardRank = card.rank_index();
+    const cardRank = card.rankIndex();
 
     for (const playerInfo of Object.values(this.other_players)) {
       this._ensure_belief_fields(playerInfo);
@@ -381,7 +381,7 @@ class AIPlayerV3 extends V1AIPlayer {
 
     const byRank = playerInfo.discard_refusals.by_rank[card.rank] || 0;
     const suitMap = playerInfo.discard_refusals.by_suit_rank[card.suit] || {};
-    return byRank + (suitMap[card.rank_index()] || 0);
+    return byRank + (suitMap[card.rankIndex()] || 0);
   }
 
   _sample_weighted_opponent_hands(playerName, playerInfo, unseenCards, sampleCount, salt = '') {
@@ -422,9 +422,9 @@ class AIPlayerV3 extends V1AIPlayer {
       if (card.rank !== 'Joker') {
         const rankNeed = playerInfo.need_by_rank[card.rank] || 0;
         const suitMap = playerInfo.need_by_suit_rank[card.suit] || {};
-        const suitNeed = (suitMap[card.rank_index()] || 0)
-          + (0.45 * (suitMap[card.rank_index() - 1] || 0))
-          + (0.45 * (suitMap[card.rank_index() + 1] || 0));
+        const suitNeed = (suitMap[card.rankIndex()] || 0)
+          + (0.45 * (suitMap[card.rankIndex() - 1] || 0))
+          + (0.45 * (suitMap[card.rankIndex() + 1] || 0));
         const refusal = this._refusal_score(playerInfo, card);
         score += (0.24 * rankNeed) + (0.28 * suitNeed) - (0.18 * refusal);
       }
@@ -582,7 +582,7 @@ class AIPlayerV3 extends V1AIPlayer {
   }
 
   _cards_signature(cards) {
-    return cards.map((card) => card._card).sort((a, b) => a - b).join(',');
+    return cards.map((card) => card.id).sort((a, b) => a - b).join(',');
   }
 
   _seed_from_text(text) {

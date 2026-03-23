@@ -56,11 +56,14 @@ test('learned training CLI completes a tiny warm-start cycle', () => {
 
   const progressPath = path.join(outputRoot, 'progress.jsonl');
   const plotPath = path.join(outputRoot, 'plots', 'progress.html');
+  const replayDir = path.join(outputRoot, 'replay');
   assert.ok(fs.existsSync(progressPath));
   assert.ok(fs.existsSync(plotPath));
 
   const progressLines = fs.readFileSync(progressPath, 'utf8').trim().split('\n').filter(Boolean);
   assert.ok(progressLines.length >= 1);
+  const replayFiles = fs.existsSync(replayDir) ? fs.readdirSync(replayDir).filter((entry) => entry.endsWith('.json')) : [];
+  assert.deepEqual(replayFiles, []);
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });

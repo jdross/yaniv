@@ -38,6 +38,7 @@ function parseArgs(argv) {
     policy_hidden_size: 64,
     value_hidden_size: 48,
     yaniv_hidden_size: 32,
+    keep_replay: false,
     rollout_target_candidates: 2,
     rollout_target_samples: 1,
     rollout_target_turns: 6,
@@ -62,6 +63,10 @@ function parseArgs(argv) {
     if (token === '--policy-hidden-size') out.policy_hidden_size = Number.parseInt(value, 10);
     if (token === '--value-hidden-size') out.value_hidden_size = Number.parseInt(value, 10);
     if (token === '--yaniv-hidden-size') out.yaniv_hidden_size = Number.parseInt(value, 10);
+    if (token === '--keep-replay') {
+      out.keep_replay = true;
+      continue;
+    }
     if (token === '--rollout-target-candidates') out.rollout_target_candidates = Number.parseInt(value, 10);
     if (token === '--rollout-target-samples') out.rollout_target_samples = Number.parseInt(value, 10);
     if (token === '--rollout-target-turns') out.rollout_target_turns = Number.parseInt(value, 10);
@@ -94,6 +99,15 @@ function resolvePythonExecutable() {
     return venvPython;
   }
   return 'python3';
+}
+
+function maybeDeleteReplay(replayPath, shouldDelete) {
+  if (!shouldDelete || !replayPath) {
+    return;
+  }
+  if (fs.existsSync(replayPath)) {
+    fs.unlinkSync(replayPath);
+  }
 }
 
 function runGenerate(config, replayPath) {
@@ -182,12 +196,17 @@ function main() {
 
   const replayPath = config.replay_path
     || path.join(config.output_root, 'replay', `replay_python_${timestampTag()}.json`);
-  runGenerate(config, replayPath);
-  const trained = runPythonTrain(config, replayPath);
-  runEvaluate(config, trained.checkpoint_manifest_path);
-  runPlot(config);
+  const shouldDeleteReplay = !config.keep_replay && !config.replay_path;
+  let trained;
+  try {
+    runGenerate(config, replayPath);
+    trained = runPythonTrain(config, replayPath);
+    runEvaluate(config, trained.checkpoint_manifest_path);
+    runPlot(config);
+  } finally {
+    maybeDeleteReplay(replayPath, shouldDeleteReplay);
+  }
 
-  console.log(`Replay: ${replayPath}`);
   console.log(`Candidate: ${trained.checkpoint_manifest_path}`);
   console.log(`Checkpoint: ${trained.checkpoint_path}`);
   console.log(`Device: ${trained.device}`);

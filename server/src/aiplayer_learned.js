@@ -17,7 +17,7 @@ function clamp(value, min, max) {
 }
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function sumCardValues(cards) {
@@ -26,7 +26,7 @@ function sumCardValues(cards) {
 
 function actionSignature(action) {
   const discard = [...(action.discard || [])]
-    .map((card) => card._card)
+    .map((card) => card.id)
     .sort((a, b) => a - b)
     .join(',');
   return `${action.draw}|${discard}`;
@@ -123,7 +123,7 @@ function buildActionFeatureMaps(player, context, discardOption, drawCards, drewF
 
   return drawCards.map((drawCard) => {
     const drawValue = Number(drawCard && drawCard.value !== undefined ? drawCard.value : 5);
-    const isRealCard = Boolean(drawCard && drawCard._card !== undefined);
+    const isRealCard = Boolean(drawCard && drawCard.id !== undefined);
     let futureScore = player._best_residual_points(postDiscardHand);
     let compositionBonus = 0;
 

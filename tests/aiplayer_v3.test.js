@@ -8,7 +8,7 @@ const { AIPlayerV3 } = require('../server/src/aiplayer_v3');
 function serializeAction(action) {
   return {
     draw: action.draw,
-    discard: action.discard.map((card) => card._card).sort((a, b) => a - b),
+    discard: action.discard.map((card) => card.id).sort((a, b) => a - b),
   };
 }
 

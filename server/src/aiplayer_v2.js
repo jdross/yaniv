@@ -12,7 +12,7 @@
 const { AIPlayer } = require('./aiplayer_v1');
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function clamp(value, min, max) {
@@ -130,9 +130,9 @@ class AIPlayerV2 extends AIPlayer {
     }
     for (const cards of Object.values(suitCards)) {
       if (cards.length < 2) continue;
-      cards.sort((a, b) => a.rank_index() - b.rank_index());
+      cards.sort((a, b) => a.rankIndex() - b.rankIndex());
       for (let i = 0; i < cards.length - 1; i += 1) {
-        const gap = cards[i + 1].rank_index() - cards[i].rank_index();
+        const gap = cards[i + 1].rankIndex() - cards[i].rankIndex();
         if (gap === 1) {
           bonus += 1.5 + 0.06 * (cards[i].value + cards[i + 1].value);
         } else if (gap === 2 && joker_count > 0) {

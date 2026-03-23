@@ -18,11 +18,11 @@ function combinations(values, size) {
 }
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function removeFirstMatchingCard(cards, target) {
-  const idx = cards.findIndex((card) => card._card === target._card);
+  const idx = cards.findIndex((card) => card.id === target.id);
   if (idx !== -1) {
     cards.splice(idx, 1);
     return true;
@@ -134,7 +134,7 @@ class AIPlayer extends Player {
           if (!playerInfo.collected_suit_ranks[drawn_card.suit]) {
             playerInfo.collected_suit_ranks[drawn_card.suit] = new Set();
           }
-          playerInfo.collected_suit_ranks[drawn_card.suit].add(drawn_card.rank_index());
+          playerInfo.collected_suit_ranks[drawn_card.suit].add(drawn_card.rankIndex());
         }
       }
 
@@ -384,7 +384,7 @@ class AIPlayer extends Player {
 
     const rank_index_by_id = {};
     for (const card of hand) {
-      rank_index_by_id[card._card] = card.rank_index();
+      rank_index_by_id[card.id] = card.rankIndex();
     }
 
     for (let combo_size = 2; combo_size <= non_jokers.length; combo_size += 1) {
@@ -403,10 +403,10 @@ class AIPlayer extends Player {
 
         const first_suit = combo[0].suit;
         if (combo.every((card) => card.suit === first_suit)) {
-          let sorted_combo = [...combo].sort((a, b) => rank_index_by_id[a._card] - rank_index_by_id[b._card]);
+          let sorted_combo = [...combo].sort((a, b) => rank_index_by_id[a.id] - rank_index_by_id[b.id]);
           const gaps = [];
           for (let i = 0; i < sorted_combo.length - 1; i += 1) {
-            const gap = rank_index_by_id[sorted_combo[i + 1]._card] - rank_index_by_id[sorted_combo[i]._card] - 1;
+            const gap = rank_index_by_id[sorted_combo[i + 1].id] - rank_index_by_id[sorted_combo[i].id] - 1;
             if (gap > 0) {
               gaps.push([i, gap]);
             }
@@ -427,10 +427,10 @@ class AIPlayer extends Player {
 
             const remaining_jokers = jokers.slice(joker_index);
             for (const joker of remaining_jokers) {
-              if (rank_index_by_id[sorted_combo[0]._card] > 1) {
+              if (rank_index_by_id[sorted_combo[0].id] > 1) {
                 discard_options.push([joker, ...sorted_combo]);
               }
-              if (rank_index_by_id[sorted_combo[sorted_combo.length - 1]._card] < 13) {
+              if (rank_index_by_id[sorted_combo[sorted_combo.length - 1].id] < 13) {
                 discard_options.push([...sorted_combo, joker]);
               }
             }
@@ -457,7 +457,7 @@ class AIPlayer extends Player {
   }
 
   _hand_signature(hand) {
-    return hand.map((card) => card._card).sort((a, b) => a - b).join(',');
+    return hand.map((card) => card.id).sort((a, b) => a - b).join(',');
   }
 
   _get_best_discard_options_cached(hand) {
@@ -677,20 +677,20 @@ class AIPlayer extends Player {
   }
 
   _get_unseen_cards() {
-    const visible_ids = new Set(this.hand.map((card) => card._card));
+    const visible_ids = new Set(this.hand.map((card) => card.id));
     for (const card of this.draw_options) {
-      visible_ids.add(card._card);
+      visible_ids.add(card.id);
     }
     for (const card of this.public_discard_pile) {
-      visible_ids.add(card._card);
+      visible_ids.add(card.id);
     }
     for (const player_info of Object.values(this.other_players)) {
       for (const card of player_info.known_cards) {
-        visible_ids.add(card._card);
+        visible_ids.add(card.id);
       }
     }
 
-    return AIPlayer._FULL_DECK.filter((card) => !visible_ids.has(card._card));
+    return AIPlayer._FULL_DECK.filter((card) => !visible_ids.has(card.id));
   }
 
   _known_card_indexes() {
@@ -706,7 +706,7 @@ class AIPlayer extends Player {
         if (!known_suit_ranks.has(card.suit)) {
           known_suit_ranks.set(card.suit, new Set());
         }
-        known_suit_ranks.get(card.suit).add(card.rank_index());
+        known_suit_ranks.get(card.suit).add(card.rankIndex());
       }
     }
 
@@ -733,8 +733,8 @@ class AIPlayer extends Player {
 
     const values = [
       this.score,
-      ...this.hand.map((card) => card._card).sort((a, b) => a - b),
-      ...this.draw_options.map((card) => card._card).sort((a, b) => a - b),
+      ...this.hand.map((card) => card.id).sort((a, b) => a - b),
+      ...this.draw_options.map((card) => card.id).sort((a, b) => a - b),
       this.public_discard_pile.length,
       ...handCounts,
     ];
@@ -837,9 +837,9 @@ class AIPlayer extends Player {
     }
     for (const cards of Object.values(suitCards)) {
       if (cards.length < 2) continue;
-      cards.sort((a, b) => a.rank_index() - b.rank_index());
+      cards.sort((a, b) => a.rankIndex() - b.rankIndex());
       for (let i = 0; i < cards.length - 1; i += 1) {
-        const gap = cards[i + 1].rank_index() - cards[i].rank_index();
+        const gap = cards[i + 1].rankIndex() - cards[i].rankIndex();
         if (gap === 1) {
           // Directly consecutive: strong run potential
           bonus += 1.5 + 0.06 * (cards[i].value + cards[i + 1].value);
@@ -898,7 +898,7 @@ class AIPlayer extends Player {
         penalty += 1.3;
       }
 
-      const card_rank = card.rank_index();
+      const card_rank = card.rankIndex();
       const suit_ranks = known_suit_ranks.get(card.suit) ?? new Set();
       if (
         suit_ranks.has(card_rank)

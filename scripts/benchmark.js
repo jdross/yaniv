@@ -15,7 +15,7 @@ const { LegacyAIPlayer } = require('../server/src/aiplayer_legacy');
 const { AIPlayerLearned } = require('../server/src/aiplayer_learned');
 
 function containsCard(cards, target) {
-  return cards.some((card) => card._card === target._card);
+  return cards.some((card) => card.id === target.id);
 }
 
 function mulberry32(seed) {
