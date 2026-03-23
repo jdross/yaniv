@@ -2,7 +2,7 @@
 // Extends the current AIPlayer so instanceof checks work with YanivGame,
 // but overrides the methods that were changed to restore the old behaviour.
 
-const { AIPlayer } = require('./aiplayer');
+const { AIPlayer } = require('./aiplayer_v1');
 
 function containsCard(cards, target) {
   return cards.some((card) => card.id === target.id);

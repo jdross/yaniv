@@ -9,7 +9,7 @@
 //   4. Score-pressure-aware Yaniv — more willing to call when score is
 //      high (60+) and elimination risk is real
 
-const { AIPlayer } = require('./aiplayer');
+const { AIPlayer } = require('./aiplayer_v1');
 
 function containsCard(cards, target) {
   return cards.some((card) => card._card === target._card);

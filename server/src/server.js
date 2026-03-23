@@ -118,6 +118,10 @@ function parseSlamdownsAllowed(payload = {}) {
   return Boolean(payload.slamdownsAllowed ?? false);
 }
 
+function isAiPlayer(player) {
+  return Boolean(player && player.is_ai === true);
+}
+
 function generateCode() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz';
   let code = '';
@@ -252,7 +256,7 @@ function roomState(room, pid = '') {
           name: player.name,
           score: player.score,
           handCount: player.hand.length,
-          isAi: player instanceof AIPlayer,
+          isAi: isAiPlayer(player),
           isCurrent: false,
           pid: memberByName.get(player.name)?.pid ?? null,
         })),
@@ -276,7 +280,7 @@ function roomState(room, pid = '') {
             name: player.name,
             score: player.score,
             handCount: player.hand.length,
-            isAi: player instanceof AIPlayer,
+            isAi: isAiPlayer(player),
             isCurrent: player === currentPlayer,
             pid: humanMember?.pid ?? null,
           };
@@ -445,11 +449,11 @@ async function processAiTurns(code) {
 
     const game = room.game;
     const [currentPlayer, drawOptionsBefore] = game.startTurn();
-    if (!(currentPlayer instanceof AIPlayer)) {
+    if (!isAiPlayer(currentPlayer)) {
       return;
     }
 
-    if (game.canDeclareYaniv(currentPlayer) && currentPlayer.shouldDeclareYaniv()) {
+    if (game.canDeclareYaniv(currentPlayer) && currentPlayer.should_declare_yaniv()) {
       const winner = applyYanivOutcome(room, game, currentPlayer);
       await pushState(code);
       if (winner) {
@@ -1129,7 +1133,7 @@ async function initDb() {
     for (const [code, room] of rooms.entries()) {
       if (room.status === 'playing' && room.game) {
         const currentPlayer = room.game.getCurrentPlayer();
-        if (currentPlayer instanceof AIPlayer) {
+        if (isAiPlayer(currentPlayer)) {
           startAiWorker(code);
         }
       }

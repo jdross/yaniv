@@ -11,7 +11,8 @@
     "start": "NODE_ENV=production node server/src/server.js",
     "server:install": "npm install",
     "server:dev": "npm run dev",
-    "server:start": "npm run start"
+    "server:start": "npm run start",
+    "benchmark:ai": "node scripts/benchmark.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
