@@ -164,6 +164,7 @@ test('waiting room options persist across join and start', async () => {
       name: 'P1',
       pid: 'pid-1',
       aiCount: 0,
+      aiDifficulty: 'easy',
     },
   });
   const code = create.body.code;
@@ -177,6 +178,7 @@ test('waiting room options persist across join and start', async () => {
   });
   assert.equal(options.status, 200);
   assert.equal(options.body.options.slamdownsAllowed, true);
+  assert.equal(options.body.options.aiDifficulty, 'easy');
 
   const join = await callRoute('post', '/api/join', {
     body: {
@@ -192,6 +194,7 @@ test('waiting room options persist across join and start', async () => {
     query: { pid: 'pid-2' },
   });
   assert.equal(state.body.options.slamdownsAllowed, true);
+  assert.equal(state.body.options.aiDifficulty, 'easy');
 
   const start = await callRoute('post', '/api/start', {
     body: {
@@ -201,9 +204,10 @@ test('waiting room options persist across join and start', async () => {
   });
   assert.equal(start.status, 200);
   assert.equal(rooms.get(code).options.slamdownsAllowed, true);
+  assert.equal(rooms.get(code).options.aiDifficulty, 'easy');
 });
 
-test('new rooms default slamdowns to enabled', async () => {
+test('new rooms default slamdowns to enabled and AI difficulty to hard', async () => {
   const create = await callRoute('post', '/api/create', {
     body: {
       name: 'P1',
@@ -219,7 +223,9 @@ test('new rooms default slamdowns to enabled', async () => {
   });
   assert.equal(state.status, 200);
   assert.equal(state.body.options.slamdownsAllowed, true);
+  assert.equal(state.body.options.aiDifficulty, 'hard');
   assert.equal(rooms.get(create.body.code).options.slamdownsAllowed, true);
+  assert.equal(rooms.get(create.body.code).options.aiDifficulty, 'hard');
 });
 
 test('only creator can change waiting options', async () => {
@@ -340,4 +346,42 @@ test('yaniv round payload includes final hands before redeal', async () => {
 
   assert.deepEqual(declarerChange.finalHand.map((card) => card.rank), ['A']);
   assert.deepEqual(opponentChange.finalHand.map((card) => card.rank), ['K', 'Q']);
+});
+
+test('easy AI rooms instantiate v3 AI players and preserve difficulty on rematch', async () => {
+  const create = await callRoute('post', '/api/create', {
+    body: {
+      name: 'P1',
+      pid: 'pid-1',
+      aiCount: 1,
+      aiDifficulty: 'easy',
+    },
+  });
+  assert.equal(create.status, 200);
+
+  const code = create.body.code;
+  const start = await callRoute('post', '/api/start', {
+    body: { code, pid: 'pid-1' },
+  });
+  assert.equal(start.status, 200);
+
+  const room = rooms.get(code);
+  const aiPlayer = room.game.players.find((player) => player.is_ai);
+  assert.ok(aiPlayer);
+  assert.equal(aiPlayer.policy_id, 'v3');
+  assert.equal(aiPlayer.aiDifficulty, 'easy');
+
+  room.status = 'finished';
+
+  const rematch = await callRoute('post', '/api/playAgain', {
+    body: { code, pid: 'pid-1' },
+  });
+  assert.equal(rematch.status, 200);
+
+  const nextRoom = rooms.get(rematch.body.nextRoom);
+  const rematchAi = nextRoom.game.players.find((player) => player.is_ai);
+  assert.ok(rematchAi);
+  assert.equal(nextRoom.options.aiDifficulty, 'easy');
+  assert.equal(rematchAi.policy_id, 'v3');
+  assert.equal(rematchAi.aiDifficulty, 'easy');
 });

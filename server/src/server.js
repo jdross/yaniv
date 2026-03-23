@@ -6,7 +6,7 @@ const express = require('express');
 
 const { YanivGame } = require('./yaniv');
 const { Player } = require('./player');
-const { AIPlayer } = require('./aiplayer');
+const { AI_DIFFICULTY, createAIPlayer, normalizeAiDifficulty } = require('./aiplayer');
 
 let Pool = null;
 let hasPg = false;
@@ -34,6 +34,7 @@ const MAX_AI_PLAYERS = 3;
 const HEARTBEAT_INTERVAL_MS = 25000;
 const DEFAULT_ROOM_OPTIONS = Object.freeze({
   slamdownsAllowed: true,
+  aiDifficulty: AI_DIFFICULTY.HARD,
 });
 
 let pool = null;
@@ -145,6 +146,7 @@ function normalizeRoomOptions(rawOptions = null) {
   }
   return {
     slamdownsAllowed: Boolean(rawOptions.slamdownsAllowed ?? DEFAULT_ROOM_OPTIONS.slamdownsAllowed),
+    aiDifficulty: normalizeAiDifficulty(rawOptions.aiDifficulty),
   };
 }
 
@@ -158,6 +160,7 @@ function applySlamdownPolicy(options, hasAiPlayers) {
 function toWireRoomOptions(options = DEFAULT_ROOM_OPTIONS) {
   return {
     slamdownsAllowed: Boolean(options.slamdownsAllowed),
+    aiDifficulty: normalizeAiDifficulty(options.aiDifficulty),
   };
 }
 
@@ -684,7 +687,7 @@ async function loadRooms() {
       let game = null;
       if (gs && gs.gameJson !== null) {
         try {
-          game = YanivGame.fromDict(parseJsonish(gs.gameJson));
+          game = YanivGame.fromDict(parseJsonish(gs.gameJson), parseJsonish(gs?.options));
         } catch (error) {
           console.log(`[DB] Could not restore game ${roomRow.code}: ${error.message || error}`);
         }
@@ -789,6 +792,7 @@ app.post('/api/create', async (req, res) => {
   const pid = parsePid(payload.pid, randomPid);
   const name = parsePlayerName(payload.name);
   const aiCount = parseAiCount(payload.aiCount);
+  const aiDifficulty = normalizeAiDifficulty(payload.aiDifficulty);
 
   if (aiCount === null) {
     return errorResponse(res, 'Invalid AI player count');
@@ -801,11 +805,16 @@ app.post('/api/create', async (req, res) => {
 
   const code = generateUniqueCode();
 
-  rooms.set(code, createRoom({ code, status: 'waiting', members }));
+  rooms.set(code, createRoom({
+    code,
+    status: 'waiting',
+    members,
+    options: { aiDifficulty },
+  }));
   await saveRoom(code);
 
   console.log(
-    `[Server] Game created code=${code} creator=${name} players=${members.length} ai=${aiCount}`,
+    `[Server] Game created code=${code} creator=${name} players=${members.length} ai=${aiCount} aiDifficulty=${aiDifficulty}`,
   );
   return res.json({ code, pid });
 });
@@ -947,7 +956,9 @@ app.post('/api/start', async (req, res) => {
   );
 
   const players = room.members.map((member) => (
-    member.isAi ? new AIPlayer(member.name) : new Player(member.name)
+    member.isAi
+      ? createAIPlayer(member.name, { aiDifficulty: room.options.aiDifficulty })
+      : new Player(member.name)
   ));
   const game = new YanivGame(players);
   game.startGame();
@@ -958,7 +969,7 @@ app.post('/api/start', async (req, res) => {
   room.lastTurn = null;
 
   console.log(
-    `[Server] Game started code=${code} players=${room.members.map((m) => m.name).join(',')} slamdowns=${room.options.slamdownsAllowed}`,
+    `[Server] Game started code=${code} players=${room.members.map((m) => m.name).join(',')} slamdowns=${room.options.slamdownsAllowed} aiDifficulty=${room.options.aiDifficulty}`,
   );
 
   await pushState(code);
@@ -1088,7 +1099,9 @@ app.post('/api/playAgain', async (req, res) => {
   const options = normalizeRoomOptions(room.options);
 
   const players = members.map((member) => (
-    member.isAi ? new AIPlayer(member.name) : new Player(member.name)
+    member.isAi
+      ? createAIPlayer(member.name, { aiDifficulty: options.aiDifficulty })
+      : new Player(member.name)
   ));
   const game = new YanivGame(players);
   game.startGame();
@@ -1105,7 +1118,7 @@ app.post('/api/playAgain', async (req, res) => {
   room.nextRoom = newCode;
 
   console.log(
-    `[Server] Game started code=${newCode} rematchOf=${code} players=${members.map((m) => m.name).join(',')} slamdowns=${options.slamdownsAllowed}`,
+    `[Server] Game started code=${newCode} rematchOf=${code} players=${members.map((m) => m.name).join(',')} slamdowns=${options.slamdownsAllowed} aiDifficulty=${options.aiDifficulty}`,
   );
 
   await saveRoom(newCode);

@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const { AIPlayer } = require('./aiplayer');
+const { createAIPlayer, normalizeAiDifficulty } = require('./aiplayer');
 const { Player } = require('./player');
 const { Card } = require('./card');
 
@@ -72,6 +72,9 @@ class YanivGame {
         score: player.score,
         hand: player.hand.map((card) => card.serialize()),
         isAi: isAiPlayer(player),
+        aiDifficulty: isAiPlayer(player)
+          ? normalizeAiDifficulty(player.aiDifficulty || player.policy_id)
+          : null,
       })),
       currentPlayerIndex: this.currentPlayerIndex,
       previousScores: [...this.previousScores],
@@ -81,7 +84,8 @@ class YanivGame {
     };
   }
 
-  static fromDict(data) {
+  static fromDict(data, options = null) {
+    const defaultAiDifficulty = normalizeAiDifficulty(options && options.aiDifficulty);
     const game = new YanivGame();
 
     game.gameId = data.gameId || randomUuid();
@@ -89,7 +93,11 @@ class YanivGame {
     const players = [];
     for (const playerData of data.players || []) {
       const isAi = Boolean(playerData.isAi || playerData.is_ai || false);
-      const player = isAi ? new AIPlayer(playerData.name) : new Player(playerData.name);
+      const player = isAi
+        ? createAIPlayer(playerData.name, {
+          aiDifficulty: normalizeAiDifficulty(playerData.aiDifficulty || playerData.policyId || defaultAiDifficulty),
+        })
+        : new Player(playerData.name);
       player.score = playerData.score || 0;
       player.hand = (playerData.hand || []).map((cardData) => Card.deserialize(cardData));
       players.push(player);

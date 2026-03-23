@@ -25,9 +25,26 @@
           <input id="create-name" type="text" maxlength="20" placeholder="Enter your name" autocomplete="off">
         </div>
         <div class="form-group">
-          <label for="ai-count">AI opponents: <span id="ai-label">0</span></label>
-          <input id="ai-count" type="range" min="0" max="3" value="0">
+          <label for="ai-count-options">AI opponents</label>
+          <div id="ai-count-options" class="ai-count-toggle" role="group" aria-label="AI opponents">
+            <button type="button" class="ai-count-option active" data-value="0" aria-pressed="true">None</button>
+            <button type="button" class="ai-count-option" data-value="1" aria-pressed="false">1</button>
+            <button type="button" class="ai-count-option" data-value="2" aria-pressed="false">2</button>
+            <button type="button" class="ai-count-option" data-value="3" aria-pressed="false">3</button>
+          </div>
           <div class="ai-hint">Total players capped at 4</div>
+        </div>
+        <div id="ai-difficulty-group" class="form-group hidden">
+          <label for="ai-difficulty-toggle">AI level</label>
+          <div class="ai-difficulty-row">
+            <span class="ai-difficulty-emoji" aria-hidden="true">🧠</span>
+            <label class="ai-switch" for="ai-difficulty-toggle">
+              <input id="ai-difficulty-toggle" type="checkbox" checked>
+              <span class="ai-switch-track" aria-hidden="true"></span>
+              <span class="sr-only">Toggle AI level between Easy and Hard</span>
+            </label>
+            <span class="ai-difficulty-emoji" aria-hidden="true">🧠🧠🧠</span>
+          </div>
         </div>
         <button id="create-btn" class="btn btn-primary">Create Game</button>
         <p id="create-error" class="error-msg"></p>
@@ -60,17 +77,37 @@
       document.getElementById('join-name').value = lastName;
     }
 
-    const aiCountEl = document.getElementById('ai-count');
-    const aiLabelEl = document.getElementById('ai-label');
-    aiCountEl.addEventListener('input', () => { aiLabelEl.textContent = aiCountEl.value; });
+    const aiCountOptionEls = Array.from(document.querySelectorAll('.ai-count-option'));
+    const aiDifficultyGroupEl = document.getElementById('ai-difficulty-group');
+    const aiDifficultyToggleEl = document.getElementById('ai-difficulty-toggle');
+    let selectedAiCount = 0;
+
+    function setAiCount(value) {
+      selectedAiCount = value;
+      aiDifficultyGroupEl.classList.toggle('hidden', value === 0);
+      aiCountOptionEls.forEach((optionEl) => {
+        const isActive = parseInt(optionEl.dataset.value, 10) === value;
+        optionEl.classList.toggle('active', isActive);
+        optionEl.setAttribute('aria-pressed', String(isActive));
+      });
+    }
+
+    aiCountOptionEls.forEach((optionEl) => {
+      optionEl.addEventListener('click', () => {
+        setAiCount(parseInt(optionEl.dataset.value, 10));
+      });
+    });
+
+    setAiCount(selectedAiCount);
 
     document.getElementById('create-btn').addEventListener('click', async () => {
       const name = document.getElementById('create-name').value.trim();
+      const aiDifficulty = aiDifficultyToggleEl.checked ? 'hard' : 'easy';
       if (!name) { document.getElementById('create-error').textContent = 'Enter your name'; return; }
       const res = await fetch('/api/create', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, aiCount: parseInt(aiCountEl.value), pid})
+        body: JSON.stringify({name, aiCount: selectedAiCount, aiDifficulty, pid})
       });
       const data = await res.json();
       if (data.error) { document.getElementById('create-error').textContent = data.error; return; }
