@@ -1,4 +1,4 @@
-const { AIPlayer: V1AIPlayer } = require('./aiplayer_v1');
+const { AIPlayer: BaseAIPlayer } = require('./aiplayer_base');
 
 function containsCard(cards, target) {
   return cards.some((card) => card.id === target.id);
@@ -31,7 +31,7 @@ function sumCardValues(cards) {
   return cards.reduce((sum, card) => sum + card.value, 0);
 }
 
-class AIPlayerV3 extends V1AIPlayer {
+class AIPlayerV3 extends BaseAIPlayer {
   static _YANIV_SAMPLES = 32;
 
   constructor(name, rollout_samples = 24) {

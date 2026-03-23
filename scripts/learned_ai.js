@@ -8,9 +8,6 @@ const { performance } = require('node:perf_hooks');
 const { YanivGame } = require('../server/src/yaniv');
 const { Player } = require('../server/src/player');
 const { Card } = require('../server/src/card');
-const { AIPlayer: ProductionAIPlayer } = require('../server/src/aiplayer');
-const { AIPlayer: V1AIPlayer } = require('../server/src/aiplayer_v1');
-const { AIPlayerV2 } = require('../server/src/aiplayer_v2');
 const { LegacyAIPlayer } = require('../server/src/aiplayer_legacy');
 const { AIPlayerV3 } = require('../server/src/aiplayer_v3');
 const {
@@ -358,6 +355,11 @@ function runtimeManifestPath() {
   return path.resolve(__dirname, '..', 'server', 'learned_ai', 'current_champion.json');
 }
 
+function isPathInside(parentPath, childPath) {
+  const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -523,13 +525,7 @@ function instantiatePolicy(policyId, name, rolloutSamples, options = {}) {
       player = new AIPlayerLearned(name, rolloutSamples, { manifestPath: options.manifestPath });
       break;
     case 'v3':
-      player = new ProductionAIPlayer(name, rolloutSamples);
-      break;
-    case 'v2':
-      player = new AIPlayerV2(name, rolloutSamples);
-      break;
-    case 'v1':
-      player = new V1AIPlayer(name, rolloutSamples);
+      player = new AIPlayerV3(name, rolloutSamples);
       break;
     case 'legacy':
       player = new LegacyAIPlayer(name, rolloutSamples);
@@ -549,37 +545,36 @@ function instantiatePolicy(policyId, name, rolloutSamples, options = {}) {
 function buildLeaguePolicies(mode, playerCount, gameIndex) {
   const warmstart2p = [
     ['v3', 'v3'],
-    ['v3', 'v2'],
-    ['v3', 'v1'],
+    ['v3', 'legacy'],
+    ['legacy', 'v3'],
   ];
   const warmstart3p = [
-    ['v3', 'v2', 'v1'],
-    ['v3', 'legacy', 'v2'],
-    ['v3', 'v1', 'legacy'],
+    ['v3', 'legacy', 'v3'],
+    ['v3', 'legacy', 'legacy'],
+    ['legacy', 'v3', 'legacy'],
   ];
   const selfPlay2p = [
     ['learned', 'v3'],
     ['learned', 'learned'],
-    ['learned', 'v2'],
     ['learned', 'legacy'],
   ];
   const selfPlay3p = [
-    ['learned', 'v3', 'v2'],
-    ['learned', 'learned', 'v3'],
     ['learned', 'v3', 'legacy'],
-    ['learned', 'v2', 'v1'],
+    ['learned', 'learned', 'v3'],
+    ['learned', 'learned', 'legacy'],
+    ['learned', 'v3', 'learned'],
   ];
   const v3Curriculum2p = [
     ['learned', 'v3'],
     ['learned', 'v3'],
     ['learned', 'v3'],
-    ['learned', 'v2'],
+    ['learned', 'legacy'],
   ];
   const v3Curriculum3p = [
     ['learned', 'v3', 'v3'],
     ['learned', 'v3', 'legacy'],
-    ['learned', 'v3', 'v2'],
     ['learned', 'v3', 'learned'],
+    ['learned', 'legacy', 'v3'],
   ];
 
   let source;
@@ -922,7 +917,7 @@ function runEvaluationBenchmarks(candidateManifestPath, championManifestPath, co
       jobs: 1,
     });
     const leagueA = await benchmark.runBenchmarks({
-      players: ['learned_candidate', 'v3', 'v2'],
+      players: ['learned_candidate', 'v3', 'legacy'],
       games: Math.max(1, Math.floor(config.eval_games_3p / 2)),
       max_turns: config.max_turns,
       seed: config.seed + 30_000,
@@ -962,7 +957,7 @@ function evaluateCheckpoint(config, candidateManifestPath) {
 
     const v3Summary = benchmark.summarizeResults(raw.headToHeadV3, ['learned_candidate', 'v3']);
     const championSummary = benchmark.summarizeResults(raw.headToHeadChampion, ['learned_candidate', 'learned_champion']);
-    const leagueASummary = benchmark.summarizeResults(raw.leagueA, ['learned_candidate', 'v3', 'v2']);
+    const leagueASummary = benchmark.summarizeResults(raw.leagueA, ['learned_candidate', 'v3', 'legacy']);
     const leagueBSummary = benchmark.summarizeResults(raw.leagueB, ['learned_candidate', 'learned_champion', 'legacy']);
 
     let rating2p = Number(currentManifest.rating_2p || 1500);
@@ -993,7 +988,6 @@ function evaluateCheckpoint(config, candidateManifestPath) {
       learned_candidate: Number(currentManifest.rating_3p || 1500),
       learned_champion: Number(currentManifest.rating_3p || 1500),
       v3: 1500,
-      v2: 1450,
       legacy: 1350,
     };
     for (const result of [...raw.leagueA, ...raw.leagueB]) {
@@ -1061,6 +1055,16 @@ function evaluateCheckpoint(config, candidateManifestPath) {
     };
 
     if (promoted) {
+      const runtimeManifest = runtimeManifestPath();
+      const candidateModelPath = path.resolve(candidateManifest.model_path);
+      if (path.resolve(config.manifest_path) === runtimeManifest) {
+        const repoRoot = path.resolve(__dirname, '..');
+        if (!isPathInside(repoRoot, candidateModelPath)) {
+          throw new Error(
+            `Refusing to promote checkpoint outside the repo into runtime manifest: ${candidateModelPath}`,
+          );
+        }
+      }
       const runtimePayload = {
         ...candidateManifest,
         model_path: candidateManifest.model_path,

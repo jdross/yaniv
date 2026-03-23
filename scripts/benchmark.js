@@ -8,10 +8,9 @@ const { Worker, isMainThread, parentPort, workerData } = require('node:worker_th
 
 const { YanivGame } = require('../server/src/yaniv');
 const { Player } = require('../server/src/player');
-const { AIPlayer: ProductionAIPlayer } = require('../server/src/aiplayer');
-const { AIPlayer: V1AIPlayer } = require('../server/src/aiplayer_v1');
-const { AIPlayerV2 } = require('../server/src/aiplayer_v2');
+const { AIPlayer: BaseAIPlayer } = require('../server/src/aiplayer_base');
 const { LegacyAIPlayer } = require('../server/src/aiplayer_legacy');
+const { AIPlayerV3 } = require('../server/src/aiplayer_v3');
 const { AIPlayerLearned } = require('../server/src/aiplayer_learned');
 
 function containsCard(cards, target) {
@@ -96,31 +95,17 @@ function makeTimedPolicyClass(BaseClass, policyId) {
   };
 }
 
-const TimedProductionAI = makeTimedPolicyClass(ProductionAIPlayer, 'v3');
-const TimedV1AI = makeTimedPolicyClass(V1AIPlayer, 'v1');
-const TimedV2AI = makeTimedPolicyClass(AIPlayerV2, 'v2');
+const TimedV3AI = makeTimedPolicyClass(AIPlayerV3, 'v3');
 const TimedLegacyAI = makeTimedPolicyClass(LegacyAIPlayer, 'legacy');
 const TimedLearnedAI = makeTimedPolicyClass(AIPlayerLearned, 'learned');
 
-const HELPER_AI = new V1AIPlayer('benchmark-helper');
+const HELPER_AI = new BaseAIPlayer('benchmark-helper');
 
 const POLICY_REGISTRY = {
   v3: {
-    label: 'Production V3',
+    label: 'V3',
     create(name, rolloutSamples) {
-      return new TimedProductionAI(name, rolloutSamples);
-    },
-  },
-  v1: {
-    label: 'V1 Baseline',
-    create(name, rolloutSamples) {
-      return new TimedV1AI(name, rolloutSamples);
-    },
-  },
-  v2: {
-    label: 'V2',
-    create(name, rolloutSamples) {
-      return new TimedV2AI(name, rolloutSamples);
+      return new TimedV3AI(name, rolloutSamples);
     },
   },
   legacy: {
@@ -162,7 +147,7 @@ function parsePlayerIds(rawPlayers) {
     .filter(Boolean);
 
   if (ids.length < 2 || ids.length > 4) {
-    throw new Error('`--players` must specify between 2 and 4 policy ids, e.g. --players v3,v1');
+    throw new Error('`--players` must specify between 2 and 4 policy ids, e.g. --players learned,v3');
   }
 
   for (const policyId of ids) {
@@ -453,7 +438,7 @@ function summarizeResults(rawGames, playerIds) {
 
 function parseArgs(argv) {
   const out = {
-    players: ['v3', 'v1'],
+    players: ['learned', 'v3'],
     games: 200,
     max_turns: 1000,
     seed: 42,

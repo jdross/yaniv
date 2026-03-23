@@ -12,7 +12,7 @@ Modern AI across 3x1000-game benchmarks (49.7% aggregate win rate).
 
 ### What was tried
 
-`AIPlayerV2` (in `server/src/aiplayer_v2.js`) extends the base `AIPlayer` with
+`AIPlayerV2` extended the base `AIPlayer` with
 four targeted changes:
 
 1. **Threat-reactive feed penalty** — increased the cost of discarding cards

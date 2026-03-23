@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Card } = require('../server/src/card');
-const { AIPlayer } = require('../server/src/aiplayer_v1');
+const { AIPlayer } = require('../server/src/aiplayer_base');
 const { AIPlayerV3 } = require('../server/src/aiplayer_v3');
 
 function serializeAction(action) {
