@@ -355,11 +355,6 @@ function runtimeManifestPath() {
   return path.resolve(__dirname, '..', 'server', 'learned_ai', 'current_champion.json');
 }
 
-function isPathInside(parentPath, childPath) {
-  const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
-  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -410,6 +405,7 @@ function parseArgs(argv) {
     learning_rate: 0.03,
     epochs: 6,
     keep_replay: false,
+    promote: false,
     rollout_target_candidates: 4,
     rollout_target_samples: 2,
     rollout_target_turns: 18,
@@ -437,6 +433,10 @@ function parseArgs(argv) {
     if (token === '--candidate-manifest-path') out.candidate_manifest_path = path.resolve(process.cwd(), value);
     if (token === '--keep-replay') {
       out.keep_replay = true;
+      continue;
+    }
+    if (token === '--promote') {
+      out.promote = true;
       continue;
     }
     if (token === '--rollout-target-candidates') out.rollout_target_candidates = Number.parseInt(value, 10);
@@ -473,6 +473,62 @@ function nextSeed(seed, step = 9973) {
 
 function loadManifest(manifestPath) {
   return readJson(manifestPath);
+}
+
+function resolveManifestModelPath(manifestPath, manifest) {
+  if (!manifest.model_path) {
+    throw new Error(`Manifest is missing model_path: ${manifestPath}`);
+  }
+  return path.isAbsolute(manifest.model_path)
+    ? manifest.model_path
+    : path.resolve(path.dirname(manifestPath), manifest.model_path);
+}
+
+function buildPromotedManifest(targetManifestPath, candidateManifestPath) {
+  const candidateManifest = loadManifest(candidateManifestPath);
+  const candidateCheckpointPath = resolveManifestModelPath(candidateManifestPath, candidateManifest);
+  if (!fs.existsSync(candidateCheckpointPath)) {
+    throw new Error(`Candidate checkpoint does not exist: ${candidateCheckpointPath}`);
+  }
+
+  const runtimeManifest = runtimeManifestPath();
+  if (path.resolve(targetManifestPath) === runtimeManifest) {
+    const repoCheckpointDir = path.resolve(path.dirname(runtimeManifest), 'checkpoints');
+    ensureDir(repoCheckpointDir);
+    const targetCheckpointName = `${candidateManifest.checkpoint_id}.json`;
+    const targetCheckpointPath = path.join(repoCheckpointDir, targetCheckpointName);
+    if (path.resolve(candidateCheckpointPath) !== targetCheckpointPath) {
+      fs.copyFileSync(candidateCheckpointPath, targetCheckpointPath);
+    }
+    return {
+      payload: {
+        ...candidateManifest,
+        model_path: `./checkpoints/${targetCheckpointName}`,
+      },
+      checkpoint_path: targetCheckpointPath,
+      copied: path.resolve(candidateCheckpointPath) !== targetCheckpointPath,
+    };
+  }
+
+  return {
+    payload: {
+      ...candidateManifest,
+      model_path: candidateCheckpointPath,
+    },
+    checkpoint_path: candidateCheckpointPath,
+    copied: false,
+  };
+}
+
+function promoteCandidateManifest(targetManifestPath, candidateManifestPath) {
+  const promoted = buildPromotedManifest(targetManifestPath, candidateManifestPath);
+  writeJson(targetManifestPath, promoted.payload);
+  return {
+    manifest_path: targetManifestPath,
+    checkpoint_path: promoted.checkpoint_path,
+    checkpoint_id: promoted.payload.checkpoint_id,
+    copied_checkpoint: promoted.copied,
+  };
 }
 
 function normalizeResultScore(playerMetrics, playerName) {
@@ -1024,12 +1080,14 @@ function evaluateCheckpoint(config, candidateManifestPath) {
     const currentComposite = (Number(currentManifest.rating_2p || 1500) + Number(currentManifest.rating_3p || 1500)) / 2;
     const candidateComposite = (candidateManifest.rating_2p + candidateManifest.rating_3p) / 2;
     const latencyOkay = avgLatency <= 30 && p95Latency <= 80;
-    const promoted = latencyOkay && candidateComposite > currentComposite;
+    const promotionRecommended = latencyOkay && candidateComposite > currentComposite;
+    const promoted = Boolean(config.promote) && promotionRecommended;
 
     const evaluation = {
       created_at: new Date().toISOString(),
       candidate_manifest_path: candidateManifestPath,
       runtime_manifest_path: config.manifest_path,
+      promotion_recommended: promotionRecommended,
       promoted,
       latency_okay: latencyOkay,
       candidate: {
@@ -1038,6 +1096,7 @@ function evaluateCheckpoint(config, candidateManifestPath) {
         rating_3p: candidateManifest.rating_3p,
         composite: Number(candidateComposite.toFixed(2)),
         win_rate_vs_v3: candidateManifest.win_rate_vs_v3,
+        win_rate_vs_champion: Number((championSummary.win_rates_by_game.learned_candidate || 0).toFixed(4)),
         latency_summary: candidateManifest.latency_summary,
       },
       current: {
@@ -1055,21 +1114,7 @@ function evaluateCheckpoint(config, candidateManifestPath) {
     };
 
     if (promoted) {
-      const runtimeManifest = runtimeManifestPath();
-      const candidateModelPath = path.resolve(candidateManifest.model_path);
-      if (path.resolve(config.manifest_path) === runtimeManifest) {
-        const repoRoot = path.resolve(__dirname, '..');
-        if (!isPathInside(repoRoot, candidateModelPath)) {
-          throw new Error(
-            `Refusing to promote checkpoint outside the repo into runtime manifest: ${candidateModelPath}`,
-          );
-        }
-      }
-      const runtimePayload = {
-        ...candidateManifest,
-        model_path: candidateManifest.model_path,
-      };
-      writeJson(config.manifest_path, runtimePayload);
+      promoteCandidateManifest(config.manifest_path, candidateManifestPath);
     }
 
     const evalOutPath = path.join(config.output_root, 'evaluations', `evaluation_${candidateManifest.checkpoint_id}.json`);
@@ -1099,6 +1144,11 @@ function plotProgress(config) {
     rating_2p: row.candidate.rating_2p,
     rating_3p: row.candidate.rating_3p,
     win_rate_vs_v3: row.candidate.win_rate_vs_v3,
+    win_rate_vs_champion: Number(
+      row.candidate.win_rate_vs_champion
+      ?? row.summaries?.candidate_vs_champion_2p?.win_rates_by_game?.learned_candidate
+      ?? 0,
+    ),
     avg_ms: row.candidate.latency_summary.avg_ms,
     promoted: row.promoted,
   }));
@@ -1121,13 +1171,13 @@ function plotProgress(config) {
 </head>
 <body>
   <h1>Learned AI Progress</h1>
-  <div class="meta">Separate 2-player and 3-player rating curves, plus win rate versus V3 and latency.</div>
+  <div class="meta">Separate 2-player and 3-player rating curves, plus win rate versus V3, win rate versus the current champion, and latency.</div>
   <canvas id="ratings" width="960" height="320"></canvas>
   <canvas id="winrate" width="960" height="220"></canvas>
   <canvas id="latency" width="960" height="220"></canvas>
   <table>
     <thead>
-      <tr><th>Iteration</th><th>Checkpoint</th><th>2p Elo</th><th>3p Elo</th><th>Win Rate vs V3</th><th>Avg ms</th><th>Promoted</th></tr>
+      <tr><th>Iteration</th><th>Checkpoint</th><th>2p Elo</th><th>3p Elo</th><th>Win Rate vs V3</th><th>Win Rate vs Champion</th><th>Avg ms</th><th>Promoted</th></tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
@@ -1166,7 +1216,8 @@ function plotProgress(config) {
       { color: '#a4552d', values: data.map((row) => row.rating_3p) }
     ], minRating, maxRating);
     drawLineChart('winrate', [
-      { color: '#2a4f88', values: data.map((row) => row.win_rate_vs_v3 * 100) }
+      { color: '#2a4f88', values: data.map((row) => row.win_rate_vs_v3 * 100) },
+      { color: '#9a6c2f', values: data.map((row) => row.win_rate_vs_champion * 100) }
     ], 0, 100);
     const latencyValues = data.map((row) => row.avg_ms);
     drawLineChart('latency', [
@@ -1180,6 +1231,7 @@ function plotProgress(config) {
         + '<td>' + row.rating_2p + '</td>'
         + '<td>' + row.rating_3p + '</td>'
         + '<td>' + (row.win_rate_vs_v3 * 100).toFixed(1) + '%</td>'
+        + '<td>' + (row.win_rate_vs_champion * 100).toFixed(1) + '%</td>'
         + '<td>' + row.avg_ms.toFixed(3) + '</td>'
         + '<td>' + (row.promoted ? 'yes' : 'no') + '</td>';
       rows.appendChild(tr);
@@ -1248,6 +1300,7 @@ async function runBurst(config) {
       mode,
       seed: workingSeed,
       checkpoint_id: payload.candidate.checkpoint_id,
+      promotion_recommended: payload.promotion_recommended,
       promoted: payload.promoted,
       composite: payload.candidate.composite,
       win_rate_vs_v3: payload.candidate.win_rate_vs_v3,
@@ -1316,6 +1369,18 @@ async function main() {
     }
     const evaluation = await evaluateCheckpoint(args, candidateManifestPath);
     console.log(`Saved evaluation to ${evaluation.path}`);
+    return;
+  }
+
+  if (args.command === 'promote') {
+    const candidateManifestPath = args.candidate_manifest_path || args.replay_path;
+    if (!candidateManifestPath) {
+      throw new Error('`promote` requires --candidate-manifest-path (or --replay-path for compatibility)');
+    }
+    const promoted = promoteCandidateManifest(args.manifest_path, candidateManifestPath);
+    console.log(`Promoted checkpoint ${promoted.checkpoint_id}`);
+    console.log(`Runtime manifest: ${promoted.manifest_path}`);
+    console.log(`Checkpoint: ${promoted.checkpoint_path}`);
     return;
   }
 

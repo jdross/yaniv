@@ -31,6 +31,7 @@ function parseArgs(argv) {
     output_root: defaultOutputRoot(),
     manifest_path: runtimeManifestPath(),
     replay_path: '',
+    candidate_manifest_path: '',
     mode: '',
     seed: 42,
     learning_rate: 0.0015,
@@ -39,6 +40,7 @@ function parseArgs(argv) {
     value_hidden_size: 48,
     yaniv_hidden_size: 32,
     keep_replay: false,
+    promote: false,
     rollout_target_candidates: 2,
     rollout_target_samples: 1,
     rollout_target_turns: 6,
@@ -56,6 +58,7 @@ function parseArgs(argv) {
     if (token === '--output-root') out.output_root = path.resolve(process.cwd(), value);
     if (token === '--manifest-path') out.manifest_path = path.resolve(process.cwd(), value);
     if (token === '--replay-path') out.replay_path = path.resolve(process.cwd(), value);
+    if (token === '--candidate-manifest-path') out.candidate_manifest_path = path.resolve(process.cwd(), value);
     if (token === '--mode') out.mode = String(value || '');
     if (token === '--seed') out.seed = Number.parseInt(value, 10);
     if (token === '--learning-rate') out.learning_rate = Number(value);
@@ -65,6 +68,10 @@ function parseArgs(argv) {
     if (token === '--yaniv-hidden-size') out.yaniv_hidden_size = Number.parseInt(value, 10);
     if (token === '--keep-replay') {
       out.keep_replay = true;
+      continue;
+    }
+    if (token === '--promote') {
+      out.promote = true;
       continue;
     }
     if (token === '--rollout-target-candidates') out.rollout_target_candidates = Number.parseInt(value, 10);
@@ -155,7 +162,7 @@ function runPythonTrain(config, replayPath) {
 
 function runEvaluate(config, candidateManifestPath) {
   const scriptPath = path.resolve(__dirname, 'learned_ai.js');
-  runChecked(process.execPath, [
+  const args = [
     scriptPath,
     'evaluate',
     '--candidate-manifest-path', candidateManifestPath,
@@ -166,7 +173,11 @@ function runEvaluate(config, candidateManifestPath) {
     '--output-root', config.output_root,
     '--manifest-path', config.manifest_path,
     '--seed', String(config.seed),
-  ]);
+  ];
+  if (config.promote) {
+    args.push('--promote');
+  }
+  runChecked(process.execPath, args);
 }
 
 function runPlot(config) {
@@ -175,6 +186,16 @@ function runPlot(config) {
     scriptPath,
     'plot',
     '--output-root', config.output_root,
+    '--manifest-path', config.manifest_path,
+  ]);
+}
+
+function runPromote(config, candidateManifestPath) {
+  const scriptPath = path.resolve(__dirname, 'learned_ai.js');
+  runChecked(process.execPath, [
+    scriptPath,
+    'promote',
+    '--candidate-manifest-path', candidateManifestPath,
     '--manifest-path', config.manifest_path,
   ]);
 }
@@ -191,6 +212,16 @@ function main() {
     console.log(`Candidate: ${trained.checkpoint_manifest_path}`);
     console.log(`Checkpoint: ${trained.checkpoint_path}`);
     console.log(`Device: ${trained.device}`);
+    return;
+  }
+
+  if (config.command === 'promote') {
+    const candidateManifestPath = config.candidate_manifest_path || config.replay_path;
+    if (!candidateManifestPath) {
+      throw new Error('`promote` requires --candidate-manifest-path');
+    }
+    runPromote(config, candidateManifestPath);
+    console.log(`Promoted: ${candidateManifestPath}`);
     return;
   }
 

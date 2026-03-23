@@ -440,10 +440,10 @@ function parseArgs(argv) {
   const out = {
     players: ['learned', 'v3'],
     games: 200,
-    max_turns: 1000,
+    max_turns: 2000,
     seed: 42,
     rollout_samples: 24,
-    jobs: 1,
+    jobs: 8,
     output: '',
     list_policies: false,
   };
