@@ -12,6 +12,7 @@ const { AIPlayer: ProductionAIPlayer } = require('../server/src/aiplayer');
 const { AIPlayer: V1AIPlayer } = require('../server/src/aiplayer_v1');
 const { AIPlayerV2 } = require('../server/src/aiplayer_v2');
 const { LegacyAIPlayer } = require('../server/src/aiplayer_legacy');
+const { AIPlayerLearned } = require('../server/src/aiplayer_learned');
 
 function containsCard(cards, target) {
   return cards.some((card) => card._card === target._card);
@@ -99,10 +100,11 @@ const TimedProductionAI = makeTimedPolicyClass(ProductionAIPlayer, 'v3');
 const TimedV1AI = makeTimedPolicyClass(V1AIPlayer, 'v1');
 const TimedV2AI = makeTimedPolicyClass(AIPlayerV2, 'v2');
 const TimedLegacyAI = makeTimedPolicyClass(LegacyAIPlayer, 'legacy');
+const TimedLearnedAI = makeTimedPolicyClass(AIPlayerLearned, 'learned');
 
 const HELPER_AI = new V1AIPlayer('benchmark-helper');
 
-const POLICY_REGISTRY = Object.freeze({
+const POLICY_REGISTRY = {
   v3: {
     label: 'Production V3',
     create(name, rolloutSamples) {
@@ -127,13 +129,27 @@ const POLICY_REGISTRY = Object.freeze({
       return new TimedLegacyAI(name, rolloutSamples);
     },
   },
+  learned: {
+    label: 'Learned',
+    create(name, rolloutSamples) {
+      return new TimedLearnedAI(name, rolloutSamples);
+    },
+  },
   random: {
     label: 'Random',
     create(name) {
       return new RandomPolicyPlayer(name);
     },
   },
-});
+};
+
+function registerPolicy(policyId, policy) {
+  POLICY_REGISTRY[policyId] = policy;
+}
+
+function unregisterPolicy(policyId) {
+  delete POLICY_REGISTRY[policyId];
+}
 
 function listPolicies() {
   return Object.entries(POLICY_REGISTRY).map(([policyId, policy]) => `${policyId}: ${policy.label}`);
@@ -407,7 +423,9 @@ function summarizeResults(rawGames, playerIds) {
   return {
     games: rawGames.length,
     players: playerIds,
-    policy_labels: Object.fromEntries(policyIds.map((policyId) => [policyId, POLICY_REGISTRY[policyId].label])),
+    policy_labels: Object.fromEntries(
+      policyIds.map((policyId) => [policyId, POLICY_REGISTRY[policyId] ? POLICY_REGISTRY[policyId].label : policyId]),
+    ),
     wins,
     draws,
     appearances,
@@ -608,12 +626,25 @@ async function main() {
 }
 
 if (isMainThread) {
-  main().catch((err) => {
-    console.error(err.stack || err.message || String(err));
-    process.exit(1);
-  });
+  if (require.main === module) {
+    main().catch((err) => {
+      console.error(err.stack || err.message || String(err));
+      process.exit(1);
+    });
+  }
 } else {
   const requests = workerData.requests || [];
   const raw = requests.map((request) => runSingleGame(request));
   parentPort.postMessage(raw);
 }
+
+module.exports = {
+  POLICY_REGISTRY,
+  listPolicies,
+  parsePlayerIds,
+  registerPolicy,
+  runBenchmarks,
+  runSingleGame,
+  summarizeResults,
+  unregisterPolicy,
+};

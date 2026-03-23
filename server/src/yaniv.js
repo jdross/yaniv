@@ -150,7 +150,7 @@ class YanivGame {
   }
 
   playTurn(player, action = null) {
-    if (isAiPlayer(player)) {
+    if (isAiPlayer(player) && action === null) {
       action = player.decide_action();
     }
 

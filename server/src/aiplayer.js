@@ -1,3 +1,3 @@
-const { AIPlayerV3 } = require('./aiplayer_v3');
+const { AIPlayerLearned } = require('./aiplayer_learned');
 
-module.exports = { AIPlayer: AIPlayerV3 };
+module.exports = { AIPlayer: AIPlayerLearned };
