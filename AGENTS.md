@@ -14,7 +14,9 @@ This file is a practical guide for future coding agents working in this repo.
 
 - `server/src/server.js`: Express API, SSE, in-memory room state, optional Postgres persistence.
 - `server/src/yaniv.js`: Core game engine/rules.
-- `server/src/aiplayer.js`: Primary AI policy.
+- `server/src/aiplayer.js`: AI difficulty selection (`easy` -> V3, `hard` -> V4).
+- `server/src/aiplayer_v4.js`: Strongest AI: learned actions + calibrated EV Yaniv calling.
+- `server/src/aiplayer_learned.js`, `server/src/aiplayer_v3.js`, `server/src/aiplayer_base.js`: Prior AI tiers (V4 extends learned, which extends V3).
 - `server/src/aiplayer_legacy.js`: Legacy AI policy for benchmark comparisons.
 - `server/src/card.js`, `server/src/player.js`: Card and player models.
 - `static/`: Frontend assets.

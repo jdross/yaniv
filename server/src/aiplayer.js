@@ -1,5 +1,5 @@
 const { AIPlayerV3 } = require('./aiplayer_v3');
-const { AIPlayerLearned } = require('./aiplayer_learned');
+const { AIPlayerV4 } = require('./aiplayer_v4');
 
 const AI_DIFFICULTY = Object.freeze({
   EASY: 'easy',
@@ -18,15 +18,15 @@ function createAIPlayer(name, options = null) {
 
   const player = aiDifficulty === AI_DIFFICULTY.EASY
     ? new AIPlayerV3(name, resolvedOptions.rolloutSamples)
-    : new AIPlayerLearned(name, resolvedOptions.rolloutSamples, resolvedOptions.learnedOptions);
+    : new AIPlayerV4(name, resolvedOptions.rolloutSamples, resolvedOptions.learnedOptions);
 
   player.aiDifficulty = aiDifficulty;
-  player.policy_id = aiDifficulty === AI_DIFFICULTY.EASY ? 'v3' : 'learned';
+  player.policy_id = aiDifficulty === AI_DIFFICULTY.EASY ? 'v3' : 'v4';
   return player;
 }
 
 module.exports = {
-  AIPlayer: AIPlayerLearned,
+  AIPlayer: AIPlayerV4,
   AI_DIFFICULTY,
   normalizeAiDifficulty,
   createAIPlayer,
