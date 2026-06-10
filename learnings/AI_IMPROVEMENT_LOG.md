@@ -5,6 +5,92 @@ build on what was learned rather than repeat what was tried.
 
 ---
 
+## 2026-06-10 — AIPlayerV4: calibrated opponent model + EV-based Yaniv call (branch: claude/game-ai-improvement-98326m)
+
+**Result: New strongest AI.** V4 = learned action policy + determinized
+expected-value Yaniv calling on a *calibrated* opponent-hand model. Now wired
+as the `hard` difficulty (`createAIPlayer`).
+
+### Benchmarks (vs the previous champion, `learned`)
+
+| Matchup | V4 win/seat | learned win/seat |
+|---------|-------------|------------------|
+| 2p, 1250+ games across 5 seed batches | ~53-55% | ~45-47% |
+| 3p (1 V4 seat vs 2 learned), 150 games | 42.7% | 28.7% |
+| 4p (1 V4 seat vs 3 learned), 100 games | 45.0% | 18.3% |
+
+V4's assaf rate per call: 4.7-5.9% (2p). It also *induces* a much higher
+assaf rate in opponents (learned jumped from ~6% in the old baseline to
+9-12% against V4) because V4 knows when an opponent is about to call and
+holds punishing low hands instead of calling into them. Note: the stale
+claim of "learned beats V3 75%" was re-measured at 57.7% (300 games).
+Latency is unchanged (~2.6ms avg; rollouts only run when hand <= 5).
+
+### The key insight: opponent hand estimates were badly mis-calibrated
+
+Every prior tier estimated an opponent's unknown cards at the mean of the
+unseen pool (~5.5-6.3 points/card). Measurement over learned/V3 self-play
+(150 games, 2p+3p) showed the *actual* average value of unknown opponent
+cards decays sharply as the opponent takes turns, since they curate toward
+Yaniv:
+
+- ~0.92-1.00x of unseen mean at turn 0-1, falling to ~0.50x by turn 7+ for
+  4-5 card hands (floor ~0.47-0.53).
+- 2-card hands decay slower (floor ~0.64).
+- A *single* unknown card skews HIGH (~1.05-1.15x): if it were low the
+  opponent would already have called Yaniv (survivorship).
+
+The calibration lives in `AIPlayerV4._unknown_value_ratio(handCount,
+turnsTaken)` and is applied two ways: (1) exponential tilting of the
+belief-weighted card sampling used to build determinized opponent hands, and
+(2) the `estimated_score` used by the reset short-circuit. The harness that
+produced the curve is easy to rebuild: hook a game loop, and for each
+observer record opponent `turns_taken`, hand count, and actual vs predicted
+unknown-card value.
+
+### What V4 does
+
+1. **Actions**: unchanged — delegates to the learned policy (still the best
+   action chooser; see failed experiments below).
+2. **Yaniv call**: for 24 determinizations (belief- and calibration-weighted
+   opponent hands + shuffled residual deck), price "call now" *exactly*
+   (Assaf comparison, 50/100 reset rule, eliminations) against "play on"
+   (roll the chosen action forward up to 28 plies with greedy policies,
+   race-aware horizon evaluation). Call iff
+   `cost(call) <= cost(play on) + callMargin`.
+3. Tuned constants: `callMargin 0.75`, `opponentWeight 0.5` (opponent score
+   deltas count half of own), `determinizations 24`. Sweeps showed margin
+   0.5-1.0 and dets 24-40 are all within noise; opponentWeight 0.5 slightly
+   better than 0.35 in 2p.
+
+### What did NOT work (do not retry blindly)
+
+1. **Determinized rollout search for action selection.** Scoring every
+   candidate (discard, draw) by rollouts lost badly: 5% win rate naively,
+   still 38-43% vs V3 after fixes. Causes: (a) greedy rollout policies hover
+   at 4-5 cards so 16-ply rollouts rarely reached a round end, leaving a
+   noisy horizon eval; (b) rollout noise (SE ~2 points at 14-20 dets)
+   swamps true action differences (~0.5-1 point) even with common random
+   numbers; (c) the simulator cannot see information effects (picking up a
+   discard reveals your hand to opponents; the tuned feed/heuristic terms
+   capture this implicitly). The well-tuned one-ply heuristic + learned
+   ranking remains better for actions.
+2. **Uncalibrated EV calling.** With unseen-mean opponent hands, the EV rule
+   over-calls into Assafs (7.4% assaf rate) AND defers good calls; it only
+   reached parity with V3's hand-tuned thresholds. The calibration is what
+   made EV calling win.
+
+### Future ideas
+
+- Re-train the learned action model with the calibrated opponent features
+  (estimated_score is an input to several features; the current checkpoint
+  was trained on the uncalibrated values).
+- Replace the play-on rollout with a 2-3 ply expectimax over determinized
+  hands; most call/wait decisions resolve within a few plies anyway.
+- Calibrate `_sim_should_call` probabilities from observed call behavior.
+
+---
+
 ## 2026-03-22 — AIPlayerV2 (branch: claude/improve-yaniv-ai-strategy-7jpUU)
 
 **Result: No meaningful improvement.** V2 performed within noise of the baseline

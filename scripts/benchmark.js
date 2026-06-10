@@ -11,6 +11,7 @@ const { Player } = require('../server/src/player');
 const { AIPlayer: BaseAIPlayer } = require('../server/src/aiplayer_base');
 const { LegacyAIPlayer } = require('../server/src/aiplayer_legacy');
 const { AIPlayerV3 } = require('../server/src/aiplayer_v3');
+const { AIPlayerV4 } = require('../server/src/aiplayer_v4');
 const { AIPlayerLearned } = require('../server/src/aiplayer_learned');
 
 function containsCard(cards, target) {
@@ -96,6 +97,7 @@ function makeTimedPolicyClass(BaseClass, policyId) {
 }
 
 const TimedV3AI = makeTimedPolicyClass(AIPlayerV3, 'v3');
+const TimedV4AI = makeTimedPolicyClass(AIPlayerV4, 'v4');
 const TimedLegacyAI = makeTimedPolicyClass(LegacyAIPlayer, 'legacy');
 const TimedLearnedAI = makeTimedPolicyClass(AIPlayerLearned, 'learned');
 
@@ -106,6 +108,12 @@ const POLICY_REGISTRY = {
     label: 'V3',
     create(name, rolloutSamples) {
       return new TimedV3AI(name, rolloutSamples);
+    },
+  },
+  v4: {
+    label: 'V4 (search)',
+    create(name, rolloutSamples) {
+      return new TimedV4AI(name, rolloutSamples);
     },
   },
   legacy: {
