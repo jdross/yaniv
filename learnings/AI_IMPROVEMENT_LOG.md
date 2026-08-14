@@ -5,6 +5,132 @@ build on what was learned rather than repeat what was tried.
 
 ---
 
+## 2026-08-14 — Retrained learned action model (checkpoint learned-20260814_011550)
+
+**Result: New strongest AI.** Promoted. The March champion
+(`learned-py-20260323_130916`, training_iteration 6) was not at a ceiling --
+simply running the existing JS pipeline for three more self-play iterations
+produced a checkpoint that beats it reproducibly.
+
+### Benchmarks (candidate vs promoted champion, both inside V4)
+
+| Matchup | Games | New | Old |
+|---|---|---|---|
+| 2p, seed 8140 | 800 | **54.3%** | 45.8% |
+| 2p, seed 991177 | 800 | **53.3%** | 46.8% |
+| 2p, seed 313131 (seats swapped) | 700 | **52.4%** | 47.6% |
+| **2p aggregate** | **2300** | **53.3%** (~3.2 SE above even) | 46.7% |
+| 3p, 1 new vs 2 old | 450 | **38.4%** | 30.8%/seat (parity 33.3%) |
+
+New champion vs V3: 64.6% (500 games). Latency unchanged (~0.94ms avg).
+
+The gain shows up as **better Yaniv discipline**: assaf rate fell from
+6.7-6.9% to 5.5% in 2p and 8.4% to 7.4% in 3p, and average final score
+dropped ~4 points. It is calling into fewer Assafs, not calling more often.
+
+### How to reproduce / continue
+
+    node scripts/learned_ai.js burst --seconds 1500 --games 40 \
+      --eval-games-2p 40 --eval-games-3p 24 --jobs 12
+    # then validate independently -- do NOT trust the pipeline's own
+    # promotion_recommended flag, which fired on a 12-game run:
+    YANIV_CANDIDATE_MANIFEST=<candidate.json> node scripts/benchmark.js \
+      --players v4cand,v4 --games 800 --seed <seed>
+    node scripts/learned_ai.js promote --candidate-manifest-path <candidate.json>
+
+`benchmark.js` gained a `v4cand` policy (V4 loading an arbitrary checkpoint via
+`YANIV_CANDIDATE_MANIFEST`) so a candidate and the champion can play each other
+in the same match, and a `v4cal` policy (see below).
+
+### Calibrated action features: tried, currently negative
+
+V4 computes a calibrated opponent-hand estimate (`_calibrated_estimated_score`)
+but uses it only for the Yaniv call; the learned action features (`threat`,
+`yaniv_next_turn_prob`, `reset_bonus`) still read the uncalibrated
+`estimated_score`. Routing the calibrated value into them
+(`new AIPlayerV4(name, rs, { calibratedFeatures: true })`, benchmark policy
+`v4cal`) measured **48.5% vs 51.5%** over 600 games with a *higher* assaf rate
+(6.4% vs 5.8%) -- the expected signature of a train/serve mismatch: better
+features, weights fit to the old distribution.
+
+It stays **off by default**. To pursue it, the model must be retrained with the
+flag enabled during data generation, which needs the calibration moved down
+from `AIPlayerV4` to `AIPlayerLearned` (along with `turns_taken` tracking) and
+the flag recorded in the checkpoint manifest so serving matches training.
+
+---
+
+## 2026-08-13 — AlphaZero / determinized search rebuild (branch: claude/alphazero-ai-player-jWDWW)
+
+**Result: Failed. V4 remains the strongest.** Every variant measured below V4.
+All numbers are one candidate seated against two V4s in a 3-player match, so
+**parity is 33.3%**; V4 itself scores 28-36% depending on the sample.
+
+| Player | Win rate vs 2x V4 |
+|---|---|
+| **V4 (baseline)** | **28-36%** |
+| V4-imitation net + determinized MCTS | 20.0% +/- 4.2 (N=90) |
+| Flat 1-ply expectimax + greedy rollouts | 15.0% +/- 4.6 (N=60) |
+| PIMC tree + rollouts | 12-17% (N=60) |
+| 1-ply lookahead anchored on V4, V3 rollouts | 14.2% +/- 3.2 (N=120) |
+| Pure policy net, no search | ~0-5% |
+
+This independently **re-confirmed the 2026-06-10 finding** that determinized
+rollout search is not viable for action selection here. That entry should have
+been read first; doing so would have saved the entire effort. **Read this log
+before starting.**
+
+### New measurements worth keeping
+
+1. **Deeper determinized search makes play worse**, with two unrelated leaf
+   evaluators (neural value head and Monte Carlo rollouts). Fixed budget
+   reallocated: 16 determinizations x 64 sims = 15.6%, 8 x 128 = 8.9%,
+   4 x 256 = 6.7%. Raising total sims: 128 -> 7%, 1024 -> 7%, 2048 -> 3%.
+   Tree search agreed with brute-force 1-ply evaluation on only 9 of 25
+   positions. This is the PIMC strategy-fusion pathology: inside a sampled
+   world the searcher sees hidden cards and plans as if it will still know
+   them deeper in the tree. **Keep search shallow and wide, or avoid it.**
+2. **Imitating V4 caps at ~82% top-1 agreement**, worth only ~20% win rate.
+   Not a capacity limit (512-wide/2-block, 1.29M params, 3.2x slower: 82.8%)
+   and not a feature limit (+43 hand-engineered features V4 uses: 82.1%).
+   V4 selects via stochastic rollout sampling, so ~18% of its moves are not
+   recoverable from board state. Imitation also caps at V4's own strength.
+3. **The round-outcome value target is mostly noise** (R^2 ceiling ~0.09;
+   correlation with hand value only -0.08). A round's result is dominated by
+   cards not yet drawn. More data does not help - R^2 plateaued by epoch 5.
+4. **AlphaZero self-play has no policy-improvement signal here**: search picks
+   the policy's own move 98.3% of the time. Its only real contribution is
+   Yaniv timing, where the simulator gives exact terminal scores.
+5. **V4's Yaniv calling is already well-calibrated.** Replacing
+   `_estimate_assaf_probability` with exact Monte Carlo sampling of opponent
+   hands changed nothing as a veto (+0.2pp, inside +/-1.9 noise) and was worse
+   as a replacement. Consistent with the 2026-06-10 calibration work.
+
+### Methodology traps that produced false signals
+
+- **Unpaired rollouts.** `YanivGame.fromDict` reshuffles the deck with
+  `Math.random`, so each candidate action was judged against a different
+  future. Reusing one deck order per determinization (common random numbers)
+  is essential or the differences vanish into noise.
+- **Ranking candidates by points shed alone ignores the draw choice**, so ties
+  break to the deck and the player never picks up from the discard pile. That
+  single omission cost the entire ~40pp gap.
+- **Winner's curse.** Taking the argmax of K noisy action estimates selects the
+  luckiest, not the best. Anchor on a known-good action and require a margin.
+- **Varying the evaluation seed per run makes trends unreadable.** At N=60 the
+  standard error is ~6pp. Use fixed seeds across compared configurations.
+
+### Engine facts
+
+- `tfjs-node` on Apple Silicon is CPU-only; backprop runs ~230us/example
+  regardless of batch size. Batch-1 inference costs about the same as
+  batch-128, so batch leaf evaluations or waste ~100x.
+- `V4.decide_action` is ~0.8ms, too slow to use as a rollout policy
+  (a 30-ply rollout costs ~24ms). V3 with 4 rollout samples is ~85us.
+- Greedy simulator rollouts are ~9us, but far too weak to rank actions.
+
+---
+
 ## 2026-06-10 — AIPlayerV4: calibrated opponent model + EV-based Yaniv call (branch: claude/game-ai-improvement-98326m)
 
 **Result: New strongest AI.** V4 = learned action policy + determinized

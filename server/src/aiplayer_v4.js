@@ -58,6 +58,28 @@ class AIPlayerV4 extends AIPlayerLearned {
     };
     this._round_order = [];
     this._turn_search = null;
+    // The calibrated opponent estimate is currently used only by the Yaniv-call
+    // path. The learned action features (threat, yaniv_next_turn_prob,
+    // reset_bonus) still read the uncalibrated `estimated_score` they were
+    // trained on. Routing the calibrated value into them is the log's top open
+    // idea, but it shifts the feature distribution away from the checkpoint's
+    // training data, so it stays opt-in until a model is retrained on it.
+    this.calibrated_features = Boolean(options && options.calibratedFeatures);
+  }
+
+  /**
+   * Writes the calibrated opponent estimate into `estimated_score`, which every
+   * downstream feature reads. Off by default: see the constructor note.
+   */
+  estimate_hand_values() {
+    if (!this.calibrated_features) {
+      super.estimate_hand_values();
+      return;
+    }
+    const [mean_unseen] = this._mean_and_variance(this._get_unseen_cards());
+    for (const player_info of Object.values(this.other_players)) {
+      player_info.estimated_score = this._calibrated_estimated_score(player_info, mean_unseen);
+    }
   }
 
   observe_round(round_info) {
