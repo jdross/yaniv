@@ -96,8 +96,29 @@ function makeTimedPolicyClass(BaseClass, policyId) {
   };
 }
 
+// V4 but with the calibrated opponent estimate routed into the learned action
+// features, so the two can be measured head to head on identical seeds.
+class AIPlayerV4Calibrated extends AIPlayerV4 {
+  constructor(name, rolloutSamples) {
+    super(name, rolloutSamples, { calibratedFeatures: true });
+  }
+}
+
+// V4 loading a specific candidate checkpoint, so a freshly trained model can be
+// played head to head against the promoted champion in the same match.
+// Point YANIV_CANDIDATE_MANIFEST at the candidate manifest.
+class AIPlayerV4Candidate extends AIPlayerV4 {
+  constructor(name, rolloutSamples) {
+    const manifestPath = process.env.YANIV_CANDIDATE_MANIFEST;
+    if (!manifestPath) throw new Error('v4cand requires YANIV_CANDIDATE_MANIFEST');
+    super(name, rolloutSamples, { manifestPath });
+  }
+}
+
 const TimedV3AI = makeTimedPolicyClass(AIPlayerV3, 'v3');
 const TimedV4AI = makeTimedPolicyClass(AIPlayerV4, 'v4');
+const TimedV4CalAI = makeTimedPolicyClass(AIPlayerV4Calibrated, 'v4cal');
+const TimedV4CandAI = makeTimedPolicyClass(AIPlayerV4Candidate, 'v4cand');
 const TimedLegacyAI = makeTimedPolicyClass(LegacyAIPlayer, 'legacy');
 const TimedLearnedAI = makeTimedPolicyClass(AIPlayerLearned, 'learned');
 
@@ -114,6 +135,18 @@ const POLICY_REGISTRY = {
     label: 'V4 (search)',
     create(name, rolloutSamples) {
       return new TimedV4AI(name, rolloutSamples);
+    },
+  },
+  v4cal: {
+    label: 'V4 (calibrated features)',
+    create(name, rolloutSamples) {
+      return new TimedV4CalAI(name, rolloutSamples);
+    },
+  },
+  v4cand: {
+    label: 'V4 (candidate checkpoint)',
+    create(name, rolloutSamples) {
+      return new TimedV4CandAI(name, rolloutSamples);
     },
   },
   legacy: {
