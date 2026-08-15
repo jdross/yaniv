@@ -55,6 +55,21 @@ const BLOCKLIST = new Set([
   'negro', 'negros', 'negroes', 'jap', 'japs',
 ]);
 
+// Crude / sexual / otherwise awkward words kept out of the prominently shown
+// required-word list only. They remain in the validation dictionary, so they
+// still count as bonus words if a player traces one.
+const COMMON_ONLY_BLOCKLIST = new Set([
+  'sex', 'sexy', 'sexual', 'porn', 'porno', 'nude', 'nudes', 'naked',
+  'penis', 'vagina', 'nipple', 'nipples', 'breast', 'breasts', 'boob',
+  'boobs', 'tit', 'tits', 'ass', 'asses', 'arse', 'anal', 'anus', 'butt',
+  'butts', 'dick', 'dicks', 'cock', 'cocks', 'pussy', 'semen', 'sperm',
+  'orgasm', 'erotic', 'erotica', 'hooker', 'stripper', 'condom', 'condoms',
+  'shit', 'shits', 'piss', 'pissed', 'fuck', 'fucks', 'fucked', 'fucking',
+  'bitch', 'bitches', 'bastard', 'damn', 'hell', 'crap', 'horny', 'kinky',
+  'fetish', 'incest', 'pedo', 'viagra', 'heroin', 'cocaine', 'meth',
+  'suicide', 'murder', 'murders', 'killer', 'killers', 'corpse', 'corpses',
+]);
+
 // ---------------------------------------------------------------------------
 // Fallback curated common-word list, used only if the frequency package
 // cannot be loaded. ~220 seed words across common lengths/topics; the script
@@ -195,7 +210,7 @@ function pickCommonWords(dictSet) {
     if (seen.has(w)) return;
     if (!LOWER_ALPHA_RE.test(w)) return;
     if (w.length < COMMON_MIN_LEN || w.length > COMMON_MAX_LEN) return;
-    if (BLOCKLIST.has(w)) return;
+    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return;
     if (!dictSet.has(w)) return; // must be a real dictionary word (also enforces ZAN_COMMON subset dict)
     seen.add(w);
     picked.push(w);
