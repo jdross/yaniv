@@ -1,4 +1,4 @@
-/* Zanagrams — game engine (pure logic, works in browser and Node).
+/* Lettermelt — game engine (pure logic, works in browser and Node).
  *
  * The game is a race against an INCREMENTING STOPWATCH. There is no time-out
  * and no lose state: play always ends by solving every hidden word, and the

@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const gen = require(path.join(__dirname, '../../static/zanagrams/js/generator.js'));
-const engine = require(path.join(__dirname, '../../static/zanagrams/js/engine.js'));
+const gen = require(path.join(__dirname, '../../static/lettermelt/js/generator.js'));
+const engine = require(path.join(__dirname, '../../static/lettermelt/js/engine.js'));
 
 /* Fixed embedded vocabulary so the suite never depends on the generated data
  * files. Lengths 4-7 for regular words, 8-11 for the single longest word. */
@@ -441,7 +441,7 @@ const realData = (() => {
   try {
     const previous = global.window;
     global.window = sandbox;
-    require(path.join(__dirname, '../../static/zanagrams/data/common.js'));
+    require(path.join(__dirname, '../../static/lettermelt/data/common.js'));
     global.window = previous;
   } catch (_e) {
     return null;

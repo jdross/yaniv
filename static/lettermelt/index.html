@@ -5,13 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0d1020">
+<meta name="theme-color" content="#170d16">
 <meta name="format-detection" content="telephone=no">
-<title>Zanagrams</title>
+<title>Lettermelt</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="zan.css">
 </head>
 <body>
+
+<div class="ambient" aria-hidden="true"><i class="glow-a"></i><i class="glow-b"></i><i class="glow-c"></i></div>
+
 <div id="app">
 
   <header class="hud">
@@ -40,8 +43,14 @@
          xmlns="http://www.w3.org/2000/svg" aria-label="Letter board"></svg>
   </main>
 
+  <footer class="brand" aria-hidden="true">
+    <span class="brand-mark">letter<span class="brand-melt">melt</span></span>
+  </footer>
+
   <div class="overlay" id="overlay" hidden>
     <div class="sheet">
+      <div class="sheet-burst" id="sheetBurst" aria-hidden="true"></div>
+      <div class="sheet-brand">letter<span class="brand-melt">melt</span></div>
       <div class="sheet-emoji" id="sheetEmoji">🎉</div>
       <h1 class="sheet-title" id="sheetTitle">Solved!</h1>
       <div class="sheet-time" id="sheetTime">0:00</div>

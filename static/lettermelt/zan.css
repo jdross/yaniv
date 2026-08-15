@@ -1,0 +1,760 @@
+/* Lettermelt — warm, molten, mobile-only. */
+
+:root {
+  /* Deep warm base: plum / espresso rather than navy. */
+  --bg: #170d16;
+  --bg-2: #241227;
+  --bg-3: #2f1626;
+
+  --ink: #fff3e6;
+  --muted: #bb9a92;
+
+  /* Molten accents. */
+  --amber: #ffb04d;
+  --honey: #ffd166;
+  --coral: #ff6b5a;
+  --ember: #f4703a;
+
+  --good: #ffc247;
+  --bad: #ff5f6d;
+
+  --edge: rgba(255, 198, 148, 0.42);
+  --edge-hot: #ff9a4d;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  position: fixed;
+  inset: 0;
+}
+
+/* --------------------------- Ambient glows --------------------------- *
+ * Three large, very low-contrast radial washes that drift slowly. Only
+ * transform + opacity animate, so this stays off the main thread's back.
+ */
+
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  contain: strict;
+}
+
+.ambient i {
+  position: absolute;
+  display: block;
+  width: 108vw;
+  height: 108vw;
+  border-radius: 50%;
+  will-change: transform, opacity;
+}
+
+.glow-a {
+  top: -34vw;
+  left: -32vw;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 137, 61, .20), rgba(255, 137, 61, 0) 62%);
+  animation: drift-a 34s ease-in-out infinite;
+}
+
+.glow-b {
+  bottom: -40vw;
+  right: -36vw;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 88, 120, .17), rgba(255, 88, 120, 0) 62%);
+  animation: drift-b 41s ease-in-out infinite;
+}
+
+.glow-c {
+  top: 26vh;
+  left: -18vw;
+  width: 92vw;
+  height: 92vw;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 200, 90, .13), rgba(255, 200, 90, 0) 64%);
+  animation: drift-c 29s ease-in-out infinite;
+}
+
+@keyframes drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: .85; }
+  33% { transform: translate3d(9vw, 7vh, 0) scale(1.13); opacity: 1; }
+  66% { transform: translate3d(-5vw, 12vh, 0) scale(.94); opacity: .7; }
+}
+
+@keyframes drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.04); opacity: .75; }
+  40% { transform: translate3d(-11vw, -8vh, 0) scale(.92); opacity: 1; }
+  70% { transform: translate3d(4vw, -14vh, 0) scale(1.1); opacity: .8; }
+}
+
+@keyframes drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(.98); opacity: .6; }
+  50% { transform: translate3d(14vw, -6vh, 0) scale(1.16); opacity: .95; }
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding:
+    calc(var(--safe-t) + 10px)
+    calc(var(--safe-r) + 14px)
+    calc(var(--safe-b) + 8px)
+    calc(var(--safe-l) + 14px);
+  gap: 8px;
+}
+
+/* ------------------------------- HUD ------------------------------- */
+
+.hud { flex: 0 0 auto; text-align: center; }
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timer {
+  position: relative;
+  font-variant-numeric: tabular-nums;
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+  transition: color .25s ease;
+  will-change: transform;
+}
+
+.timer.credited {
+  color: var(--honey);
+  text-shadow: 0 0 26px rgba(255, 209, 102, .75);
+  animation: credit-pop .7s cubic-bezier(.2, .9, .3, 1.5);
+}
+
+@keyframes credit-pop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18); }
+  55% { transform: scale(.97); }
+  100% { transform: scale(1); }
+}
+
+.timer-toasts {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  width: 0;
+  height: 0;
+}
+
+.toast {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 0);
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--honey);
+  text-shadow: 0 2px 14px rgba(255, 176, 77, .6);
+  animation: float-up 1.25s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes float-up {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(.8); }
+  20% { opacity: 1; transform: translate(-50%, -6px) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -48px) scale(1); }
+}
+
+.counter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+  flex: 1 1 auto;
+}
+
+.counter-nums {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-nums b {
+  display: inline-block;
+  color: var(--ink);
+  font-weight: 800;
+  will-change: transform;
+}
+
+.counter-nums b.tick {
+  animation: spring-tick .52s cubic-bezier(.2, .9, .25, 1.5);
+  color: var(--honey);
+}
+
+@keyframes spring-tick {
+  0% { transform: translateY(0) scale(1); }
+  25% { transform: translateY(-4px) scale(1.35); }
+  55% { transform: translateY(1px) scale(.92); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.counter-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--muted);
+}
+
+.btn-new {
+  appearance: none;
+  border: 1px solid rgba(255, 176, 77, .34);
+  background: linear-gradient(160deg, rgba(255, 176, 77, .2), rgba(255, 107, 90, .16));
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  transition: transform .12s ease, background .2s ease;
+}
+
+.btn-new:active { transform: scale(.94); background: rgba(255, 176, 77, .34); }
+
+/* The one long word: a dimmed teaser until it is found, then it goes gold. */
+.longest {
+  position: relative;
+  overflow: hidden;
+  margin: 9px auto 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 176, 77, .34);
+  background: rgba(255, 137, 61, .08);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: background .35s ease, color .35s ease, border-color .35s ease;
+}
+
+.longest[hidden] { display: none; }
+
+.longest-star { color: var(--honey); font-size: 15px; letter-spacing: 0; }
+
+.longest.found {
+  border-style: solid;
+  border-color: rgba(255, 209, 102, .6);
+  background: linear-gradient(135deg, rgba(255, 209, 102, .28), rgba(255, 107, 90, .22));
+  color: var(--ink);
+  text-shadow: 0 0 16px rgba(255, 209, 102, .5);
+}
+
+/* Shine sweep across the pill the moment it turns gold. */
+.longest.found::after {
+  content: "";
+  position: absolute;
+  top: -40%;
+  bottom: -40%;
+  width: 46%;
+  left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .55), transparent);
+  transform: skewX(-18deg);
+  animation: shine-sweep 1.1s ease-out .1s 1;
+}
+
+@keyframes shine-sweep {
+  from { left: -60%; opacity: 0; }
+  25% { opacity: 1; }
+  to { left: 120%; opacity: 0; }
+}
+
+.longest.celebrate { animation: chunky-pop .62s cubic-bezier(.2, .9, .3, 1.5); }
+
+.current {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.current-text {
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 4px 26px rgba(255, 137, 61, .55);
+  min-height: 1em;
+  will-change: transform;
+}
+
+.current-text.bad {
+  color: var(--bad);
+  text-shadow: 0 4px 24px rgba(255, 95, 109, .5);
+  animation: shake .42s cubic-bezier(.36, .07, .19, .97);
+}
+
+.current-text.good {
+  color: var(--honey);
+  text-shadow: 0 4px 30px rgba(255, 209, 102, .75);
+  animation: chunky-pop .55s cubic-bezier(.2, .9, .28, 1.6);
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-3px); }
+  20%, 80% { transform: translateX(6px); }
+  30%, 50%, 70% { transform: translateX(-9px); }
+  40%, 60% { transform: translateX(9px); }
+}
+
+@keyframes chunky-pop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.28) rotate(-1.5deg); }
+  60% { transform: scale(.94) rotate(.5deg); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------ Board ------------------------------ */
+
+.board-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  display: block;
+}
+
+/* ---- edges ---- */
+
+.edge {
+  stroke: var(--edge);
+  stroke-width: 9;
+  stroke-linecap: round;
+  transition: stroke .18s ease, opacity .3s ease, stroke-width .18s ease;
+  opacity: 1;
+}
+
+.edge.fresh { opacity: 0; }
+
+.edge.traced {
+  stroke: var(--edge-hot);
+  stroke-width: 14;
+}
+
+/* Molten under-glow for whichever edges the finger is riding. */
+.edge-glow {
+  stroke: var(--coral);
+  stroke-width: 22;
+  stroke-linecap: round;
+  opacity: 0;
+  filter: blur(7px);
+  transition: opacity .16s ease;
+  pointer-events: none;
+}
+
+.edge-glow.traced { opacity: .75; }
+
+.edge.melting {
+  animation: edge-melt .42s ease-in forwards;
+}
+
+@keyframes edge-melt {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(16px); stroke-width: 3; }
+}
+
+/* ---- rubber band ---- */
+
+.trace-line {
+  stroke: var(--honey);
+  stroke-width: 16;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.trace-line.visible { opacity: .95; }
+
+.trace-glow {
+  stroke: var(--ember);
+  stroke-width: 30;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(9px);
+}
+
+.trace-glow.visible { opacity: .7; }
+
+.trace-tip {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+
+.trace-tip.visible { opacity: .9; }
+
+/* ---- letter tiles ---- */
+
+.node-hit { fill: transparent; }
+
+.node-inner {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.node-disc {
+  stroke: rgba(255, 198, 140, .3);
+  stroke-width: 2.5;
+  transition: stroke .16s ease;
+}
+
+.node-shadow { opacity: .8; }
+
+.node-gloss {
+  opacity: .5;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+
+.node-glow {
+  opacity: 0;
+  transition: opacity .18s ease;
+  pointer-events: none;
+}
+
+.node-letter {
+  fill: var(--ink);
+  font-size: 46px;
+  font-weight: 800;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  pointer-events: none;
+  transition: fill .16s ease;
+}
+
+/* A few tiles breathe, very slowly and very slightly. */
+.node.shimmer .node-gloss {
+  animation: shimmer-breathe 6.5s ease-in-out infinite;
+}
+
+@keyframes shimmer-breathe {
+  0%, 100% { opacity: .42; transform: scale(1); }
+  50% { opacity: .78; transform: scale(1.1); }
+}
+
+.node.traced .node-disc { stroke: rgba(255, 240, 210, .85); }
+.node.traced .node-gloss { opacity: .8; animation: none; }
+.node.traced .node-glow { opacity: .95; }
+.node.traced .node-letter { fill: #3a1008; }
+
+/* Squash-and-spring the instant a tile locks into the trace. */
+.node.lock .node-inner { animation: tile-lock .34s cubic-bezier(.22, .9, .3, 1.6); }
+
+@keyframes tile-lock {
+  0% { transform: scale(1); }
+  22% { transform: scale(.84, .78); }
+  55% { transform: scale(1.16, 1.12); }
+  100% { transform: scale(1); }
+}
+
+.node.spawn { animation: node-in .42s ease both; }
+
+@keyframes node-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Solved letters MELT: droop, liquify, dissolve. */
+.node.melting .node-inner {
+  animation: tile-melt .72s cubic-bezier(.55, 0, .85, .35) forwards;
+}
+
+@keyframes tile-melt {
+  0% { transform: translateY(0) scale(1, 1); opacity: 1; }
+  22% { transform: translateY(2px) scale(1.12, .86); opacity: 1; }
+  55% { transform: translateY(22px) scale(.74, 1.35); opacity: .85; }
+  100% { transform: translateY(64px) scale(.3, 1.9); opacity: 0; }
+}
+
+.node.melting .node-letter { animation: letter-smear .72s ease-in forwards; }
+
+@keyframes letter-smear {
+  0% { opacity: 1; }
+  45% { opacity: .7; }
+  100% { opacity: 0; }
+}
+
+.node.melting .node-disc { stroke: rgba(255, 220, 170, .8); }
+
+/* Survivors of a solved word give a happy little bounce. */
+.node.kept .node-inner { animation: tile-bounce .62s cubic-bezier(.2, .9, .25, 1.5); }
+
+@keyframes tile-bounce {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-13px) scale(1.1, .92); }
+  62% { transform: translateY(0) scale(.94, 1.07); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.node.bonus .node-glow { opacity: 1; }
+.node.bonus .node-inner { animation: tile-bounce .6s cubic-bezier(.2, .9, .25, 1.5); }
+
+.node.wrong .node-disc { stroke: var(--bad); stroke-width: 5; }
+.node.wrong .node-inner { animation: tile-wrong .45s ease; }
+
+@keyframes tile-wrong {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-7px) rotate(-3deg); }
+  60% { transform: translateX(7px) rotate(3deg); }
+}
+
+/* ---- droplets + embers ---- */
+
+.drop {
+  animation: drop-fall var(--dur, .8s) cubic-bezier(.45, 0, .8, .4) forwards;
+  animation-delay: var(--delay, 0s);
+  pointer-events: none;
+  opacity: 0;
+}
+
+@keyframes drop-fall {
+  0% { transform: translate(0, 0) scale(.5); opacity: 0; }
+  18% { transform: translate(calc(var(--dx) * .3), 6px) scale(1); opacity: .95; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(.35); opacity: 0; }
+}
+
+.ember {
+  animation: ember-fly var(--dur, .7s) cubic-bezier(.15, .7, .4, 1) forwards;
+  animation-delay: var(--delay, 0s);
+  pointer-events: none;
+  opacity: 0;
+}
+
+@keyframes ember-fly {
+  0% { transform: translate(0, 0) scale(.4); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(.9); opacity: 0; }
+}
+
+/* ------------------------------ Brand ------------------------------ */
+
+.brand {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 6px 0 2px;
+  pointer-events: none;
+}
+
+.brand-mark {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .34em;
+  text-transform: lowercase;
+  color: rgba(255, 200, 160, .34);
+}
+
+.brand-melt {
+  background: linear-gradient(180deg, var(--honey), var(--coral));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  opacity: .82;
+}
+
+/* ----------------------------- Overlay ----------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 6, 14, .84);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--safe-t) + 20px) 22px calc(var(--safe-b) + 20px);
+  z-index: 10;
+  animation: fade-in .28s ease;
+}
+
+.overlay[hidden] { display: none; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.sheet {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-width: 380px;
+  background: linear-gradient(180deg, #341a2c, #21101f);
+  border: 1px solid rgba(255, 186, 130, .22);
+  border-radius: 26px;
+  padding: 22px 22px 22px;
+  text-align: center;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6), 0 0 60px rgba(255, 137, 61, .1) inset;
+  animation: sheet-in .42s cubic-bezier(.2, .9, .3, 1.2) both;
+  max-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(26px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Celebratory particle burst behind the win copy. */
+.sheet-burst {
+  position: absolute;
+  left: 50%;
+  top: 84px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.sheet-burst i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 9px;
+  height: 9px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--spark, var(--honey));
+  opacity: 0;
+  animation: burst-out 1.15s cubic-bezier(.15, .7, .35, 1) forwards;
+  animation-delay: var(--delay, 0s);
+}
+
+@keyframes burst-out {
+  0% { transform: translate(0, 0) scale(.3); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(.5); opacity: 0; }
+}
+
+.sheet-brand {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .38em;
+  text-transform: lowercase;
+  color: rgba(255, 200, 160, .5);
+  margin-bottom: 10px;
+}
+
+.sheet-emoji { font-size: 44px; line-height: 1; }
+.sheet-title { font-size: 28px; font-weight: 800; margin-top: 8px; }
+
+.sheet-time {
+  margin-top: 6px;
+  font-size: 54px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(135deg, var(--honey), var(--coral));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sheet-sub { color: var(--muted); font-size: 15px; margin-top: 8px; line-height: 1.45; }
+
+.sheet-words {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: center;
+  margin: 16px 0 4px;
+}
+
+.sheet-words li {
+  padding: 6px 11px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  background: rgba(255, 186, 130, .12);
+  color: var(--ink);
+}
+
+.sheet-words li.extra { background: rgba(255, 176, 77, .2); color: var(--honey); }
+
+.btn-primary {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  margin-top: 18px;
+  padding: 15px;
+  border-radius: 16px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  color: #35100c;
+  background: linear-gradient(135deg, var(--honey), var(--ember));
+  box-shadow: 0 10px 26px rgba(244, 112, 58, .42);
+  transition: transform .12s ease;
+}
+
+.btn-primary:active { transform: scale(.97); }
+
+/* --------------------------- Reduced motion --------------------------- *
+ * Everything collapses to plain fades: no drift, no melt, no particles.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient i { animation: none; }
+  .node.shimmer .node-gloss { animation: none; }
+  .drop, .ember, .sheet-burst i { display: none; }
+  .node.melting .node-inner { animation: none; opacity: 0; transition: opacity .2s ease; }
+  * {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

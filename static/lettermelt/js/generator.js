@@ -1,4 +1,4 @@
-/* Zanagrams — puzzle generator (pure logic, works in browser and Node).
+/* Lettermelt — puzzle generator (pure logic, works in browser and Node).
  *
  * MODEL
  * -----

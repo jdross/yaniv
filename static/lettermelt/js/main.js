@@ -1,4 +1,4 @@
-/* Zanagrams — wiring. */
+/* Lettermelt — wiring. */
 (function () {
   'use strict';
 
@@ -21,6 +21,7 @@
     sheetEmoji: $('sheetEmoji'),
     sheetTitle: $('sheetTitle'),
     sheetTime: $('sheetTime'),
+    sheetBurst: $('sheetBurst'),
     sheetSub: $('sheetSub'),
     sheetWords: $('sheetWords'),
     playAgain: $('playAgain')
@@ -55,6 +56,14 @@
     adjacency = Generator.adjacencyMap(game.puzzle.cells, game.puzzle.edges);
   }
 
+  /** Letters of the just-solved word that other words still need. */
+  function keptLetters(result) {
+    const word = game.puzzle.words[result.wordIndex];
+    if (!word) return [];
+    const gone = new Set(result.removedIds);
+    return word.cellIds.filter(id => !gone.has(id));
+  }
+
   function renderLongest() {
     const word = Generator.longestWord(game.puzzle);
     if (!word) {
@@ -71,9 +80,16 @@
     }
   }
 
-  function renderHud() {
+  function renderHud(tick) {
     els.timerValue.textContent = Engine.formatTime(game.elapsedMs);
-    els.solvedCount.textContent = String(Engine.solvedCount(game));
+    const solved = String(Engine.solvedCount(game));
+    if (tick && els.solvedCount.textContent !== solved) {
+      els.solvedCount.classList.remove('tick');
+      void els.solvedCount.offsetWidth;   // restart the spring
+      els.solvedCount.classList.add('tick');
+      window.setTimeout(() => els.solvedCount.classList.remove('tick'), 560);
+    }
+    els.solvedCount.textContent = solved;
     els.totalCount.textContent = String(Engine.totalWords(game));
   }
 
@@ -118,6 +134,40 @@
 
   /* ------------------------------ endgame ------------------------------ */
 
+  /** Count the final time up from zero, then settle on the real value. */
+  function countUpTime(target) {
+    if (renderer.prefersReducedMotion()) {
+      els.sheetTime.textContent = Engine.formatTime(target);
+      return;
+    }
+    const duration = 900;
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      els.sheetTime.textContent = Engine.formatTime(target * eased);
+      if (t < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /** Celebratory particle burst behind the win copy. */
+  function burst() {
+    els.sheetBurst.innerHTML = '';
+    if (renderer.prefersReducedMotion()) return;
+    const colors = ['#ffd166', '#ffb04d', '#ff6b5a', '#fff3e6'];
+    for (let i = 0; i < 18; i++) {
+      const dot = document.createElement('i');
+      const angle = (Math.PI * 2 * i) / 18 + Math.random() * 0.3;
+      const dist = 90 + Math.random() * 90;
+      dot.style.setProperty('--dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
+      dot.style.setProperty('--dy', (Math.sin(angle) * dist).toFixed(1) + 'px');
+      dot.style.setProperty('--delay', (Math.random() * 0.25).toFixed(2) + 's');
+      dot.style.setProperty('--spark', colors[i % colors.length]);
+      els.sheetBurst.appendChild(dot);
+    }
+  }
+
   function finish() {
     busy = true;
     renderHud();
@@ -125,7 +175,7 @@
     const saved = Math.round(game.savedMs / 1000);
     els.sheetEmoji.textContent = '🎉';
     els.sheetTitle.textContent = 'Solved!';
-    els.sheetTime.textContent = Engine.formatTime(game.elapsedMs);
+    countUpTime(game.elapsedMs);
     els.sheetSub.textContent = extras.length
       ? extras.length + ' extra word' + (extras.length === 1 ? '' : 's') + ' saved you ' + saved + 's'
       : 'No extra words found — try hunting for bonus words next time.';
@@ -138,6 +188,7 @@
       els.sheetWords.appendChild(li);
     }
     els.overlay.hidden = false;
+    burst();
   }
 
   /* ------------------------------ submit ------------------------------- */
@@ -153,21 +204,27 @@
     if (result.type === 'required') {
       busy = true;
       setCurrent(word, 'good');
-      renderHud();
+      renderHud(true);
       renderLongest();
       if (result.isLong) els.longest.classList.add('celebrate');
-      renderer.playFound(result.removedIds, result.removedEdgeKeys, () => {
-        rebuildAdjacency();
-        busy = false;
-        setCurrent('');
-        els.longest.classList.remove('celebrate');
-        if (result.solved) finish();
+      renderer.playFound({
+        removedIds: result.removedIds,
+        removedEdgeKeys: result.removedEdgeKeys,
+        keptIds: keptLetters(result),
+        onDone: function () {
+          rebuildAdjacency();
+          busy = false;
+          setCurrent('');
+          els.longest.classList.remove('celebrate');
+          if (result.solved) finish();
+        }
       });
       return;
     }
 
     if (result.type === 'extra') {
       renderer.pulse(ids, 'bonus', 620);
+      renderer.sparkAt(ids[ids.length - 1]);
       toast('-' + result.seconds + 's');
       flashTimer();
       flashCurrent(word, 'good', 800);
@@ -218,6 +275,8 @@
       }
       setCurrent(Generator.traceToWord(game.puzzle.cells, ids));
     },
+    onLock: id => renderer.lockPulse(id),
+    onStart: id => renderer.lockPulse(id),
     onSubmit: handleSubmit,
     onCancel: () => setCurrent('')
   });
@@ -248,9 +307,14 @@
       if (result.type === 'required') {
         renderHud();
         renderLongest();
-        renderer.playFound(result.removedIds, result.removedEdgeKeys, () => {
-          rebuildAdjacency();
-          if (result.solved) finish();
+        renderer.playFound({
+          removedIds: result.removedIds,
+          removedEdgeKeys: result.removedEdgeKeys,
+          keptIds: keptLetters(result),
+          onDone: function () {
+            rebuildAdjacency();
+            if (result.solved) finish();
+          }
         });
       }
       return result;

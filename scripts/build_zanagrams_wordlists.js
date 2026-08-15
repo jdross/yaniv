@@ -32,7 +32,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const OUT_DIR = path.join(ROOT, 'static', 'zanagrams', 'data');
+const OUT_DIR = path.join(ROOT, 'static', 'lettermelt', 'data');
 const COMMON_OUT = path.join(OUT_DIR, 'common.js');
 const DICT_OUT = path.join(OUT_DIR, 'dict.js');
 

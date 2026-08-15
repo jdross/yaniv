@@ -1,4 +1,4 @@
-/* Zanagrams — pointer/touch tracing (browser only, iOS Safari first). */
+/* Lettermelt — pointer/touch tracing (browser only, iOS Safari first). */
 (function (root) {
   'use strict';
 
