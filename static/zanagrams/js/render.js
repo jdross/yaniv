@@ -4,7 +4,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const STEP = 100;
-  const PAD = 78;
+  const PAD = 56;
 
   function el(name, attrs) {
     const node = document.createElementNS(SVG_NS, name);
@@ -80,7 +80,7 @@
       const g = el('g', { class: 'node' });
       g.dataset.id = String(cell.id);
       const hit = el('circle', { class: 'node-hit', r: 46, cx: 0, cy: 0 });
-      const disc = el('circle', { class: 'node-disc', r: 33, cx: 0, cy: 0 });
+      const disc = el('circle', { class: 'node-disc', r: 36, cx: 0, cy: 0 });
       const text = el('text', { class: 'node-letter', x: 0, y: 1, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
       text.textContent = cell.letter.toUpperCase();
       g.appendChild(hit);
@@ -211,16 +211,23 @@
       state.anim = requestAnimationFrame(frame);
     }
 
-    /** Burst the found word's letters, then collapse the rest into place. */
-    function playFound(removedIds, onDone) {
+    /**
+     * Burst the letters and connections that the union no longer needs, then
+     * slide what remains into its compacted position. Letters still used by
+     * other unfound words simply stay put.
+     */
+    function playFound(removedIds, removedEdgeKeys, onDone) {
       for (const id of removedIds) {
         const node = state.nodeEls.get(id);
         if (node) node.g.classList.add('popping');
       }
       const edgesToFade = [];
       const removed = new Set(removedIds);
-      for (const line of state.edgeEls.values()) {
-        if (removed.has(Number(line.dataset.a)) || removed.has(Number(line.dataset.b))) {
+      const goneKeys = new Set(removedEdgeKeys || []);
+      for (const [k, line] of state.edgeEls) {
+        if (goneKeys.has(k) ||
+            removed.has(Number(line.dataset.a)) ||
+            removed.has(Number(line.dataset.b))) {
           line.classList.add('fading');
           edgesToFade.push(line);
         }
@@ -288,15 +295,46 @@
       }, 500);
     }
 
-    /** Map a client point into svg user units. */
-    function toSvgPoint(clientX, clientY) {
+    /**
+     * Map a client point into svg user units. The board uses
+     * preserveAspectRatio="xMidYMid meet", so the viewBox is uniformly scaled
+     * and centred inside the element — mapping each axis independently would
+     * put the fingertip in the wrong place on any non-matching aspect ratio.
+     */
+    function viewTransform() {
       const rect = svg.getBoundingClientRect();
-      const scaleX = state.view.w / rect.width;
-      const scaleY = state.view.h / rect.height;
+      const scale = Math.min(
+        rect.width / state.view.w,
+        rect.height / state.view.h
+      ) || 1;
       return {
-        x: state.view.x + (clientX - rect.left) * scaleX,
-        y: state.view.y + (clientY - rect.top) * scaleY
+        scale: scale,
+        offsetX: rect.left + (rect.width - state.view.w * scale) / 2,
+        offsetY: rect.top + (rect.height - state.view.h * scale) / 2
       };
+    }
+
+    function toSvgPoint(clientX, clientY) {
+      const t = viewTransform();
+      return {
+        x: state.view.x + (clientX - t.offsetX) / t.scale,
+        y: state.view.y + (clientY - t.offsetY) / t.scale
+      };
+    }
+
+    /** Inverse of toSvgPoint — svg user units back to client coordinates. */
+    function toClientPoint(x, y) {
+      const t = viewTransform();
+      return {
+        x: t.offsetX + (x - state.view.x) * t.scale,
+        y: t.offsetY + (y - state.view.y) * t.scale
+      };
+    }
+
+    /** Client coordinates of a node's centre (used by input tests). */
+    function nodeClientPoint(id) {
+      const p = state.pos.get(id);
+      return p ? toClientPoint(p.x, p.y) : null;
     }
 
     /** Nearest node to an svg point, within `radius` user units. */
@@ -320,8 +358,7 @@
     }
 
     function scaleFactor() {
-      const rect = svg.getBoundingClientRect();
-      return rect.width ? state.view.w / rect.width : 1;
+      return 1 / viewTransform().scale;
     }
 
     return {
@@ -335,6 +372,8 @@
       flashTrace: flashTrace,
       pulse: pulse,
       toSvgPoint: toSvgPoint,
+      toClientPoint: toClientPoint,
+      nodeClientPoint: nodeClientPoint,
       nodeAt: nodeAt,
       scaleFactor: scaleFactor,
       positions: state.pos

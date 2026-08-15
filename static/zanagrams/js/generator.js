@@ -1,10 +1,22 @@
 /* Zanagrams — puzzle generator (pure logic, works in browser and Node).
  *
- * A puzzle is a set of required words laid out as one connected cluster of
- * letter cells on a square lattice. Every required word is placed as a
- * self-avoiding path of 8-adjacent cells, so a traceable route is guaranteed
- * by construction. Graph edges are every 8-adjacency between occupied cells,
- * minus one of each pair of visually crossing diagonals.
+ * MODEL
+ * -----
+ * A puzzle is 15-20 hidden words that SHARE letters. Every word owns a
+ * canonical path: a self-avoiding sequence of 8-adjacent cells on a square
+ * lattice, one cell per letter. Cells are shared between words whenever the
+ * letters match.
+ *
+ * The board graph shown to the player is EXACTLY the union of the remaining
+ * (unfound) words' canonical paths:
+ *   - a node exists iff >= 1 remaining word uses that cell,
+ *   - an edge exists iff >= 1 remaining word steps between those two cells.
+ * No other adjacency is drawn or traversable. Solving a word recomputes the
+ * union, so anything no longer needed disappears.
+ *
+ * Solvability is guaranteed by construction: canonical paths are untouched
+ * until their word is solved, and union-removal never deletes a cell or edge
+ * that a remaining word still needs.
  */
 (function (root, factory) {
   const api = factory();
@@ -18,21 +30,65 @@
   'use strict';
 
   /* ------------------------------------------------------------------ *
-   * Fallback word data (kept tiny; the real lists live in data/*.js)
+   * Tunables
+   * ------------------------------------------------------------------ */
+  const CONFIG = {
+    cols: 8,                  // lattice width  (phone portrait board)
+    rows: 13,                 // lattice height
+    minWords: 15,
+    maxWords: 20,
+    relaxedMinWords: 13,      // only used if restarts are exhausted
+    longMin: 8,
+    longMax: 11,
+    maxNodes: 64,             // board node budget — forces words to share
+    softNodes: 50,            // below this, routing may spend new cells freely
+    regularMin: 4,
+    regularMax: 7,
+    candidateAttempts: 420,   // sampled words per generation pass
+    routeBudget: 1400,        // DFS steps for the preferred (reuse >= 2) route
+    routeBudgetRelaxed: 700,  // DFS steps for the fallback (reuse >= 1) route
+    longRouteBudget: 9000,
+    restarts: 6
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Fallback word data (the real lists live in data/*.js)
    * ------------------------------------------------------------------ */
   const FALLBACK_COMMON = [
-    'cat', 'dog', 'sun', 'hat', 'run', 'cup', 'pen', 'map', 'bed', 'jar',
-    'tree', 'blue', 'fire', 'moon', 'rain', 'star', 'lamp', 'ship', 'gold', 'wind',
-    'apple', 'bread', 'chair', 'dance', 'eagle', 'grape', 'house', 'light', 'music', 'ocean',
-    'candle', 'forest', 'garden', 'island', 'orange', 'planet', 'silver', 'winter',
-    'diamond', 'journey', 'kitchen', 'morning'
+    'able', 'acre', 'atom', 'bake', 'bald', 'band', 'bare', 'barn', 'beam', 'bean',
+    'bear', 'beat', 'bell', 'belt', 'bend', 'bird', 'blue', 'boat', 'bone', 'cake',
+    'calm', 'cane', 'cart', 'cave', 'coal', 'coat', 'cold', 'cone', 'core', 'corn',
+    'dare', 'dark', 'date', 'dawn', 'deal', 'dear', 'debt', 'dent', 'dial', 'dime',
+    'earn', 'east', 'lace', 'lake', 'lamb', 'lame', 'land', 'lane', 'late', 'lead',
+    'lean', 'mare', 'mast', 'mate', 'meal', 'mean', 'meat', 'mend', 'mole', 'moat',
+    'nail', 'name', 'near', 'neat', 'nest', 'note', 'oral', 'oval', 'pale', 'pane',
+    'part', 'past', 'pear', 'pest', 'plan', 'pole', 'rail', 'rain', 'rate', 'real',
+    'rent', 'road', 'roam', 'robe', 'rode', 'role', 'rope', 'sale', 'salt', 'same',
+    'sand', 'sane', 'seal', 'seam', 'seat', 'sent', 'slam', 'slate', 'snare', 'solar',
+    'alone', 'blame', 'blast', 'brace', 'brain', 'bread', 'clean', 'clear', 'crane', 'cream',
+    'dream', 'earls', 'learn', 'least', 'metal', 'ocean', 'organ', 'paint', 'panel', 'pearl',
+    'place', 'plane', 'plant', 'plate', 'price', 'scale', 'score', 'shore', 'slate', 'smart',
+    'snail', 'solid', 'stale', 'stand', 'stone', 'store', 'storm', 'table', 'trace', 'train',
+    'anchor', 'animal', 'basket', 'candle', 'carbon', 'castle', 'centre', 'cellar', 'clever', 'coast',
+    'dealer', 'desert', 'dinner', 'garden', 'inland', 'island', 'lantern', 'leader', 'legend', 'listen',
+    'manner', 'marble', 'master', 'mental', 'metals', 'mineral', 'nature', 'normal', 'orange', 'parcel',
+    'parent', 'planet', 'plaster', 'reason', 'relate', 'rental', 'sailor', 'salmon', 'sample', 'season',
+    'senate', 'silent', 'silver', 'sister', 'stable', 'stream', 'talent', 'tender', 'tunnel', 'winter'
+  ];
+
+  const FALLBACK_LONG = [
+    'painters', 'creation', 'material', 'mountain', 'notebook', 'sandstone', 'cardinal',
+    'planetary', 'centrally', 'landscape', 'strangers', 'celebrate', 'presented',
+    'restaurant', 'generation', 'personally', 'reasonable', 'management', 'centimeter'
   ];
 
   const FALLBACK_EXTRA = [
-    'are', 'ate', 'ear', 'eat', 'era', 'net', 'ten', 'tan', 'ant', 'nap', 'pan', 'tap',
-    'pat', 'rat', 'tar', 'art', 'oar', 'ore', 'roe', 'toe', 'ton', 'not', 'one', 'eon',
-    'lit', 'til', 'tin', 'nit', 'sin', 'ins', 'sir', 'sit', 'its', 'rise', 'sire', 'tile',
-    'lite', 'rite', 'tier', 'tire', 'star', 'rats', 'arts', 'tars', 'note', 'tone', 'nose'
+    'lane', 'lean', 'earn', 'near', 'tale', 'teal', 'late', 'seal', 'sale', 'ales',
+    'rate', 'tear', 'tare', 'star', 'rats', 'arts', 'tars', 'note', 'tone', 'nose',
+    'ones', 'eons', 'nest', 'nets', 'sent', 'tens', 'rest', 'rise', 'sire', 'tile',
+    'lite', 'rite', 'tier', 'tire', 'mane', 'mean', 'name', 'amen', 'came', 'mace',
+    'stone', 'notes', 'onset', 'tones', 'stare', 'tears', 'rates', 'aster', 'least',
+    'steal', 'stale', 'slate', 'tales', 'learn', 'renal', 'antler', 'rental', 'canoe'
   ];
 
   /* ------------------------------------------------------------------ *
@@ -77,94 +133,90 @@
     return a < b ? a + '|' + b : b + '|' + a;
   }
 
-  function isDiagonal(ax, ay, bx, by) {
+  function isDiagonalStep(ax, ay, bx, by) {
     return ax !== bx && ay !== by;
   }
 
   function areAdjacent(a, b) {
     const dx = Math.abs(a.x - b.x);
     const dy = Math.abs(a.y - b.y);
-    return (dx <= 1 && dy <= 1) && (dx + dy) > 0;
+    return dx <= 1 && dy <= 1 && dx + dy > 0;
   }
 
-  /* ------------------------------------------------------------------ *
-   * Edge computation (with crossing-diagonal resolution)
-   * ------------------------------------------------------------------ */
-
-  /** Build a Map of "x,y" -> cell for the given cell list. */
   function cellMap(cells) {
     const map = new Map();
     for (const cell of cells) map.set(key(cell.x, cell.y), cell);
     return map;
   }
 
-  /** Set of edgeKeys that must survive: the canonical routes of live words. */
-  function reservedEdgeSet(words) {
-    const reserved = new Set();
-    for (const word of words) {
+  /* ------------------------------------------------------------------ *
+   * Union derivation — the product's core invariant
+   * ------------------------------------------------------------------ */
+
+  /** Recompute puzzle.cells / puzzle.edges as the union of remaining words. */
+  function computeUnion(puzzle) {
+    const liveIds = new Set();
+    const edgeIds = new Map();
+    for (const word of puzzle.words) {
       if (word.found) continue;
-      for (let i = 1; i < word.cellIds.length; i++) {
-        reserved.add(edgeKey(word.cellIds[i - 1], word.cellIds[i]));
+      const ids = word.cellIds;
+      for (let i = 0; i < ids.length; i++) {
+        liveIds.add(ids[i]);
+        if (i > 0) edgeIds.set(edgeKey(ids[i - 1], ids[i]), [ids[i - 1], ids[i]]);
       }
     }
-    return reserved;
+    puzzle.cells = puzzle.allCells.filter(c => liveIds.has(c.id));
+    puzzle.edges = Array.from(edgeIds.values());
+    return puzzle;
   }
 
   /**
-   * All 8-adjacency edges between occupied cells, dropping one diagonal from
-   * every crossing pair. Reserved edges always win; ties break deterministically.
+   * Verify the invariant exactly: shown nodes/edges are precisely the union of
+   * the remaining words' canonical paths. Returns a list of problem strings
+   * (empty when healthy).
    */
-  function computeEdges(cells, reserved) {
-    const map = cellMap(cells);
-    const res = reserved || new Set();
-    const dropped = new Set();
-
-    // Resolve crossings first.
-    for (const cell of cells) {
-      const a = cell;                                  // (x, y)
-      const b = map.get(key(a.x + 1, a.y));            // (x+1, y)
-      const c = map.get(key(a.x, a.y + 1));            // (x, y+1)
-      const d = map.get(key(a.x + 1, a.y + 1));        // (x+1, y+1)
-      if (!b || !c || !d) continue;
-      const diagA = edgeKey(a.id, d.id);
-      const diagB = edgeKey(b.id, c.id);
-      const aRes = res.has(diagA);
-      const bRes = res.has(diagB);
-      if (aRes && bRes) continue;                      // must not happen; keep both live words safe
-      if (aRes) dropped.add(diagB);
-      else if (bRes) dropped.add(diagA);
-      else dropped.add(diagB);                         // deterministic tie-break
-    }
-
-    const edges = [];
-    const seen = new Set();
-    for (const cell of cells) {
-      for (const off of OFFSETS) {
-        const other = map.get(key(cell.x + off[0], cell.y + off[1]));
-        if (!other) continue;
-        const ek = edgeKey(cell.id, other.id);
-        if (seen.has(ek) || dropped.has(ek)) continue;
-        seen.add(ek);
-        edges.push([cell.id, other.id]);
+  function checkUnionInvariant(puzzle) {
+    const problems = [];
+    const wantNodes = new Set();
+    const wantEdges = new Set();
+    for (const word of puzzle.words) {
+      if (word.found) continue;
+      const ids = word.cellIds;
+      for (let i = 0; i < ids.length; i++) {
+        wantNodes.add(ids[i]);
+        if (i > 0) wantEdges.add(edgeKey(ids[i - 1], ids[i]));
       }
     }
-    return edges;
-  }
-
-  /** True if two live-word routes would visually cross as diagonals. */
-  function hasReservedCrossing(cells, reserved) {
-    const map = cellMap(cells);
-    for (const a of cells) {
-      const b = map.get(key(a.x + 1, a.y));
-      const c = map.get(key(a.x, a.y + 1));
-      const d = map.get(key(a.x + 1, a.y + 1));
-      if (!b || !c || !d) continue;
-      if (reserved.has(edgeKey(a.id, d.id)) && reserved.has(edgeKey(b.id, c.id))) return true;
+    const haveNodes = new Set(puzzle.cells.map(c => c.id));
+    const haveEdges = new Set(puzzle.edges.map(e => edgeKey(e[0], e[1])));
+    if (haveNodes.size !== puzzle.cells.length) problems.push('duplicate node id on board');
+    if (haveEdges.size !== puzzle.edges.length) problems.push('duplicate edge on board');
+    for (const id of wantNodes) if (!haveNodes.has(id)) problems.push('missing node ' + id);
+    for (const id of haveNodes) if (!wantNodes.has(id)) problems.push('orphan node ' + id);
+    for (const k of wantEdges) if (!haveEdges.has(k)) problems.push('missing edge ' + k);
+    for (const k of haveEdges) if (!wantEdges.has(k)) problems.push('orphan edge ' + k);
+    // Shown edges must connect lattice-adjacent cells.
+    const byId = new Map(puzzle.cells.map(c => [c.id, c]));
+    for (const [a, b] of puzzle.edges) {
+      const ca = byId.get(a);
+      const cb = byId.get(b);
+      if (!ca || !cb) { problems.push('edge to unknown node ' + edgeKey(a, b)); continue; }
+      if (!areAdjacent(ca, cb)) problems.push('non-adjacent edge ' + edgeKey(a, b));
     }
-    return false;
+    const seen = new Set();
+    for (const c of puzzle.cells) {
+      const k = key(c.x, c.y);
+      if (seen.has(k)) problems.push('two cells at ' + k);
+      seen.add(k);
+    }
+    return problems;
   }
 
-  /** List every crossing diagonal pair present in an edge list (for tests). */
+  /* ------------------------------------------------------------------ *
+   * Crossing diagonals
+   * ------------------------------------------------------------------ */
+
+  /** Every pair of shown diagonals that visually cross (should always be []). */
   function findCrossingEdgePairs(cells, edges) {
     const map = cellMap(cells);
     const present = new Set(edges.map(e => edgeKey(e[0], e[1])));
@@ -181,6 +233,10 @@
     return crossings;
   }
 
+  function hasCrossing(cells, edges) {
+    return findCrossingEdgePairs(cells, edges).length > 0;
+  }
+
   /* ------------------------------------------------------------------ *
    * Graph queries
    * ------------------------------------------------------------------ */
@@ -194,14 +250,40 @@
     return adj;
   }
 
-  /** Does a traceable route spelling `word` exist in the graph? */
+  /** Connected components of the SHOWN graph (edges only, not adjacency). */
+  function edgeComponents(cells, edges) {
+    const adj = adjacencyMap(cells, edges);
+    const byId = new Map(cells.map(c => [c.id, c]));
+    const seen = new Set();
+    const comps = [];
+    for (const cell of cells) {
+      if (seen.has(cell.id)) continue;
+      const stack = [cell.id];
+      const comp = [];
+      seen.add(cell.id);
+      while (stack.length) {
+        const id = stack.pop();
+        comp.push(byId.get(id));
+        for (const next of adj.get(id) || []) {
+          if (!seen.has(next)) {
+            seen.add(next);
+            stack.push(next);
+          }
+        }
+      }
+      comps.push(comp);
+    }
+    return comps;
+  }
+
+  /** Does some traceable route spelling `word` exist along shown edges? */
   function findRoute(cells, edges, word) {
     const adj = adjacencyMap(cells, edges);
     const byId = new Map(cells.map(c => [c.id, c]));
     const target = String(word).toLowerCase();
     const used = new Set();
     const path = [];
-    let budget = 200000;
+    let budget = 300000;
 
     function walk(index, cellId) {
       if (budget-- <= 0) return false;
@@ -232,7 +314,7 @@
     return findRoute(cells, edges, word) !== null;
   }
 
-  /** Is a specific ordered list of cell ids a legal trace? */
+  /** Is an ordered list of node ids a legal trace along shown edges? */
   function isValidTrace(cells, edges, cellIds) {
     if (!Array.isArray(cellIds) || cellIds.length < 1) return false;
     const present = new Set(edges.map(e => edgeKey(e[0], e[1])));
@@ -252,355 +334,353 @@
     return cellIds.map(id => (byId.get(id) ? byId.get(id).letter : '')).join('');
   }
 
-  function connectedComponents(cells) {
-    const map = cellMap(cells);
-    const seen = new Set();
-    const comps = [];
-    for (const cell of cells) {
-      if (seen.has(cell.id)) continue;
-      const stack = [cell];
-      const comp = [];
-      seen.add(cell.id);
-      while (stack.length) {
-        const cur = stack.pop();
-        comp.push(cur);
-        for (const off of OFFSETS) {
-          const nb = map.get(key(cur.x + off[0], cur.y + off[1]));
-          if (nb && !seen.has(nb.id)) {
-            seen.add(nb.id);
-            stack.push(nb);
-          }
-        }
-      }
-      comps.push(comp);
-    }
-    return comps;
+  /* ------------------------------------------------------------------ *
+   * Board under construction
+   * ------------------------------------------------------------------ */
+  function createBoard(cols, rows) {
+    return {
+      cols: cols,
+      rows: rows,
+      occ: new Map(),          // "x,y" -> { x, y, letter }
+      edges: new Set(),        // coord edge keys
+      letterCounts: new Map(),
+      paths: []                // [{ text, path: [{x,y,letter}] }]
+    };
   }
 
-  /* ------------------------------------------------------------------ *
-   * Word selection
-   * ------------------------------------------------------------------ */
-  function pickWords(pool, count, rng, minLen, maxLen) {
-    const usable = pool.filter(w => typeof w === 'string' && w.length >= minLen && w.length <= maxLen && /^[a-z]+$/.test(w));
-    if (usable.length < count) return null;
-    const byLength = new Map();
-    for (const w of usable) {
-      if (!byLength.has(w.length)) byLength.set(w.length, []);
-      byLength.get(w.length).push(w);
-    }
-    const lengths = shuffled(Array.from(byLength.keys()), rng);
-    const chosen = [];
-    const seen = new Set();
-    // Take at most a couple per length band so puzzles mix short and long words.
-    for (const len of lengths) {
-      if (chosen.length >= count) break;
-      const bucket = byLength.get(len);
-      const take = Math.min(2, count - chosen.length);
-      for (let i = 0; i < take; i++) {
-        for (let attempt = 0; attempt < 12; attempt++) {
-          const w = bucket[Math.floor(rng() * bucket.length)];
-          if (!seen.has(w)) {
-            seen.add(w);
-            chosen.push(w);
-            break;
-          }
-        }
-      }
-    }
-    let guard = 0;
-    while (chosen.length < count && guard++ < 200) {
-      const w = usable[Math.floor(rng() * usable.length)];
-      if (!seen.has(w)) {
-        seen.add(w);
-        chosen.push(w);
-      }
-    }
-    if (chosen.length < count) return null;
-    // Long words first: they are the hardest to place.
-    chosen.sort((a, b) => b.length - a.length);
-    return chosen;
+  function coordEdgeKey(ax, ay, bx, by) {
+    const ka = key(ax, ay);
+    const kb = key(bx, by);
+    return ka < kb ? ka + '|' + kb : kb + '|' + ka;
   }
 
-  /* ------------------------------------------------------------------ *
-   * Placement
-   * ------------------------------------------------------------------ */
-  function tryPlaceWord(word, occ, reserved, rng, maxDim, bounds) {
-    const n = word.length;
+  function commitPath(board, text, path) {
+    for (const cell of path) {
+      const k = key(cell.x, cell.y);
+      if (!board.occ.has(k)) {
+        board.occ.set(k, { x: cell.x, y: cell.y, letter: cell.letter });
+        board.letterCounts.set(cell.letter, (board.letterCounts.get(cell.letter) || 0) + 1);
+      }
+    }
+    for (let i = 1; i < path.length; i++) {
+      board.edges.add(coordEdgeKey(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y));
+    }
+    board.paths.push({ text: text, path: path.map(p => ({ x: p.x, y: p.y, letter: p.letter })) });
+  }
+
+  /**
+   * Randomized DFS over (cell, letterIndex).
+   *
+   * From the current cell, the next letter may go to
+   *   (a) an EXISTING node holding that letter in an adjacent cell (preferred:
+   *       this is what creates sharing), or
+   *   (b) an adjacent empty cell (a new node).
+   * The path is self-avoiding, stays inside the lattice box, must reuse at
+   * least `minReuse` existing nodes, and may never create a diagonal that
+   * visually crosses another shown diagonal.
+   */
+  function routeWord(board, text, rng, minReuse, budgetLimit, maxNew) {
+    const n = text.length;
     const path = [];
-    const pathKeys = new Map(); // "x,y" -> index in path
-    let budget = 6000;
+    const inPath = new Map();      // "x,y" -> letter
+    const pathEdges = new Set();
+    const newCap = maxNew == null ? Infinity : maxNew;
+    let reuse = 0;
+    let fresh = 0;
+    let budget = budgetLimit;
 
-    const box = { minX: bounds.minX, maxX: bounds.maxX, minY: bounds.minY, maxY: bounds.maxY };
-
-    function occupiedCell(x, y) {
+    function nodeLetterAt(x, y) {
       const k = key(x, y);
-      if (occ.has(k)) return occ.get(k);
-      if (pathKeys.has(k)) return path[pathKeys.get(k)];
+      const existing = board.occ.get(k);
+      if (existing) return existing.letter;
+      if (inPath.has(k)) return inPath.get(k);
       return null;
     }
 
-    function edgeReserved(a, b) {
-      if (!a || !b) return false;
-      if (a.id != null && b.id != null && reserved.has(edgeKey(a.id, b.id))) return true;
-      // consecutive cells of the word currently being laid down
-      const ia = pathKeys.has(key(a.x, a.y)) ? pathKeys.get(key(a.x, a.y)) : -1;
-      const ib = pathKeys.has(key(b.x, b.y)) ? pathKeys.get(key(b.x, b.y)) : -1;
-      return ia >= 0 && ib >= 0 && Math.abs(ia - ib) === 1;
+    function hasEdgeBetween(ax, ay, bx, by) {
+      const k = coordEdgeKey(ax, ay, bx, by);
+      return board.edges.has(k) || pathEdges.has(k);
     }
 
-    function fits(x, y) {
-      const minX = Math.min(box.minX, x);
-      const maxX = Math.max(box.maxX, x);
-      const minY = Math.min(box.minY, y);
-      const maxY = Math.max(box.maxY, y);
-      return (maxX - minX + 1) <= maxDim && (maxY - minY + 1) <= maxDim;
+    /** Would the step a->b be a diagonal crossing an existing shown diagonal? */
+    function crosses(ax, ay, bx, by) {
+      if (!isDiagonalStep(ax, ay, bx, by)) return false;
+      const c1x = ax, c1y = by;
+      const c2x = bx, c2y = ay;
+      if (nodeLetterAt(c1x, c1y) === null) return false;
+      if (nodeLetterAt(c2x, c2y) === null) return false;
+      return hasEdgeBetween(c1x, c1y, c2x, c2y);
     }
 
-    function neighborScore(x, y) {
-      let score = 0;
+    function neighbourCount(x, y) {
+      let count = 0;
       for (const off of OFFSETS) {
-        if (occupiedCell(x + off[0], y + off[1])) score++;
+        if (nodeLetterAt(x + off[0], y + off[1]) !== null) count++;
       }
-      return score;
+      return count;
     }
 
-    function extend(x, y) {
-      if (budget-- <= 0) return false;
-      const k = key(x, y);
-      if (occ.has(k) || pathKeys.has(k)) return false;
-      if (!fits(x, y)) return false;
+    function candidates(from, letter) {
+      const out = [];
+      for (const off of OFFSETS) {
+        const nx = from.x + off[0];
+        const ny = from.y + off[1];
+        if (nx < 0 || ny < 0 || nx >= board.cols || ny >= board.rows) continue;
+        const k = key(nx, ny);
+        if (inPath.has(k)) continue;
+        const existing = board.occ.get(k);
+        if (existing && existing.letter !== letter) continue;
+        if (crosses(from.x, from.y, nx, ny)) continue;
+        const isReuse = !!existing;
+        const score = (isReuse ? 6 : 0) + neighbourCount(nx, ny) * 0.5 + rng() * 1.6;
+        out.push({ x: nx, y: ny, letter: letter, reuse: isReuse, score: score });
+      }
+      out.sort((a, b) => b.score - a.score);
+      return out;
+    }
 
+    function push(cell) {
       const prev = path.length ? path[path.length - 1] : null;
-      if (prev && isDiagonal(prev.x, prev.y, x, y)) {
-        // Would this diagonal cross a reserved diagonal of another word?
-        const c1 = occupiedCell(prev.x, y);
-        const c2 = occupiedCell(x, prev.y);
-        if (c1 && c2 && edgeReserved(c1, c2)) return false;
-      }
-
-      const savedBox = { minX: box.minX, maxX: box.maxX, minY: box.minY, maxY: box.maxY };
-      box.minX = Math.min(box.minX, x);
-      box.maxX = Math.max(box.maxX, x);
-      box.minY = Math.min(box.minY, y);
-      box.maxY = Math.max(box.maxY, y);
-
-      const cell = { x: x, y: y, letter: word[path.length] };
-      pathKeys.set(k, path.length);
       path.push(cell);
+      inPath.set(key(cell.x, cell.y), cell.letter);
+      if (prev) pathEdges.add(coordEdgeKey(prev.x, prev.y, cell.x, cell.y));
+      if (cell.reuse) reuse++; else fresh++;
+    }
 
-      if (path.length === n) return true;
+    function pop() {
+      const cell = path.pop();
+      inPath.delete(key(cell.x, cell.y));
+      const prev = path.length ? path[path.length - 1] : null;
+      if (prev) pathEdges.delete(coordEdgeKey(prev.x, prev.y, cell.x, cell.y));
+      if (cell.reuse) reuse--; else fresh--;
+    }
 
-      const candidates = shuffled(OFFSETS, rng)
-        .map(off => ({ x: x + off[0], y: y + off[1] }))
-        .map(p => ({ p: p, s: neighborScore(p.x, p.y) + rng() * 1.4 }))
-        .sort((a, b) => b.s - a.s);
-
-      for (const cand of candidates) {
-        if (extend(cand.p.x, cand.p.y)) return true;
+    function extend(index) {
+      if (index === n - 1) return reuse >= minReuse;
+      if (budget-- <= 0) return false;
+      if (reuse + (n - 1 - index) < minReuse) return false;
+      if (fresh > newCap) return false;
+      const from = path[index];
+      for (const cand of candidates(from, text[index + 1])) {
+        push(cand);
+        if (extend(index + 1)) return true;
+        pop();
       }
-
-      path.pop();
-      pathKeys.delete(k);
-      box.minX = savedBox.minX;
-      box.maxX = savedBox.maxX;
-      box.minY = savedBox.minY;
-      box.maxY = savedBox.maxY;
       return false;
     }
 
-    // Candidate start cells: free cells hugging the existing cluster.
-    let starts;
-    if (occ.size === 0) {
-      starts = [{ x: 0, y: 0 }];
-    } else {
-      const set = new Map();
-      for (const cell of occ.values()) {
-        for (const off of OFFSETS) {
-          const nx = cell.x + off[0];
-          const ny = cell.y + off[1];
-          const k = key(nx, ny);
-          if (!occ.has(k) && !set.has(k)) set.set(k, { x: nx, y: ny });
+    // Start cells: prefer existing nodes carrying the first letter.
+    const starts = [];
+    for (const cell of board.occ.values()) {
+      if (cell.letter === text[0]) {
+        starts.push({ x: cell.x, y: cell.y, letter: text[0], reuse: true, score: 6 + rng() });
+      }
+    }
+    if (minReuse <= 0 || starts.length < 6) {
+      // Empty cells hugging the cluster (or, for the first word, near centre).
+      const seen = new Set();
+      if (board.occ.size === 0) {
+        const cx = Math.floor(board.cols / 2);
+        const cy = Math.floor(board.rows / 2);
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const x = cx + dx;
+            const y = cy + dy;
+            if (x < 0 || y < 0 || x >= board.cols || y >= board.rows) continue;
+            starts.push({ x: x, y: y, letter: text[0], reuse: false, score: rng() });
+          }
+        }
+      } else {
+        for (const cell of board.occ.values()) {
+          for (const off of OFFSETS) {
+            const nx = cell.x + off[0];
+            const ny = cell.y + off[1];
+            if (nx < 0 || ny < 0 || nx >= board.cols || ny >= board.rows) continue;
+            const k = key(nx, ny);
+            if (board.occ.has(k) || seen.has(k)) continue;
+            seen.add(k);
+            starts.push({ x: nx, y: ny, letter: text[0], reuse: false, score: rng() * 1.2 });
+          }
         }
       }
-      starts = shuffled(Array.from(set.values()), rng)
-        .map(p => ({ p: p, s: neighborScore(p.x, p.y) + rng() * 1.4 }))
-        .sort((a, b) => b.s - a.s)
-        .map(o => o.p)
-        .slice(0, 24);
     }
+    starts.sort((a, b) => b.score - a.score);
+    const limited = starts.slice(0, 20);
 
-    for (const start of starts) {
+    for (const start of limited) {
       path.length = 0;
-      pathKeys.clear();
-      box.minX = bounds.minX;
-      box.maxX = bounds.maxX;
-      box.minY = bounds.minY;
-      box.maxY = bounds.maxY;
-      budget = 6000;
-      if (extend(start.x, start.y)) {
-        return { path: path.slice(), bounds: { minX: box.minX, maxX: box.maxX, minY: box.minY, maxY: box.maxY } };
+      inPath.clear();
+      pathEdges.clear();
+      reuse = 0;
+      push(start);
+      if (n === 1 ? reuse >= minReuse : extend(0)) {
+        return path.map(p => ({ x: p.x, y: p.y, letter: p.letter }));
       }
+      pop();
+      if (budget <= 0) break;
     }
     return null;
   }
 
-  function layoutWords(wordList, rng, maxDim) {
-    const occ = new Map();
-    const reserved = new Set();
-    const cells = [];
-    const words = [];
-    let nextId = 1;
-    let bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
-    let first = true;
-
-    for (const text of wordList) {
-      const placed = tryPlaceWord(text, occ, reserved, rng, maxDim, bounds);
-      if (!placed) return null;
-      const wordIndex = words.length;
-      const cellIds = [];
-      for (let i = 0; i < placed.path.length; i++) {
-        const p = placed.path[i];
-        const cell = {
-          id: nextId++,
-          x: p.x,
-          y: p.y,
-          letter: p.letter,
-          wordIndex: wordIndex,
-          letterIndex: i
-        };
-        cells.push(cell);
-        occ.set(key(cell.x, cell.y), cell);
-        cellIds.push(cell.id);
-      }
-      for (let i = 1; i < cellIds.length; i++) reserved.add(edgeKey(cellIds[i - 1], cellIds[i]));
-      words.push({ text: text, cellIds: cellIds, found: false });
-      if (first) {
-        bounds = placed.bounds;
-        first = false;
-      } else {
-        bounds = placed.bounds;
-      }
+  /* ------------------------------------------------------------------ *
+   * Word pools
+   * ------------------------------------------------------------------ */
+  function usableWords(list, minLen, maxLen) {
+    const out = [];
+    const seen = new Set();
+    if (!Array.isArray(list)) return out;
+    for (const raw of list) {
+      if (typeof raw !== 'string') continue;
+      const w = raw.toLowerCase();
+      if (w.length < minLen || w.length > maxLen) continue;
+      if (!/^[a-z]+$/.test(w)) continue;
+      if (seen.has(w)) continue;
+      seen.add(w);
+      out.push(w);
     }
+    return out;
+  }
 
-    return { cells: cells, words: words };
+  function resolvePools(opts) {
+    const g = typeof globalThis !== 'undefined' ? globalThis : {};
+    const rawCommon = (opts.words && opts.words.length) ? opts.words
+      : (Array.isArray(g.ZAN_COMMON) && g.ZAN_COMMON.length ? g.ZAN_COMMON : FALLBACK_COMMON);
+    let rawLong = (opts.longWords && opts.longWords.length) ? opts.longWords
+      : (Array.isArray(g.ZAN_COMMON_LONG) && g.ZAN_COMMON_LONG.length ? g.ZAN_COMMON_LONG : null);
+
+    const regular = usableWords(rawCommon, CONFIG.regularMin, CONFIG.regularMax);
+    if (!rawLong) {
+      // Old data contract (no ZAN_COMMON_LONG): mine long words from whatever
+      // we were given, else fall back to the embedded list.
+      const mined = usableWords(rawCommon, CONFIG.longMin, CONFIG.longMax);
+      rawLong = mined.length >= 4 ? mined : FALLBACK_LONG;
+    }
+    const long = usableWords(rawLong, CONFIG.longMin, CONFIG.longMax);
+    return {
+      regular: regular.length ? regular : usableWords(FALLBACK_COMMON, CONFIG.regularMin, CONFIG.regularMax),
+      long: long.length ? long : usableWords(FALLBACK_LONG, CONFIG.longMin, CONFIG.longMax)
+    };
+  }
+
+  /** Cheap prefilter: does the word share >= 2 letters with what's on board? */
+  function sharesEnough(word, letterCounts) {
+    let shared = 0;
+    const seen = new Set();
+    for (const ch of word) {
+      if (seen.has(ch)) continue;
+      seen.add(ch);
+      if (letterCounts.has(ch)) shared++;
+      if (shared >= 2) return true;
+    }
+    return false;
   }
 
   /* ------------------------------------------------------------------ *
-   * Public generation
+   * Generation
    * ------------------------------------------------------------------ */
+  function buildBoard(pools, rng, target, cols, rows, maxNodes) {
+    const board = createBoard(cols, rows);
+
+    // 1. The one long word, laid as a compact self-avoiding path.
+    let longText = null;
+    for (let attempt = 0; attempt < 24 && !longText; attempt++) {
+      const candidate = pools.long[Math.floor(rng() * pools.long.length)];
+      const path = routeWord(board, candidate, rng, 0, CONFIG.longRouteBudget, null);
+      if (path) {
+        commitPath(board, candidate, path);
+        longText = candidate;
+      }
+    }
+    if (!longText) return null;
+
+    // 2. Regular words until the target count.
+    const used = new Set([longText]);
+    let attempts = 0;
+    while (board.paths.length < target && attempts < CONFIG.candidateAttempts) {
+      attempts++;
+      const candidate = pools.regular[Math.floor(rng() * pools.regular.length)];
+      if (used.has(candidate) || candidate === longText) continue;
+      // Bias toward sharing, but let a few outsiders through so we never stall.
+      if (!sharesEnough(candidate, board.letterCounts) && rng() < 0.85) continue;
+      // Node budget: the tighter the board gets, the more a word must share.
+      const room = maxNodes - board.occ.size;
+      if (room <= 0 && board.paths.length >= 1) {
+        // Board is full: only fully-shared words may still join.
+        const full = routeWord(board, candidate, rng, candidate.length, CONFIG.routeBudget, 0);
+        if (full) { commitPath(board, candidate, full); used.add(candidate); }
+        continue;
+      }
+      const maxNew = board.occ.size < CONFIG.softNodes
+        ? Math.min(candidate.length - 2, room)
+        : Math.min(Math.max(1, Math.ceil(candidate.length / 2) - 1), room);
+      let path = routeWord(board, candidate, rng, 2, CONFIG.routeBudget, maxNew);
+      if (!path) path = routeWord(board, candidate, rng, 1, CONFIG.routeBudgetRelaxed, maxNew);
+      if (!path) continue;
+      commitPath(board, candidate, path);
+      used.add(candidate);
+    }
+    return { board: board, longText: longText };
+  }
+
+  function materialize(board, longText) {
+    const idByCoord = new Map();
+    const allCells = [];
+    let nextId = 1;
+    for (const cell of board.occ.values()) {
+      const node = { id: nextId++, x: cell.x, y: cell.y, letter: cell.letter };
+      idByCoord.set(key(cell.x, cell.y), node.id);
+      allCells.push(node);
+    }
+    const words = board.paths.map(p => ({
+      text: p.text,
+      cellIds: p.path.map(c => idByCoord.get(key(c.x, c.y))),
+      found: false,
+      isLong: p.text === longText
+    }));
+    // Longest word first in the list; the rest sorted for stable display.
+    words.sort((a, b) => (b.isLong ? 1 : 0) - (a.isLong ? 1 : 0));
+    const puzzle = { allCells: allCells, cells: [], edges: [], words: words, longWord: longText };
+    computeUnion(puzzle);
+    recenter(puzzle);
+    return puzzle;
+  }
+
   function generatePuzzle(options) {
     const opts = options || {};
     const rng = opts.rng || createRng(Math.floor(Math.random() * 0xffffffff));
-    const pool = (opts.words && opts.words.length ? opts.words : null) ||
-      (typeof globalThis !== 'undefined' && globalThis.ZAN_COMMON && globalThis.ZAN_COMMON.length
-        ? globalThis.ZAN_COMMON
-        : FALLBACK_COMMON);
-    const minLen = opts.minLen || 3;
-    const maxLen = opts.maxLen || 7;
-    const wordCount = opts.wordCount || (4 + Math.floor(rng() * 3)); // 4..6
-    const maxAttempts = opts.maxAttempts || 60;
+    const pools = resolvePools(opts);
+    const cols = opts.cols || CONFIG.cols;
+    const rows = opts.rows || CONFIG.rows;
+    const minWords = opts.minWords || CONFIG.minWords;
+    const maxWords = opts.maxWords || CONFIG.maxWords;
+    const relaxedMin = opts.relaxedMinWords != null ? opts.relaxedMinWords : CONFIG.relaxedMinWords;
+    const restarts = opts.restarts || CONFIG.restarts;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const chosen = opts.fixedWords || pickWords(pool, wordCount, rng, minLen, maxLen);
-      if (!chosen) return null;
-      const total = chosen.reduce((sum, w) => sum + w.length, 0);
-      const maxDim = Math.max(5, Math.ceil(Math.sqrt(total)) + 2 + Math.floor(attempt / 8));
-      const laid = layoutWords(chosen, rng, maxDim);
-      if (!laid) continue;
-
-      const puzzle = normalize(laid.cells, laid.words);
-      recenter(puzzle);
-      let ok = true;
-      for (const word of puzzle.words) {
-        if (!isTraceable(puzzle.cells, puzzle.edges, word.text)) { ok = false; break; }
-      }
-      if (!ok) continue;
-      if (connectedComponents(puzzle.cells).length !== 1) continue;
-      return puzzle;
+    let best = null;
+    for (let attempt = 0; attempt < restarts; attempt++) {
+      const target = minWords + Math.floor(rng() * (maxWords - minWords + 1));
+      const built = buildBoard(pools, rng, target, cols, rows, opts.maxNodes || CONFIG.maxNodes);
+      if (!built) continue;
+      const count = built.board.paths.length;
+      if (!best || count > best.board.paths.length) best = built;
+      if (count >= minWords) return materialize(built.board, built.longText);
     }
+    // Relaxed acceptance rather than looping forever.
+    if (best && best.board.paths.length >= Math.min(relaxedMin, minWords)) {
+      return materialize(best.board, best.longText);
+    }
+    if (best && best.board.paths.length >= 2) return materialize(best.board, best.longText);
     return null;
   }
 
-  function normalize(cells, words) {
-    const reserved = reservedEdgeSet(words);
-    const edges = computeEdges(cells, reserved);
-    return { cells: cells, words: words, edges: edges };
-  }
-
-  /** Recompute the edge list from current cell positions + live word routes. */
-  function refreshEdges(puzzle) {
-    puzzle.edges = computeEdges(puzzle.cells, reservedEdgeSet(puzzle.words));
-    return puzzle.edges;
-  }
-
   /* ------------------------------------------------------------------ *
-   * Removal + collapse
+   * Removal + compaction
    * ------------------------------------------------------------------ */
   function centroidOf(cells) {
     let sx = 0;
     let sy = 0;
     for (const c of cells) { sx += c.x; sy += c.y; }
     return { x: sx / cells.length, y: sy / cells.length };
-  }
-
-  /**
-   * Slide each connected component toward the global centroid one lattice step
-   * at a time. Components move rigidly, so every remaining word keeps its route.
-   */
-  function collapse(puzzle) {
-    const reserved = reservedEdgeSet(puzzle.words);
-    if (puzzle.cells.length === 0) {
-      puzzle.edges = [];
-      return puzzle;
-    }
-
-    for (let iter = 0; iter < 300; iter++) {
-      const comps = connectedComponents(puzzle.cells);
-      if (comps.length <= 1) break;
-      const target = centroidOf(puzzle.cells);
-      // Move the piece furthest from the centre first.
-      comps.sort((a, b) => {
-        const ca = centroidOf(a);
-        const cb = centroidOf(b);
-        const da = Math.hypot(ca.x - target.x, ca.y - target.y);
-        const db = Math.hypot(cb.x - target.x, cb.y - target.y);
-        return db - da;
-      });
-      let movedAny = false;
-      for (const comp of comps) {
-        const c = centroidOf(comp);
-        const dx = Math.abs(c.x - target.x) < 0.4 ? 0 : (c.x < target.x ? 1 : -1);
-        const dy = Math.abs(c.y - target.y) < 0.4 ? 0 : (c.y < target.y ? 1 : -1);
-        const tries = [[dx, dy], [dx, 0], [0, dy]];
-        for (const [mx, my] of tries) {
-          if (mx === 0 && my === 0) continue;
-          if (tryShift(puzzle, comp, mx, my, reserved)) { movedAny = true; break; }
-        }
-      }
-      if (!movedAny) break;
-    }
-
-    recenter(puzzle);
-    puzzle.edges = computeEdges(puzzle.cells, reserved);
-    return puzzle;
-  }
-
-  function tryShift(puzzle, comp, dx, dy, reserved) {
-    const compIds = new Set(comp.map(c => c.id));
-    const blocked = new Set();
-    for (const cell of puzzle.cells) {
-      if (!compIds.has(cell.id)) blocked.add(key(cell.x, cell.y));
-    }
-    for (const cell of comp) {
-      if (blocked.has(key(cell.x + dx, cell.y + dy))) return false;
-    }
-    // Tentatively apply, then reject if it creates crossing live-word diagonals.
-    for (const cell of comp) { cell.x += dx; cell.y += dy; }
-    if (hasReservedCrossing(puzzle.cells, reserved)) {
-      for (const cell of comp) { cell.x -= dx; cell.y -= dy; }
-      return false;
-    }
-    return true;
   }
 
   function recenter(puzzle) {
@@ -611,32 +691,98 @@
       if (c.x < minX) minX = c.x;
       if (c.y < minY) minY = c.y;
     }
+    if (minX === 0 && minY === 0) return;
     for (const c of puzzle.cells) {
       c.x -= minX;
       c.y -= minY;
     }
   }
 
+  function tryShift(puzzle, comp, dx, dy) {
+    const compIds = new Set(comp.map(c => c.id));
+    const blocked = new Set();
+    for (const cell of puzzle.cells) {
+      if (!compIds.has(cell.id)) blocked.add(key(cell.x, cell.y));
+    }
+    for (const cell of comp) {
+      if (blocked.has(key(cell.x + dx, cell.y + dy))) return false;
+    }
+    for (const cell of comp) { cell.x += dx; cell.y += dy; }
+    if (hasCrossing(puzzle.cells, puzzle.edges)) {
+      for (const cell of comp) { cell.x -= dx; cell.y -= dy; }
+      return false;
+    }
+    return true;
+  }
+
   /**
-   * Mark a required word as found, drop its canonical cells and collapse.
-   * Returns { removedIds, moved } for the renderer.
+   * Slide whole edge-connected components toward the centroid, one lattice
+   * step at a time. Components move rigidly, so every remaining word keeps its
+   * canonical route. Nodes may end up lattice-adjacent without an edge — that
+   * is correct in this model (no line drawn, no traversal allowed).
+   */
+  function collapse(puzzle) {
+    if (!puzzle.cells.length) {
+      puzzle.edges = [];
+      return puzzle;
+    }
+    for (let iter = 0; iter < 200; iter++) {
+      const comps = edgeComponents(puzzle.cells, puzzle.edges);
+      if (comps.length <= 1) break;
+      const target = centroidOf(puzzle.cells);
+      comps.sort((a, b) => {
+        const ca = centroidOf(a);
+        const cb = centroidOf(b);
+        return Math.hypot(cb.x - target.x, cb.y - target.y) - Math.hypot(ca.x - target.x, ca.y - target.y);
+      });
+      let movedAny = false;
+      for (const comp of comps) {
+        const c = centroidOf(comp);
+        const dx = Math.abs(c.x - target.x) < 0.45 ? 0 : (c.x < target.x ? 1 : -1);
+        const dy = Math.abs(c.y - target.y) < 0.45 ? 0 : (c.y < target.y ? 1 : -1);
+        const tries = [[dx, dy], [dx, 0], [0, dy]];
+        for (const [mx, my] of tries) {
+          if (mx === 0 && my === 0) continue;
+          if (tryShift(puzzle, comp, mx, my)) { movedAny = true; break; }
+        }
+      }
+      if (!movedAny) break;
+    }
+    recenter(puzzle);
+    return puzzle;
+  }
+
+  /**
+   * Mark a word as found, recompute the union, compact the board.
+   * Returns { removedIds, removedEdgeKeys, moved } for the renderer.
    */
   function removeWord(puzzle, wordIndex) {
     const word = puzzle.words[wordIndex];
     if (!word || word.found) return null;
+    const beforeNodes = new Set(puzzle.cells.map(c => c.id));
+    const beforeEdges = new Set(puzzle.edges.map(e => edgeKey(e[0], e[1])));
+    const beforePos = new Map(puzzle.cells.map(c => [c.id, { x: c.x, y: c.y }]));
+
     word.found = true;
-    const removed = new Set(word.cellIds);
-    const before = new Map(puzzle.cells.map(c => [c.id, { x: c.x, y: c.y }]));
-    puzzle.cells = puzzle.cells.filter(c => !removed.has(c.id));
+    computeUnion(puzzle);
+
+    const stillNodes = new Set(puzzle.cells.map(c => c.id));
+    const stillEdges = new Set(puzzle.edges.map(e => edgeKey(e[0], e[1])));
+    const removedIds = [];
+    for (const id of beforeNodes) if (!stillNodes.has(id)) removedIds.push(id);
+    const removedEdgeKeys = [];
+    for (const k of beforeEdges) if (!stillEdges.has(k)) removedEdgeKeys.push(k);
+
     collapse(puzzle);
+
     const moved = [];
     for (const c of puzzle.cells) {
-      const prev = before.get(c.id);
+      const prev = beforePos.get(c.id);
       if (prev && (prev.x !== c.x || prev.y !== c.y)) {
         moved.push({ id: c.id, fromX: prev.x, fromY: prev.y, toX: c.x, toY: c.y });
       }
     }
-    return { removedIds: Array.from(removed), moved: moved };
+    return { removedIds: removedIds, removedEdgeKeys: removedEdgeKeys, moved: moved };
   }
 
   function findWordIndex(puzzle, text) {
@@ -647,38 +793,54 @@
     return -1;
   }
 
+  function longestWord(puzzle) {
+    return puzzle.words.find(w => w.isLong) || null;
+  }
+
   function clonePuzzle(puzzle) {
-    return {
-      cells: puzzle.cells.map(c => Object.assign({}, c)),
-      words: puzzle.words.map(w => ({ text: w.text, cellIds: w.cellIds.slice(), found: w.found })),
-      edges: puzzle.edges.map(e => e.slice())
+    const allCells = puzzle.allCells.map(c => Object.assign({}, c));
+    const clone = {
+      allCells: allCells,
+      cells: [],
+      edges: [],
+      longWord: puzzle.longWord,
+      words: puzzle.words.map(w => ({
+        text: w.text,
+        cellIds: w.cellIds.slice(),
+        found: w.found,
+        isLong: w.isLong
+      }))
     };
+    computeUnion(clone);
+    return clone;
   }
 
   return {
+    CONFIG: CONFIG,
     FALLBACK_COMMON: FALLBACK_COMMON,
+    FALLBACK_LONG: FALLBACK_LONG,
     FALLBACK_EXTRA: FALLBACK_EXTRA,
     createRng: createRng,
     shuffled: shuffled,
     areAdjacent: areAdjacent,
     edgeKey: edgeKey,
     cellMap: cellMap,
-    computeEdges: computeEdges,
-    refreshEdges: refreshEdges,
-    reservedEdgeSet: reservedEdgeSet,
+    computeUnion: computeUnion,
+    checkUnionInvariant: checkUnionInvariant,
     findCrossingEdgePairs: findCrossingEdgePairs,
-    hasReservedCrossing: hasReservedCrossing,
+    hasCrossing: hasCrossing,
     adjacencyMap: adjacencyMap,
+    edgeComponents: edgeComponents,
     findRoute: findRoute,
     isTraceable: isTraceable,
     isValidTrace: isValidTrace,
     traceToWord: traceToWord,
-    connectedComponents: connectedComponents,
-    pickWords: pickWords,
     generatePuzzle: generatePuzzle,
     collapse: collapse,
+    recenter: recenter,
     removeWord: removeWord,
     findWordIndex: findWordIndex,
+    longestWord: longestWord,
     clonePuzzle: clonePuzzle
   };
 });

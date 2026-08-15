@@ -5,8 +5,10 @@
  * Build script for the Zanagrams-clone word list data assets.
  *
  * Generates:
- *   - static/zanagrams/data/common.js   (window.ZAN_COMMON = [...])
- *   - static/zanagrams/data/dict.js     (window.ZAN_DICT_RAW = "word word ...")
+ *   - static/zanagrams/data/common.js   (window.ZAN_COMMON = [...] lengths 4-7,
+ *                                         window.ZAN_COMMON_LONG = [...] lengths 8-11)
+ *   - static/zanagrams/data/dict.js     (window.ZAN_DICT_RAW = "word word ...",
+ *                                         lengths 4-11, or 4-10 if capped for size)
  *
  * Sources:
  *   - Dictionary (validation list): "an-array-of-english-words" npm package
@@ -34,12 +36,26 @@ const OUT_DIR = path.join(ROOT, 'static', 'zanagrams', 'data');
 const COMMON_OUT = path.join(OUT_DIR, 'common.js');
 const DICT_OUT = path.join(OUT_DIR, 'dict.js');
 
-const DICT_MIN_LEN = 3;
-const DICT_MAX_LEN = 8;
-const COMMON_MIN_LEN = 3;
+const DICT_MIN_LEN = 4;
+const DICT_MAX_LEN = 11;
+const DICT_MAX_LEN_CAPPED = 10; // used if the full-length dict file would be too large
+const DICT_SIZE_CAP_BYTES = 2.3 * 1024 * 1024; // ~2.3 MB
+
+const COMMON_MIN_LEN = 4;
 const COMMON_MAX_LEN = 7;
 const COMMON_TARGET_MIN = 1500;
 const COMMON_TARGET_MAX = 4000;
+
+const COMMON_LONG_MIN_LEN = 8;
+const COMMON_LONG_MAX_LEN = 11;
+const COMMON_LONG_TARGET_MIN = 500;
+const COMMON_LONG_TARGET_MAX = 2000;
+// The frequency-ranked list thins out badly past its top few thousand
+// entries at 8-11 letters (place names, brand names, adult/spam terms start
+// dominating). Cap how deep we'll walk it for ZAN_COMMON_LONG specifically,
+// trading list size (we land well within the 500-2000 target either way)
+// for recognizability — see the build report for the tradeoff writeup.
+const COMMON_LONG_MAX_FREQ_RANK = 3500;
 
 const LOWER_ALPHA_RE = /^[a-z]+$/;
 
@@ -53,6 +69,9 @@ const BLOCKLIST = new Set([
   'cunt', 'whore', 'slut', 'rape', 'raped', 'raping', 'rapist',
   'nazi', 'nazis', 'molest', 'molested', 'molester',
   'negro', 'negros', 'negroes', 'jap', 'japs',
+  // Not real English words / scraper artifacts that occasionally surface
+  // near the tail of the frequency-ranked list.
+  'verzeichnis', 'epinions', 'postposted',
 ]);
 
 // Crude / sexual / otherwise awkward words kept out of the prominently shown
@@ -68,6 +87,8 @@ const COMMON_ONLY_BLOCKLIST = new Set([
   'bitch', 'bitches', 'bastard', 'damn', 'hell', 'crap', 'horny', 'kinky',
   'fetish', 'incest', 'pedo', 'viagra', 'heroin', 'cocaine', 'meth',
   'suicide', 'murder', 'murders', 'killer', 'killers', 'corpse', 'corpses',
+  'hardcore', 'lesbians', 'phentermine', 'personals', 'gangbang', 'blowjobs',
+  'gangbangs', 'blowjob',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -203,27 +224,55 @@ function buildDictSet(rawWords) {
 function pickCommonWords(dictSet) {
   const freq = loadFrequencyRankedWords();
   const picked = [];
+  const pickedLong = [];
   const seen = new Set();
+  const seenLong = new Set();
 
   function tryAdd(word) {
+    if (picked.length >= COMMON_TARGET_MAX) return false;
     const w = String(word).toLowerCase();
-    if (seen.has(w)) return;
-    if (!LOWER_ALPHA_RE.test(w)) return;
-    if (w.length < COMMON_MIN_LEN || w.length > COMMON_MAX_LEN) return;
-    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return;
-    if (!dictSet.has(w)) return; // must be a real dictionary word (also enforces ZAN_COMMON subset dict)
+    if (seen.has(w)) return false;
+    if (!LOWER_ALPHA_RE.test(w)) return false;
+    if (w.length < COMMON_MIN_LEN || w.length > COMMON_MAX_LEN) return false;
+    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
+    if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces ZAN_COMMON subset dict)
     seen.add(w);
     picked.push(w);
+    return true;
+  }
+
+  function tryAddLong(word) {
+    if (pickedLong.length >= COMMON_LONG_TARGET_MAX) return false;
+    const w = String(word).toLowerCase();
+    if (seenLong.has(w)) return false;
+    if (!LOWER_ALPHA_RE.test(w)) return false;
+    if (w.length < COMMON_LONG_MIN_LEN || w.length > COMMON_LONG_MAX_LEN) return false;
+    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
+    if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces subset-of-dict)
+    seenLong.add(w);
+    pickedLong.push(w);
+    return true;
   }
 
   let freqSourceLabel = 'embedded fallback list only';
 
   if (freq) {
     freqSourceLabel = freq.source;
-    for (const w of freq.words) {
-      tryAdd(w);
-      if (picked.length >= COMMON_TARGET_MAX) break;
-    }
+    // Single pass down the frequency-ranked list: short/mid-length words feed
+    // ZAN_COMMON, longer-but-still-frequent words feed ZAN_COMMON_LONG. This
+    // keeps ZAN_COMMON_LONG sourced from the same "words an average player
+    // knows" frequency ordering, just continuing further down the list.
+    freq.words.forEach((w, rank) => {
+      const word = String(w).toLowerCase();
+      if (word.length >= COMMON_MIN_LEN && word.length <= COMMON_MAX_LEN) {
+        tryAdd(word);
+      } else if (
+        rank < COMMON_LONG_MAX_FREQ_RANK &&
+        word.length >= COMMON_LONG_MIN_LEN && word.length <= COMMON_LONG_MAX_LEN
+      ) {
+        tryAddLong(word);
+      }
+    });
   }
 
   // If the frequency source didn't yield enough in-range/in-dictionary words
@@ -244,26 +293,47 @@ function pickCommonWords(dictSet) {
     }
   }
 
+  // ZAN_COMMON_LONG has no fallback word list to top up from (the curated
+  // fallback words are all short), so if the frequency source ran out before
+  // reaching the target minimum, top up from the dictionary directly. This
+  // is a quality tradeoff versus frequency-ranked words: dictionary order is
+  // alphabetical, not popularity-ranked, so words picked this way may be
+  // less universally recognizable. Only used if genuinely short.
+  let longToppedUpFromDict = 0;
+  if (pickedLong.length < COMMON_LONG_TARGET_MIN) {
+    for (const w of dictSet) {
+      if (tryAddLong(w)) longToppedUpFromDict++;
+      if (pickedLong.length >= COMMON_LONG_TARGET_MIN) break;
+    }
+  }
+
   picked.sort();
-  return { words: picked, freqSourceLabel };
+  pickedLong.sort();
+  return { words: picked, wordsLong: pickedLong, freqSourceLabel, longToppedUpFromDict };
 }
 
-function toJsFileCommon(words) {
+function toJsFileCommon(words, wordsLong) {
   const json = JSON.stringify(words);
+  const jsonLong = JSON.stringify(wordsLong);
   return (
     '// Auto-generated by scripts/build_zanagrams_wordlists.js — do not edit by hand.\n' +
-    '// Common, everyday English words (lengths 3-7) used as required puzzle words.\n' +
+    '// Common, everyday English words (lengths 4-7) used as required puzzle words.\n' +
     '// Source: frequency-ranked common-words list intersected with a public-domain\n' +
     "// English dictionary. See the build script's header comment for full sourcing.\n" +
-    'window.ZAN_COMMON = ' + json + ';\n'
+    'window.ZAN_COMMON = ' + json + ';\n\n' +
+    '// Common, recognizable English words (lengths 8-11) used as the puzzle\'s\n' +
+    '// single "longest word". Sourced further down the same frequency ranking\n' +
+    "// used for ZAN_COMMON, so they should still be words an average player\n" +
+    '// knows (e.g. birthday, elephant, chocolate, dangerous, basketball).\n' +
+    'window.ZAN_COMMON_LONG = ' + jsonLong + ';\n'
   );
 }
 
-function toJsFileDict(words) {
+function toJsFileDict(words, maxLen) {
   const raw = words.join(' ');
   return (
     '// Auto-generated by scripts/build_zanagrams_wordlists.js — do not edit by hand.\n' +
-    '// Full validation dictionary (lengths 3-8), space-separated for compactness.\n' +
+    '// Full validation dictionary (lengths ' + DICT_MIN_LEN + '-' + maxLen + '), space-separated for compactness.\n' +
     "// Source: public-domain English word list. See the build script's header\n" +
     '// comment for full sourcing.\n' +
     'window.ZAN_DICT_RAW = ' + JSON.stringify(raw) + ';\n'
@@ -276,17 +346,34 @@ function main() {
   const dictSrc = loadDictionarySource();
   const dictSet = buildDictSet(dictSrc.words);
 
-  const { words: commonWords, freqSourceLabel } = pickCommonWords(dictSet);
+  const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
+    pickCommonWords(dictSet);
 
-  // Guarantee subset invariant: every common word must be in the dict set.
-  for (const w of commonWords) {
-    dictSet.add(w);
+  // Guarantee subset invariants: every common/common-long word must be in the
+  // dict set (ZAN_COMMON and ZAN_COMMON_LONG are disjoint by length range).
+  for (const w of commonWords) dictSet.add(w);
+  for (const w of commonLongWords) dictSet.add(w);
+
+  let dictWords = Array.from(dictSet).sort();
+  let dictMaxLen = DICT_MAX_LEN;
+
+  // If the full-length (up to 11) dictionary would exceed the size budget,
+  // cap it at length 10 instead, but always keep the ZAN_COMMON_LONG words
+  // (which may include length-11 words) present so the subset invariant
+  // still holds even though the general dictionary is capped shorter.
+  const uncappedRaw = dictWords.join(' ');
+  if (Buffer.byteLength(uncappedRaw, 'utf8') > DICT_SIZE_CAP_BYTES) {
+    dictMaxLen = DICT_MAX_LEN_CAPPED;
+    const cappedSet = new Set();
+    for (const w of dictWords) {
+      if (w.length <= DICT_MAX_LEN_CAPPED) cappedSet.add(w);
+    }
+    for (const w of commonLongWords) cappedSet.add(w); // preserve subset invariant
+    dictWords = Array.from(cappedSet).sort();
   }
 
-  const dictWords = Array.from(dictSet).sort();
-
-  fs.writeFileSync(COMMON_OUT, toJsFileCommon(commonWords));
-  fs.writeFileSync(DICT_OUT, toJsFileDict(dictWords));
+  fs.writeFileSync(COMMON_OUT, toJsFileCommon(commonWords, commonLongWords));
+  fs.writeFileSync(DICT_OUT, toJsFileDict(dictWords, dictMaxLen));
 
   const commonSize = fs.statSync(COMMON_OUT).size;
   const dictSize = fs.statSync(DICT_OUT).size;
@@ -294,8 +381,12 @@ function main() {
   console.log('Zanagrams word list build complete.');
   console.log('  Dictionary source : %s (%d raw words)', dictSrc.source, dictSrc.words.length);
   console.log('  Frequency source  : %s', freqSourceLabel);
-  console.log('  common.js : %d words, %d bytes -> %s', commonWords.length, commonSize, COMMON_OUT);
-  console.log('  dict.js   : %d words, %d bytes -> %s', dictWords.length, dictSize, DICT_OUT);
+  console.log('  common.js : ZAN_COMMON=%d words, ZAN_COMMON_LONG=%d words, %d bytes -> %s',
+    commonWords.length, commonLongWords.length, commonSize, COMMON_OUT);
+  console.log('  dict.js   : %d words (maxLen=%d), %d bytes -> %s', dictWords.length, dictMaxLen, dictSize, DICT_OUT);
+  if (longToppedUpFromDict > 0) {
+    console.log('  NOTE: %d ZAN_COMMON_LONG words topped up from raw dictionary (not frequency-ranked) because the frequency source ran short at lengths 8-11.', longToppedUpFromDict);
+  }
 }
 
 main();

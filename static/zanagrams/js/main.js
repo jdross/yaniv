@@ -8,17 +8,19 @@
   const $ = id => document.getElementById(id);
   const els = {
     board: $('board'),
-    timerValue: $('timerValue'),
     timer: $('timer'),
-    timerFill: $('timerFill'),
+    timerValue: $('timerValue'),
     timerToasts: $('timerToasts'),
-    bonusCount: $('bonusCount'),
+    solvedCount: $('solvedCount'),
+    totalCount: $('totalCount'),
+    longest: $('longest'),
+    longestText: $('longestText'),
     newGame: $('newGame'),
     current: $('currentText'),
-    targets: $('targets'),
     overlay: $('overlay'),
     sheetEmoji: $('sheetEmoji'),
     sheetTitle: $('sheetTitle'),
+    sheetTime: $('sheetTime'),
     sheetSub: $('sheetSub'),
     sheetWords: $('sheetWords'),
     playAgain: $('playAgain')
@@ -28,9 +30,15 @@
     ? window.ZAN_COMMON
     : Generator.FALLBACK_COMMON;
 
+  // Guard: if the data files predate the ZAN_COMMON_LONG contract, keep long
+  // words out of the regular pool and use the embedded long list instead.
+  const longWords = (Array.isArray(window.ZAN_COMMON_LONG) && window.ZAN_COMMON_LONG.length)
+    ? window.ZAN_COMMON_LONG
+    : Generator.FALLBACK_LONG;
+
   const dict = Engine.buildDict(
     window.ZAN_DICT_RAW || '',
-    commonWords.concat(Generator.FALLBACK_COMMON, Generator.FALLBACK_EXTRA)
+    commonWords.concat(longWords, Generator.FALLBACK_COMMON, Generator.FALLBACK_LONG, Generator.FALLBACK_EXTRA)
   );
 
   const renderer = window.ZanRender.create(els.board);
@@ -47,26 +55,26 @@
     adjacency = Generator.adjacencyMap(game.puzzle.cells, game.puzzle.edges);
   }
 
-  function renderTargets(revealMissed) {
-    els.targets.innerHTML = '';
-    for (const word of game.puzzle.words) {
-      const div = document.createElement('div');
-      div.className = 'target' + (word.found ? ' found' : (revealMissed ? ' missed' : ''));
-      div.textContent = (word.found || revealMissed)
-        ? word.text.toUpperCase().split('').join(' ')
-        : Engine.blanksFor(word.text);
-      els.targets.appendChild(div);
+  function renderLongest() {
+    const word = Generator.longestWord(game.puzzle);
+    if (!word) {
+      els.longest.hidden = true;
+      return;
+    }
+    els.longest.hidden = false;
+    if (word.found) {
+      els.longest.classList.add('found');
+      els.longestText.textContent = word.text.toUpperCase();
+    } else {
+      els.longest.classList.remove('found');
+      els.longestText.textContent = word.text.length + ' letters';
     }
   }
 
   function renderHud() {
-    els.timerValue.textContent = Engine.formatTime(game.timeLeftMs);
-    const ratio = Math.max(0, Math.min(1, game.timeLeftMs / game.totalMs));
-    els.timerFill.style.width = (ratio * 100) + '%';
-    const urgent = game.timeLeftMs <= 15000 && game.status === 'playing';
-    els.timer.classList.toggle('urgent', urgent);
-    els.timerFill.classList.toggle('urgent', urgent);
-    els.bonusCount.textContent = String(game.bonusWords.length);
+    els.timerValue.textContent = Engine.formatTime(game.elapsedMs);
+    els.solvedCount.textContent = String(Engine.solvedCount(game));
+    els.totalCount.textContent = String(Engine.totalWords(game));
   }
 
   function toast(text) {
@@ -74,7 +82,15 @@
     node.className = 'toast';
     node.textContent = text;
     els.timerToasts.appendChild(node);
-    window.setTimeout(() => node.remove(), 1200);
+    window.setTimeout(() => node.remove(), 1300);
+  }
+
+  function flashTimer() {
+    els.timer.classList.remove('credited');
+    // Force a reflow so the animation restarts on rapid extras.
+    void els.timer.offsetWidth;
+    els.timer.classList.add('credited');
+    window.setTimeout(() => els.timer.classList.remove('credited'), 700);
   }
 
   function setCurrent(text, mood) {
@@ -96,39 +112,29 @@
     if (!game || game.status !== 'playing') return;
     const dt = lastTick ? now - lastTick : 0;
     lastTick = now;
-    if (dt > 0 && dt < 2000) {
-      if (Engine.tick(game, dt)) {
-        finish(false);
-      }
-    }
+    if (dt > 0 && dt < 2000) Engine.tick(game, dt);
     renderHud();
   }
 
   /* ------------------------------ endgame ------------------------------ */
 
-  function finish(won) {
+  function finish() {
     busy = true;
-    renderTargets(!won);
     renderHud();
-    const bonusList = game.bonusWords;
-    els.sheetEmoji.textContent = won ? '🎉' : '⏳';
-    els.sheetTitle.textContent = won ? 'Solved!' : "Time's up";
-    els.sheetSub.textContent = won
-      ? Engine.formatTime(game.timeLeftMs) + ' left · ' + bonusList.length + ' bonus word' + (bonusList.length === 1 ? '' : 's')
-      : 'You found ' + game.foundWords.length + ' of ' + game.puzzle.words.length + ' words.';
+    const extras = game.extraWords;
+    const saved = Math.round(game.savedMs / 1000);
+    els.sheetEmoji.textContent = '🎉';
+    els.sheetTitle.textContent = 'Solved!';
+    els.sheetTime.textContent = Engine.formatTime(game.elapsedMs);
+    els.sheetSub.textContent = extras.length
+      ? extras.length + ' extra word' + (extras.length === 1 ? '' : 's') + ' saved you ' + saved + 's'
+      : 'No extra words found — try hunting for bonus words next time.';
 
     els.sheetWords.innerHTML = '';
-    const missed = game.puzzle.words.filter(w => !w.found);
-    for (const word of missed) {
+    for (const extra of extras.slice(0, 18)) {
       const li = document.createElement('li');
-      li.className = 'missed';
-      li.textContent = word.text;
-      els.sheetWords.appendChild(li);
-    }
-    for (const bonus of bonusList.slice(0, 12)) {
-      const li = document.createElement('li');
-      li.className = 'bonus';
-      li.textContent = bonus.word;
+      li.className = 'extra';
+      li.textContent = extra.word;
       els.sheetWords.appendChild(li);
     }
     els.overlay.hidden = false;
@@ -137,11 +143,7 @@
   /* ------------------------------ submit ------------------------------- */
 
   function handleSubmit(ids) {
-    if (!game || game.status !== 'playing' || busy) {
-      setCurrent('');
-      return;
-    }
-    if (!ids.length) {
+    if (!game || game.status !== 'playing' || busy || !ids.length) {
       setCurrent('');
       return;
     }
@@ -151,21 +153,23 @@
     if (result.type === 'required') {
       busy = true;
       setCurrent(word, 'good');
-      if (result.timeAdded) toast('+' + Math.round(result.timeAdded / 1000) + 's');
-      renderTargets(false);
-      renderer.playFound(result.removedIds, () => {
+      renderHud();
+      renderLongest();
+      if (result.isLong) els.longest.classList.add('celebrate');
+      renderer.playFound(result.removedIds, result.removedEdgeKeys, () => {
         rebuildAdjacency();
         busy = false;
         setCurrent('');
-        if (result.solved) finish(true);
+        els.longest.classList.remove('celebrate');
+        if (result.solved) finish();
       });
-      renderHud();
       return;
     }
 
-    if (result.type === 'bonus') {
+    if (result.type === 'extra') {
       renderer.pulse(ids, 'bonus', 620);
-      toast('+' + result.seconds + 's');
+      toast('-' + result.seconds + 's');
+      flashTimer();
       flashCurrent(word, 'good', 800);
       renderHud();
       return;
@@ -178,11 +182,12 @@
   /* ------------------------------ new game ----------------------------- */
 
   function newGame() {
-    const puzzle = Generator.generatePuzzle({ words: commonWords })
-      || Generator.generatePuzzle({ words: Generator.FALLBACK_COMMON });
+    const puzzle = Generator.generatePuzzle({ words: commonWords, longWords: longWords })
+      || Generator.generatePuzzle({ words: Generator.FALLBACK_COMMON, longWords: Generator.FALLBACK_LONG });
     if (!puzzle) {
       els.sheetEmoji.textContent = '😵';
       els.sheetTitle.textContent = 'Could not build a puzzle';
+      els.sheetTime.textContent = '';
       els.sheetSub.textContent = 'Try again.';
       els.overlay.hidden = false;
       return;
@@ -190,8 +195,9 @@
     game = Engine.createGame({ puzzle: puzzle, dict: dict });
     rebuildAdjacency();
     renderer.setPuzzle(puzzle);
-    renderTargets(false);
     renderHud();
+    renderLongest();
+    els.longest.classList.remove('celebrate');
     setCurrent('');
     els.overlay.hidden = true;
     busy = false;
@@ -231,5 +237,23 @@
   });
 
   newGame();
-  window.ZAN = { newGame: newGame, getGame: () => game, renderer: renderer };
+
+  // Test/debug hook.
+  window.ZAN = {
+    newGame: newGame,
+    getGame: () => game,
+    renderer: renderer,
+    solve: function (text) {
+      const result = Engine.submitWord(game, text);
+      if (result.type === 'required') {
+        renderHud();
+        renderLongest();
+        renderer.playFound(result.removedIds, result.removedEdgeKeys, () => {
+          rebuildAdjacency();
+          if (result.solved) finish();
+        });
+      }
+      return result;
+    }
+  };
 })();

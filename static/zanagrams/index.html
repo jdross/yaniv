@@ -20,15 +20,18 @@
         <span class="timer-value" id="timerValue">0:00</span>
         <div class="timer-toasts" id="timerToasts"></div>
       </div>
-      <div class="hud-stats">
-        <div class="stat">
-          <span class="stat-value" id="bonusCount">0</span>
-          <span class="stat-label">bonus</span>
-        </div>
-        <button class="btn-new" id="newGame" type="button">New</button>
+      <div class="counter" id="counter">
+        <span class="counter-nums"><b id="solvedCount">0</b> / <span id="totalCount">0</span></span>
+        <span class="counter-label">words</span>
       </div>
+      <button class="btn-new" id="newGame" type="button">New</button>
     </div>
-    <div class="timer-track"><div class="timer-fill" id="timerFill"></div></div>
+
+    <div class="longest" id="longest">
+      <span class="longest-star">★</span>
+      <span class="longest-text" id="longestText">—</span>
+    </div>
+
     <div class="current" id="current" aria-live="polite"><span class="current-text" id="currentText"></span></div>
   </header>
 
@@ -37,12 +40,11 @@
          xmlns="http://www.w3.org/2000/svg" aria-label="Letter board"></svg>
   </main>
 
-  <footer class="targets" id="targets"></footer>
-
   <div class="overlay" id="overlay" hidden>
     <div class="sheet">
       <div class="sheet-emoji" id="sheetEmoji">🎉</div>
       <h1 class="sheet-title" id="sheetTitle">Solved!</h1>
+      <div class="sheet-time" id="sheetTime">0:00</div>
       <p class="sheet-sub" id="sheetSub"></p>
       <ul class="sheet-words" id="sheetWords"></ul>
       <button class="btn-primary" id="playAgain" type="button">Play again</button>
