@@ -59,13 +59,20 @@
     routeBudgetRelaxed: 600,  // DFS steps for the fallback (reuse >= 1) route
     saturateBudget: 260,      // DFS steps for a zero-new-cell route
     longRouteBudget: 12000,
-    restarts: 26,
-    timeBudgetMs: 150,        // total wall-clock budget for polish restarts
+    restarts: 40,
+    timeBudgetMs: 200,        // total wall-clock budget for polish restarts
     // Boards may leave gaps in the 5 x 5 — a hole-punched silhouette reads far
     // better than a solid block. minCells stops them from getting so sparse
     // that the puzzle turns into a thin thread.
-    minCells: 17,
-    fillWeight: 2
+    minCells: 14,
+    fillWeight: 2,
+    // Occupancy budget drawn per attempt. Keeping the ceiling below the 25-cell
+    // capacity is what forces words to share letters instead of sprawling.
+    budgetMin: 14,
+    budgetMax: 20,
+    // Boards below this quality score are re-rolled while the time budget
+    // lasts; the best one found is used if none clears the bar.
+    minFunScore: 74
   };
 
   /* ------------------------------------------------------------------ *
@@ -650,6 +657,29 @@
         common.add(w);
       }
     }
+    // Base-word screening. Every contiguous slice of the base word's path is
+    // traceable, so a compound like "background" hands the board back/ground/
+    // round for free — filler words that pad the count without being finds.
+    // Prefer base words that embed few common words.
+    const commonByLen = Array.from(common).filter(w => w.length >= 4);
+    const baseWords = [];
+    const baseRoomy = [];
+    if (Array.isArray(longList)) {
+      for (const raw of longList) {
+        const w = String(raw).toLowerCase();
+        let embedded = 0;
+        for (const c of commonByLen) {
+          if (c.length < w.length && w.indexOf(c) !== -1 && ++embedded > 1) break;
+        }
+        if (embedded === 0) baseWords.push(w);
+        if (embedded <= 1) baseRoomy.push(w);
+      }
+    }
+    // Fall back through progressively looser pools so a small vocabulary
+    // (tests, offline fallback data) still has base words to choose from.
+    const basePool = baseWords.length >= 40 ? baseWords
+      : (baseRoomy.length >= 20 ? baseRoomy : null);
+
     return {
       size: words.size,
       commonSize: common.size,
@@ -657,8 +687,133 @@
       isCommon: w => common.has(w),
       isPrefix: p => (p.length > PREFIX_DEPTH ? true : prefixes.has(p)),
       words: words,
-      common: common
+      common: common,
+      baseWords: basePool
     };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Puzzle quality ("is this board fun?")
+   * ------------------------------------------------------------------ */
+
+  /** Map a raw value onto 0..1 across [lo, hi]. */
+  function ramp(value, lo, hi) {
+    if (hi === lo) return 0;
+    return Math.max(0, Math.min(1, (value - lo) / (hi - lo)));
+  }
+
+  /**
+   * Play the board out in a couple of random orders and watch how it melts.
+   * A solve that removes nothing is "inert": the counter ticks but the board
+   * doesn't move. A handful is fine (letters are shared, that's the game); a
+   * long run of them means the puzzle sits still while you work.
+   */
+  function meltFlow(puzzle) {
+    const ORDERS = 2;
+    let inert = 0;
+    let solves = 0;
+    let longestRun = 0;
+    for (let pass = 0; pass < ORDERS; pass++) {
+      const copy = clonePuzzleForSim(puzzle);
+      const order = copy.words.map(w => w.text);
+      // Deterministic shuffle per pass so scoring is stable for a given board.
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = (i * 7 + pass * 13 + order.length) % (i + 1);
+        const tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+      }
+      let run = 0;
+      for (const text of order) {
+        const index = findWordIndex(copy, text);
+        if (index < 0) continue;
+        const result = removeWord(copy, index);
+        solves++;
+        if (!result || !result.removedIds.length) {
+          inert++;
+          run++;
+          if (run > longestRun) longestRun = run;
+        } else {
+          run = 0;
+        }
+      }
+    }
+    return {
+      inertShare: solves ? inert / solves : 0,
+      longestInertRun: longestRun
+    };
+  }
+
+  /** Structural clone deep enough for meltFlow to mutate freely. */
+  function clonePuzzleForSim(puzzle) {
+    return {
+      cells: puzzle.cells.map(c => ({ id: c.id, x: c.x, y: c.y, letter: c.letter })),
+      allCells: puzzle.allCells.map(c => ({ id: c.id, x: c.x, y: c.y, letter: c.letter })),
+      edges: puzzle.edges.map(e => [e[0], e[1]]),
+      words: puzzle.words.map(w => ({
+        text: w.text,
+        cellIds: w.cellIds.slice(),
+        found: false,
+        isLong: w.isLong
+      })),
+      gridSize: puzzle.gridSize,
+      cellsUsed: puzzle.cellsUsed
+    };
+  }
+
+  /**
+   * Score a finished puzzle on the things that actually make it fun to play.
+   * Returns { score (0-100), parts } so the generator can hold out for a good
+   * board and so tests/tools can see WHY a board scored the way it did.
+   *
+   *  density    letters spelled per cell. A dense graph means every orb is
+   *             pulling weight in several words — the whole point of the game.
+   *  freshness  penalty for words contained in other words (print/printer):
+   *             they inflate the count without being separate discoveries.
+   *  melt       share of words that own at least one cell outright. A word
+   *             that owns nothing removes nothing when solved, so the board
+   *             sits still and the solve feels inert.
+   *  variety    spread of word lengths, so a board isn't all four-letter words.
+   *  extras     rare words available to stumble on for time back.
+   */
+  function scorePuzzle(puzzle, lexicon, extraCount) {
+    const texts = puzzle.words.map(w => w.text);
+    const letters = texts.reduce((sum, t) => sum + t.length, 0);
+    const cells = puzzle.cells.length || 1;
+
+    let subwordPairs = 0;
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = 0; j < texts.length; j++) {
+        if (i !== j && texts[i].length < texts[j].length && texts[j].indexOf(texts[i]) !== -1) {
+          subwordPairs++;
+        }
+      }
+    }
+
+    const flow = meltFlow(puzzle);
+    const lengths = new Set(texts.map(t => t.length));
+
+    const parts = {
+      density: ramp(letters / cells, 2.6, 4.6),
+      freshness: 1 - ramp(subwordPairs, 0, 4),
+      // Two ways melting goes wrong: too many solves that change nothing, and
+      // long stretches where the board sits still.
+      melt: (ramp(1 - flow.inertShare, 0.3, 0.7) + (1 - ramp(flow.longestInertRun, 2, 6))) / 2,
+      variety: ramp(lengths.size, 2, 5),
+      extras: ramp(extraCount || 0, 6, 40)
+    };
+    const score = Math.round(
+      parts.density * 32 +
+      parts.freshness * 24 +
+      parts.melt * 24 +
+      parts.variety * 10 +
+      parts.extras * 10
+    );
+    parts.subwordPairs = subwordPairs;
+    parts.lettersPerCell = letters / cells;
+    parts.inertShare = flow.inertShare;
+    parts.longestInertRun = flow.longestInertRun;
+    return { score: score, parts: parts };
   }
 
   /* ------------------------------------------------------------------ *
@@ -883,7 +1038,13 @@
    */
   function finishPuzzle(board, longText, lexicon, minWords, maxWords, minCells) {
     const puzzle = materialize(board, longText);
-    const commons = enumerateCommon(puzzle.cells, puzzle.edges, lexicon);
+    const traceable = enumerateWords(puzzle.cells, puzzle.edges, lexicon);
+    const commons = new Map();
+    let extraCount = 0;
+    for (const [word, route] of traceable) {
+      if (lexicon.isCommon(word)) commons.set(word, route);
+      else extraCount++;
+    }
 
     // The base word must be the one and only long word in the solvable set.
     for (const word of commons.keys()) {
@@ -921,7 +1082,12 @@
     computeUnion(puzzle);
     recenter(puzzle);
     puzzle.cellsUsed = puzzle.cells.length;
-    return { rejected: false, normalCount: words.length, puzzle: puzzle };
+    return {
+      rejected: false,
+      normalCount: words.length,
+      extraCount: extraCount,
+      puzzle: puzzle
+    };
   }
 
   /* Lexicon cache: the prefix index costs ~120ms to build over the shipped
@@ -943,8 +1109,14 @@
   function generatePuzzle(options) {
     const opts = options || {};
     const rng = opts.rng || createRng(Math.floor(Math.random() * 0xffffffff));
-    const pools = resolvePools(opts);
+    let pools = resolvePools(opts);
     const lexicon = resolveLexicon(opts, pools);
+    // Prefer base words that don't embed other common words (see buildLexicon).
+    if (lexicon.baseWords && lexicon.baseWords.length) {
+      const allowed = new Set(pools.long);
+      const screened = lexicon.baseWords.filter(w => allowed.has(w));
+      if (screened.length >= 20) pools = Object.assign({}, pools, { long: screened });
+    }
     const size = opts.size || CONFIG.size;
     const minWords = opts.minWords || CONFIG.minWords;
     const minCells = opts.minCells || CONFIG.minCells;
@@ -953,6 +1125,7 @@
     // landing on the middle of the band.
     const targetWords = opts.targetWords ||
       (minWords + Math.floor(rng() * (maxWords - minWords + 1)));
+    const minFunScore = opts.minFunScore != null ? opts.minFunScore : CONFIG.minFunScore;
     const restarts = opts.restarts || CONFIG.restarts;
     const capacity = size * size;
     const deadline = Date.now() + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
@@ -969,9 +1142,11 @@
     let rejects = 0;
     for (let attempt = 0; attempt < restarts; attempt++) {
       attempts++;
-      // Each attempt gets its own occupancy budget, so boards vary from
-      // hole-punched silhouettes up to the occasional solid 5 x 5.
-      const cellBudget = minCells + Math.floor(rng() * (capacity - minCells + 1));
+      // Each attempt gets its own occupancy budget, so boards vary in
+      // silhouette; the ceiling stays under capacity to force letter sharing.
+      const budgetMin = Math.max(1, opts.budgetMin || CONFIG.budgetMin);
+      const budgetMax = Math.min(capacity, opts.budgetMax || CONFIG.budgetMax);
+      const cellBudget = budgetMin + Math.floor(rng() * Math.max(1, budgetMax - budgetMin + 1));
       const built = buildBoard(pools, rng, construct, size, deadline, cellBudget);
       if (!built) continue;
       const result = finishPuzzle(built.board, built.longText, lexicon, minWords, maxWords, minCells);
@@ -982,17 +1157,18 @@
         else if (result.normalCount < minWords && construct < CONFIG.constructMax + 2) construct++;
         continue;
       }
-      const score = scoreBoard(built.board, minWords, maxWords, {
-        normalCount: result.normalCount,
-        targetWords: targetWords,
-        extraCount: 0
-      });
+      // Quality gate: keep pulling new boards until one is actually fun to
+      // play (dense, few subwords, words that melt something), rather than
+      // settling for the first structurally valid grid.
+      const quality = scorePuzzle(result.puzzle, lexicon, result.extraCount);
+      const onTarget = Math.max(0, 6 - Math.abs(result.normalCount - targetWords));
+      const score = quality.score + onTarget;
       if (score > bestScore) {
         bestScore = score;
         best = result.puzzle;
+        best.quality = quality;
       }
-      // Hit the target exactly and there is nothing left to search for.
-      if (result.normalCount === targetWords) break;
+      if (quality.score >= minFunScore && result.normalCount === targetWords) break;
       // No early exit on a full grid: filling all 25 cells is no longer the
       // goal, so every restart in the budget gets a fair shot at scoring.
       if (Date.now() > deadline) break;
@@ -1173,6 +1349,7 @@
     enumerateCommon: enumerateCommon,
     multisetFits: multisetFits,
     scoreBoard: scoreBoard,
+    scorePuzzle: scorePuzzle,
     finishPuzzle: finishPuzzle,
     generatePuzzle: generatePuzzle,
     collapse: collapse,

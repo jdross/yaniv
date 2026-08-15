@@ -766,6 +766,54 @@ const realData = (() => {
   return sandbox;
 })();
 
+test('real boards are dense, fresh, and score as fun', { skip: !realData ? 'no real data' : false }, () => {
+  const density = [];
+  const subwords = [];
+  const scores = [];
+  for (let i = 0; i < 25; i++) {
+    const puzzle = gen.generatePuzzle({
+      rng: gen.createRng(7000000 + i),
+      words: realData.ZAN_COMMON,
+      longWords: realData.ZAN_COMMON_LONG,
+      lexicon: realData.lexicon
+    });
+    assert.ok(puzzle, 'generation failed');
+    assert.ok(puzzle.quality, 'puzzle carries no quality report');
+    density.push(puzzle.quality.parts.lettersPerCell);
+    subwords.push(puzzle.quality.parts.subwordPairs);
+    scores.push(puzzle.quality.score);
+  }
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  // Letters must be pulling their weight in several words each.
+  assert.ok(avg(density) >= 3.5, 'boards not dense enough: ' + avg(density).toFixed(2) + ' letters/cell');
+  // print/printer pairs pad the word count without being separate finds.
+  assert.ok(avg(subwords) <= 1.5, 'too many subword pairs: ' + avg(subwords).toFixed(2) + ' per board');
+  assert.ok(Math.min(...scores) >= 45, 'a board scored far below the quality bar: ' + Math.min(...scores));
+});
+
+test('the quality score reacts to the things it claims to measure', () => {
+  const { puzzle } = makePuzzle(880011);
+  const baseline = gen.scorePuzzle(puzzle, LEXICON, 20);
+  assert.ok(baseline.score >= 0 && baseline.score <= 100, 'score out of range: ' + baseline.score);
+
+  // Planting a word inside another word must cost freshness.
+  const withSubword = JSON.parse(JSON.stringify(puzzle));
+  const host = withSubword.words.find(w => w.text.length >= 6) || withSubword.words[0];
+  withSubword.words.push({
+    text: host.text.slice(0, 4),
+    cellIds: host.cellIds.slice(0, 4),
+    found: false,
+    isLong: false
+  });
+  const dirty = gen.scorePuzzle(withSubword, LEXICON, 20);
+  assert.ok(dirty.parts.subwordPairs > baseline.parts.subwordPairs, 'subword pair went uncounted');
+  assert.ok(dirty.parts.freshness < baseline.parts.freshness, 'freshness ignored the subword');
+
+  // More rare words to stumble on is worth more.
+  const richer = gen.scorePuzzle(puzzle, LEXICON, 60);
+  assert.ok(richer.parts.extras >= baseline.parts.extras, 'extras component ignored the rare-word count');
+});
+
 test('real word lists carry no plural or past-tense forms', { skip: !realData ? 'no real data' : false }, () => {
   // Required words are the ones the counter tallies, so "metal" AND "metals"
   // both counting would inflate the target without adding anything to solve.
@@ -867,7 +915,10 @@ test('real-data generation stays inside the time budget', { skip: !realData ? 'n
   }
   times.sort((a, b) => a - b);
   const median = times[Math.floor(times.length / 2)];
-  assert.ok(median < 150, 'median generation ' + median + 'ms exceeds the budget');
+  // The generator spends its budget re-rolling until a board clears the
+  // quality bar, so the ceiling is the configured budget plus one attempt.
+  assert.ok(median < gen.CONFIG.timeBudgetMs + 60,
+    'median generation ' + median + 'ms exceeds the budget');
   assert.ok(Math.min(...counts) >= 10 && Math.max(...counts) <= 16,
     'word counts outside 10-16: ' + Math.min(...counts) + '-' + Math.max(...counts));
   assert.ok(Math.min(...cells) >= gen.CONFIG.minCells,
