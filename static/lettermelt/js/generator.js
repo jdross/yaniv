@@ -72,7 +72,7 @@
     budgetMax: 20,
     // Boards below this quality score are re-rolled while the time budget
     // lasts; the best one found is used if none clears the bar.
-    minFunScore: 74
+    minFunScore: 78
   };
 
   /* ------------------------------------------------------------------ *
@@ -702,6 +702,51 @@
     return Math.max(0, Math.min(1, (value - lo) / (hi - lo)));
   }
 
+  /* Endings that build a new word out of an existing one. Finding "print" and
+   * then "printer" is not a second discovery — it's the same word again. Note
+   * this is deliberately about SHARED ROOTS, not shared letters: race/trace,
+   * live/olive and cell/cellar are different words that happen to overlap, and
+   * those are fun to spot. */
+  const DERIVED_SUFFIXES = [
+    's', 'es', 'ed', 'd', 'ing', 'er', 'r', 'est', 'st',
+    'ly', 'y', 'ness', 'ment', 'ful', 'less', 'able', 'ible',
+    'ist', 'ize', 'ise', 'ion', 'tion', 'al'
+  ];
+
+  /* Pairs that look like stem + suffix but are unrelated words. The stem must
+   * itself be 4+ letters to ever reach this check, which already rules out
+   * most of them (letter/let, summer/sum, manner/man). */
+  const NOT_DERIVED = new Set([
+    'corn|corner', 'flow|flower', 'mast|master', 'moth|mother', 'numb|number',
+    'cove|cover', 'part|party', 'count|county', 'brow|brown', 'butt|butter',
+    'fast|faster', 'tow|tower', 'lift|lifter', 'hang|hanger', 'poem|poems',
+    'stat|state', 'plan|plane', 'plan|planet', 'come|comet', 'cast|caste',
+    'char|charm', 'form|former', 'mine|miner', 'pain|paint', 'rest|rester',
+    'wine|winter', 'sting|stinger', 'cent|center', 'cove|covert', 'ward|warden'
+  ]);
+
+  /**
+   * Is `long` just `short` wearing a suffix? Handles the usual spelling
+   * adjustments: silent-e drop (bake -> baking), consonant doubling
+   * (stop -> stopper) and y -> i (happy -> happier).
+   */
+  function isDerivedFrom(short, long) {
+    if (long.length <= short.length) return false;
+    if (NOT_DERIVED.has(short + '|' + long)) return false;
+    const stems = [short];
+    if (short.endsWith('e')) stems.push(short.slice(0, -1));
+    if (short.endsWith('y')) stems.push(short.slice(0, -1) + 'i');
+    const last = short[short.length - 1];
+    if (last === short[short.length - 2]) stems.push(short.slice(0, -1));
+    else stems.push(short + last);
+    for (const stem of stems) {
+      if (!long.startsWith(stem)) continue;
+      const tail = long.slice(stem.length);
+      if (tail && DERIVED_SUFFIXES.indexOf(tail) !== -1) return true;
+    }
+    return false;
+  }
+
   /**
    * Play the board out in a couple of random orders and watch how it melts.
    * A solve that removes nothing is "inert": the counter ticks but the board
@@ -784,9 +829,7 @@
     let subwordPairs = 0;
     for (let i = 0; i < texts.length; i++) {
       for (let j = 0; j < texts.length; j++) {
-        if (i !== j && texts[i].length < texts[j].length && texts[j].indexOf(texts[i]) !== -1) {
-          subwordPairs++;
-        }
+        if (i !== j && isDerivedFrom(texts[i], texts[j])) subwordPairs++;
       }
     }
 

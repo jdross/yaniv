@@ -272,9 +272,15 @@ test('clonePuzzle produces an independent board', () => {
   const { puzzle } = makePuzzle(700001);
   const clone = gen.clonePuzzle(puzzle);
   assert.equal(clone.cells.length, puzzle.cells.length);
+  const before = puzzle.cells.length;
   gen.removeWord(clone, 0);
-  assert.ok(clone.cells.length < puzzle.cells.length);
+  // Solving marks the clone and leaves the original completely alone. The
+  // board does not necessarily shrink: on a dense board every letter of the
+  // solved word can still be needed by other words.
+  assert.equal(clone.words[0].found, true);
   assert.equal(puzzle.words[0].found, false);
+  assert.equal(puzzle.cells.length, before, 'removeWord mutated the original');
+  assert.ok(clone.cells.length <= before);
 });
 
 /* ------------------------------------------------------------------ *
@@ -787,7 +793,8 @@ test('real boards are dense, fresh, and score as fun', { skip: !realData ? 'no r
   // Letters must be pulling their weight in several words each.
   assert.ok(avg(density) >= 3.5, 'boards not dense enough: ' + avg(density).toFixed(2) + ' letters/cell');
   // print/printer pairs pad the word count without being separate finds.
-  assert.ok(avg(subwords) <= 1.5, 'too many subword pairs: ' + avg(subwords).toFixed(2) + ' per board');
+  // (race/trace and cell/cellar are fine — different words, real discoveries.)
+  assert.ok(avg(subwords) <= 0.4, 'too many same-root pairs: ' + avg(subwords).toFixed(2) + ' per board');
   assert.ok(Math.min(...scores) >= 45, 'a board scored far below the quality bar: ' + Math.min(...scores));
 });
 
@@ -796,18 +803,31 @@ test('the quality score reacts to the things it claims to measure', () => {
   const baseline = gen.scorePuzzle(puzzle, LEXICON, 20);
   assert.ok(baseline.score >= 0 && baseline.score <= 100, 'score out of range: ' + baseline.score);
 
-  // Planting a word inside another word must cost freshness.
-  const withSubword = JSON.parse(JSON.stringify(puzzle));
-  const host = withSubword.words.find(w => w.text.length >= 6) || withSubword.words[0];
-  withSubword.words.push({
-    text: host.text.slice(0, 4),
-    cellIds: host.cellIds.slice(0, 4),
+  // Planting the SAME WORD in another form must cost freshness.
+  const withDerived = JSON.parse(JSON.stringify(puzzle));
+  const host = withDerived.words.find(w => !w.isLong) || withDerived.words[0];
+  withDerived.words.push({
+    text: host.text + (host.text.endsWith('e') ? 'r' : 'er'),
+    cellIds: host.cellIds.slice(),
     found: false,
     isLong: false
   });
-  const dirty = gen.scorePuzzle(withSubword, LEXICON, 20);
-  assert.ok(dirty.parts.subwordPairs > baseline.parts.subwordPairs, 'subword pair went uncounted');
-  assert.ok(dirty.parts.freshness < baseline.parts.freshness, 'freshness ignored the subword');
+  const dirty = gen.scorePuzzle(withDerived, LEXICON, 20);
+  assert.ok(dirty.parts.subwordPairs > baseline.parts.subwordPairs, 'same-root pair went uncounted');
+  assert.ok(dirty.parts.freshness < baseline.parts.freshness, 'freshness ignored the same-root pair');
+
+  // But a different word that merely overlaps must NOT be penalised: finding
+  // "race" after "trace" is a real second discovery.
+  const withOverlap = JSON.parse(JSON.stringify(puzzle));
+  withOverlap.words.push({
+    text: 'race', cellIds: host.cellIds.slice(0, 4), found: false, isLong: false
+  });
+  withOverlap.words.push({
+    text: 'trace', cellIds: host.cellIds.slice(0, 5), found: false, isLong: false
+  });
+  const overlapped = gen.scorePuzzle(withOverlap, LEXICON, 20);
+  assert.equal(overlapped.parts.subwordPairs, baseline.parts.subwordPairs,
+    'race/trace was wrongly counted as the same word');
 
   // More rare words to stumble on is worth more.
   const richer = gen.scorePuzzle(puzzle, LEXICON, 60);
