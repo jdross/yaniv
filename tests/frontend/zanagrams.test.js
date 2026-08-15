@@ -69,13 +69,13 @@ function assertBoardHealthy(puzzle, context) {
  * Generation
  * ------------------------------------------------------------------ */
 
-test('generates puzzles of 15-20 words with exactly one 8-11 letter longest word', () => {
+test('generates puzzles of 10-16 words with exactly one 8-11 letter base word', () => {
   let shortfall = 0;
   for (let i = 0; i < PUZZLE_COUNT; i++) {
     const { puzzle } = makePuzzle(100000 + i);
-    if (puzzle.words.length < 15) shortfall++;
-    assert.ok(puzzle.words.length >= 13, 'too few words: ' + puzzle.words.length);
-    assert.ok(puzzle.words.length <= 20, 'too many words: ' + puzzle.words.length);
+    if (puzzle.words.length < 10) shortfall++;
+    assert.ok(puzzle.words.length >= 10, 'too few words: ' + puzzle.words.length);
+    assert.ok(puzzle.words.length <= 16, 'too many words: ' + puzzle.words.length);
 
     const longs = puzzle.words.filter(w => w.isLong);
     assert.equal(longs.length, 1, 'expected exactly one longest word');
@@ -96,14 +96,14 @@ test('generates puzzles of 15-20 words with exactly one 8-11 letter longest word
       assert.equal(new Set(word.cellIds).size, word.cellIds.length, 'word path revisits a cell');
     }
   }
-  // >= 15 words must be the overwhelmingly common case.
-  assert.ok(shortfall <= PUZZLE_COUNT * 0.02,
-    shortfall + '/' + PUZZLE_COUNT + ' puzzles fell below 15 words');
+  // The 10-word floor is a hard requirement, never a statistical one.
+  assert.equal(shortfall, 0, shortfall + '/' + PUZZLE_COUNT + ' puzzles fell below 10 words');
 });
 
 test('initial board is exactly the union of the word paths, with no crossings', () => {
   let nodeMin = Infinity;
   let nodeMax = 0;
+  let fullGrids = 0;
   for (let i = 0; i < PUZZLE_COUNT; i++) {
     const { puzzle } = makePuzzle(200000 + i);
     assertBoardHealthy(puzzle, 'at generation (seed ' + (200000 + i) + ')');
@@ -111,16 +111,47 @@ test('initial board is exactly the union of the word paths, with no crossings', 
     nodeMax = Math.max(nodeMax, puzzle.cells.length);
     // Sharing must actually happen: far fewer nodes than letters.
     const letters = puzzle.words.reduce((sum, w) => sum + w.text.length, 0);
-    assert.ok(puzzle.cells.length < letters * 0.8, 'words are not sharing letters');
+    assert.ok(puzzle.cells.length < letters * 0.6, 'words are not sharing letters');
     // Board fits a phone-portrait lattice.
-    const maxX = Math.max(...puzzle.cells.map(c => c.x));
-    const maxY = Math.max(...puzzle.cells.map(c => c.y));
-    assert.ok(maxX < gen.CONFIG.cols && maxY < gen.CONFIG.rows,
-      'board outside the lattice box: ' + (maxX + 1) + 'x' + (maxY + 1));
-    assert.ok(gen.CONFIG.cols <= 10 && gen.CONFIG.rows <= 13, 'lattice must stay phone-portrait sized');
+    // Everything lives inside the fixed 5 x 5 grid.
+    assert.equal(gen.CONFIG.size, 5, 'the grid is 5 x 5');
+    const capacity = gen.CONFIG.size * gen.CONFIG.size;
+    for (const cell of puzzle.allCells) {
+      assert.ok(cell.x >= 0 && cell.x < gen.CONFIG.size, 'cell x outside the grid: ' + cell.x);
+      assert.ok(cell.y >= 0 && cell.y < gen.CONFIG.size, 'cell y outside the grid: ' + cell.y);
+    }
+    assert.ok(puzzle.allCells.length <= capacity,
+      'more than ' + capacity + ' cells: ' + puzzle.allCells.length);
+    assert.equal(puzzle.cellsUsed, puzzle.allCells.length);
+    if (puzzle.allCells.length === capacity) fullGrids++;
   }
-  assert.ok(nodeMax <= 70, 'board unexpectedly dense: ' + nodeMax + ' nodes');
-  assert.ok(nodeMin >= 20, 'board unexpectedly sparse: ' + nodeMin + ' nodes');
+  assert.ok(nodeMax <= 25, 'board exceeded the grid: ' + nodeMax + ' nodes');
+  assert.ok(nodeMin >= 12, 'board unexpectedly sparse: ' + nodeMin + ' nodes');
+  // The grid should almost always be filled right up.
+  assert.ok(fullGrids >= PUZZLE_COUNT * 0.6,
+    'only ' + fullGrids + '/' + PUZZLE_COUNT + ' puzzles filled all 25 cells');
+});
+
+test('phase-2 saturation prefilter is a correct multiset-subset test', () => {
+  const grid = new Map([['a', 2], ['b', 1], ['t', 1]]);
+  assert.equal(gen.multisetFits('bat', grid), true);
+  assert.equal(gen.multisetFits('tab', grid), true);
+  assert.equal(gen.multisetFits('abat', grid), true, 'two a\'s are available');
+  assert.equal(gen.multisetFits('aaab', grid), false, 'only two a\'s exist');
+  assert.equal(gen.multisetFits('bb', grid), false, 'only one b exists');
+  assert.equal(gen.multisetFits('cat', grid), false, 'c is not on the grid');
+  assert.equal(gen.multisetFits('', grid), true);
+
+  // Against real boards: every word placed must pass its own grid's filter.
+  for (let i = 0; i < 20; i++) {
+    const { puzzle } = makePuzzle(150000 + i);
+    const counts = new Map();
+    for (const cell of puzzle.allCells) counts.set(cell.letter, (counts.get(cell.letter) || 0) + 1);
+    for (const word of puzzle.words) {
+      assert.ok(gen.multisetFits(word.text, counts),
+        '"' + word.text + '" is placed but fails the multiset filter');
+    }
+  }
 });
 
 test('every word is findable along shown edges from the start', () => {
@@ -331,6 +362,58 @@ test('solving every word wins the game and reports the counter', () => {
   assert.equal(game.elapsedMs, 45000, 'the stopwatch stops when the puzzle is solved');
 });
 
+test('the game ends if and only if every normal word is solved and the board is empty', () => {
+  for (let i = 0; i < 60; i++) {
+    const { puzzle, rng } = makePuzzle(950000 + i);
+    const dict = engine.buildDict(EXTRA_WORDS.join(' '));
+    const game = engine.createGame({ puzzle: puzzle, dict: dict });
+    const order = gen.shuffled(puzzle.words.map((_w, idx) => idx), rng);
+
+    for (let step = 0; step < order.length; step++) {
+      const word = puzzle.words[order[step]];
+      const isLast = step === order.length - 1;
+
+      // Before the last word the board must still hold letters.
+      assert.ok(puzzle.cells.length > 0, 'board emptied before the last word');
+      assert.equal(game.status, 'playing', 'game ended early');
+
+      // Time passing never ends the game, however much of it passes.
+      engine.tick(game, 600000);
+      assert.equal(game.status, 'playing', 'the stopwatch must never end the game');
+
+      // Extras never end the game either.
+      const puzzleTexts = new Set(puzzle.words.map(w => w.text));
+      const extra = EXTRA_WORDS.find(w => !puzzleTexts.has(w) && !game.extraWords.some(e => e.word === w));
+      if (extra) {
+        engine.submitWord(game, extra);
+        assert.equal(game.status, 'playing', 'an extra word ended the game');
+        assert.ok(puzzle.cells.length > 0, 'an extra word removed letters from the board');
+      }
+
+      const result = engine.submitWord(game, word.text);
+      assert.equal(result.type, 'required');
+
+      // THE biconditional, checked at this exact moment.
+      const allSolved = puzzle.words.every(w => w.found);
+      const boardEmpty = puzzle.cells.length === 0 && puzzle.edges.length === 0;
+      assert.equal(allSolved, boardEmpty,
+        'board emptiness must track solving every normal word (step ' + step + ')');
+      assert.equal(game.status === 'won', allSolved,
+        'win state must trigger exactly when the last normal word is solved');
+      assert.equal(result.solved, allSolved);
+      assert.equal(allSolved, isLast, 'the win must land on the final word, no earlier');
+    }
+
+    assert.equal(game.status, 'won');
+    assert.equal(engine.solvedCount(game), puzzle.words.length);
+    assert.equal(puzzle.cells.length, 0);
+    assert.equal(puzzle.edges.length, 0);
+    // There is no other end condition: nothing can be submitted afterwards.
+    assert.equal(engine.submitWord(game, EXTRA_WORDS[0]).type, 'inactive');
+    assert.equal(engine.tick(game, 999999), false);
+  }
+});
+
 test('the longest word is reported through the result so the HUD can celebrate', () => {
   const { game, puzzle } = newGame(900006);
   const long = puzzle.words.find(w => w.isLong);
@@ -377,8 +460,9 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
       longWords: realData.ZAN_COMMON_LONG
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
-    assert.ok(puzzle.words.length >= 15 && puzzle.words.length <= 20,
+    assert.ok(puzzle.words.length >= 10 && puzzle.words.length <= 16,
       'real-data puzzle has ' + puzzle.words.length + ' words');
+    assert.ok(puzzle.allCells.length <= 25, 'real-data puzzle exceeded the 5 x 5 grid');
     assert.equal(puzzle.words.filter(w => w.isLong).length, 1);
     assertBoardHealthy(puzzle, 'on real data');
 

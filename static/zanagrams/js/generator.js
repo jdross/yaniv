@@ -2,10 +2,16 @@
  *
  * MODEL
  * -----
- * A puzzle is 15-20 hidden words that SHARE letters. Every word owns a
- * canonical path: a self-avoiding sequence of 8-adjacent cells on a square
- * lattice, one cell per letter. Cells are shared between words whenever the
- * letters match.
+ * A puzzle is 10-16 hidden words packed into a FIXED 5 x 5 grid (<= 25 letter
+ * cells). Every word owns a canonical path: a self-avoiding sequence of
+ * 8-adjacent cells, one cell per letter. Cells are shared between words
+ * whenever the letters match. Exactly one word is the 8-11 letter "base" word.
+ *
+ * Construction runs in three phases inside the grid:
+ *   0. snake the base word across the 5 x 5,
+ *   1. grow with 4-7 letter words that reuse cells and add few new ones,
+ *   2. saturate: scan the vocabulary for words routable with ZERO new cells.
+ * Restarts keep the best-scoring board (fuller grid, more sharing, more words).
  *
  * The board graph shown to the player is EXACTLY the union of the remaining
  * (unfound) words' canonical paths:
@@ -33,22 +39,21 @@
    * Tunables
    * ------------------------------------------------------------------ */
   const CONFIG = {
-    cols: 8,                  // lattice width  (phone portrait board)
-    rows: 13,                 // lattice height
-    minWords: 15,
-    maxWords: 20,
-    relaxedMinWords: 13,      // only used if restarts are exhausted
+    size: 5,                  // THE grid: every puzzle lives inside 5 x 5
+    minWords: 10,             // hard floor for the solvable set
+    maxWords: 16,             // cap for the solvable set
     longMin: 8,
     longMax: 11,
-    maxNodes: 64,             // board node budget — forces words to share
-    softNodes: 50,            // below this, routing may spend new cells freely
     regularMin: 4,
     regularMax: 7,
-    candidateAttempts: 420,   // sampled words per generation pass
-    routeBudget: 1400,        // DFS steps for the preferred (reuse >= 2) route
-    routeBudgetRelaxed: 700,  // DFS steps for the fallback (reuse >= 1) route
-    longRouteBudget: 9000,
-    restarts: 6
+    growAttempts: 260,        // sampled words during the growth phase
+    saturateScan: 4200,       // vocabulary entries scanned during saturation
+    routeBudget: 1200,        // DFS steps for the preferred (reuse >= 2) route
+    routeBudgetRelaxed: 600,  // DFS steps for the fallback (reuse >= 1) route
+    saturateBudget: 260,      // DFS steps for a zero-new-cell route
+    longRouteBudget: 12000,
+    restarts: 26,
+    timeBudgetMs: 150         // total wall-clock budget for polish restarts
   };
 
   /* ------------------------------------------------------------------ *
@@ -480,13 +485,9 @@
       // Empty cells hugging the cluster (or, for the first word, near centre).
       const seen = new Set();
       if (board.occ.size === 0) {
-        const cx = Math.floor(board.cols / 2);
-        const cy = Math.floor(board.rows / 2);
-        for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-            const x = cx + dx;
-            const y = cy + dy;
-            if (x < 0 || y < 0 || x >= board.cols || y >= board.rows) continue;
+        // The grid is tiny: every cell is a plausible start for the snake.
+        for (let x = 0; x < board.cols; x++) {
+          for (let y = 0; y < board.rows; y++) {
             starts.push({ x: x, y: y, letter: text[0], reuse: false, score: rng() });
           }
         }
@@ -505,7 +506,7 @@
       }
     }
     starts.sort((a, b) => b.score - a.score);
-    const limited = starts.slice(0, 20);
+    const limited = starts.slice(0, 26);
 
     for (const start of limited) {
       path.length = 0;
@@ -575,51 +576,116 @@
     return false;
   }
 
-  /* ------------------------------------------------------------------ *
-   * Generation
-   * ------------------------------------------------------------------ */
-  function buildBoard(pools, rng, target, cols, rows, maxNodes) {
-    const board = createBoard(cols, rows);
+  /**
+   * Saturation prefilter: the word's letter multiset must be a SUBSET of the
+   * grid's letter multiset. A path is self-avoiding, so each letter instance
+   * needs its own cell — a word needing two E's cannot be routed on a grid
+   * holding one. Necessary (not sufficient); the tiny DFS decides the rest.
+   */
+  function multisetFits(word, letterCounts) {
+    const need = new Map();
+    for (const ch of word) {
+      const n = (need.get(ch) || 0) + 1;
+      if (n > (letterCounts.get(ch) || 0)) return false;
+      need.set(ch, n);
+    }
+    return true;
+  }
 
-    // 1. The one long word, laid as a compact self-avoiding path.
-    let longText = null;
-    for (let attempt = 0; attempt < 24 && !longText; attempt++) {
+  /* ------------------------------------------------------------------ *
+   * Generation — a fixed 5 x 5 grid, built in three phases
+   * ------------------------------------------------------------------ */
+
+  /** Phase 0: lay the 8-11 letter base word as a self-avoiding snake. */
+  function placeBaseWord(board, pools, rng) {
+    for (let attempt = 0; attempt < 26; attempt++) {
       const candidate = pools.long[Math.floor(rng() * pools.long.length)];
       const path = routeWord(board, candidate, rng, 0, CONFIG.longRouteBudget, null);
       if (path) {
         commitPath(board, candidate, path);
-        longText = candidate;
+        return candidate;
       }
     }
-    if (!longText) return null;
+    return null;
+  }
 
-    // 2. Regular words until the target count.
-    const used = new Set([longText]);
+  /**
+   * Phase 1 (grow): add 4-7 letter words, strongly preferring routes that
+   * reuse >= 2 existing cells and add few new ones, until the grid is full or
+   * the word cap is reached.
+   */
+  function growWords(board, pools, rng, used, cap) {
+    const capacity = board.cols * board.rows;
     let attempts = 0;
-    while (board.paths.length < target && attempts < CONFIG.candidateAttempts) {
+    let sinceGrowth = 0;
+    while (board.paths.length < cap && attempts < CONFIG.growAttempts) {
       attempts++;
       const candidate = pools.regular[Math.floor(rng() * pools.regular.length)];
-      if (used.has(candidate) || candidate === longText) continue;
-      // Bias toward sharing, but let a few outsiders through so we never stall.
-      if (!sharesEnough(candidate, board.letterCounts) && rng() < 0.85) continue;
-      // Node budget: the tighter the board gets, the more a word must share.
-      const room = maxNodes - board.occ.size;
-      if (room <= 0 && board.paths.length >= 1) {
-        // Board is full: only fully-shared words may still join.
-        const full = routeWord(board, candidate, rng, candidate.length, CONFIG.routeBudget, 0);
-        if (full) { commitPath(board, candidate, full); used.add(candidate); }
-        continue;
-      }
-      const maxNew = board.occ.size < CONFIG.softNodes
-        ? Math.min(candidate.length - 2, room)
-        : Math.min(Math.max(1, Math.ceil(candidate.length / 2) - 1), room);
+      if (used.has(candidate)) continue;
+      if (!sharesEnough(candidate, board.letterCounts) && rng() < 0.8) continue;
+      const free = capacity - board.occ.size;
+      if (free <= 0) break;                       // grid full: phase 2 takes over
+      const before = board.occ.size;
+      // Prefer adding as few new cells as we can get away with.
+      const maxNew = Math.min(candidate.length - 2, free);
       let path = routeWord(board, candidate, rng, 2, CONFIG.routeBudget, maxNew);
       if (!path) path = routeWord(board, candidate, rng, 1, CONFIG.routeBudgetRelaxed, maxNew);
       if (!path) continue;
       commitPath(board, candidate, path);
       used.add(candidate);
+      sinceGrowth = board.occ.size > before ? 0 : sinceGrowth + 1;
+      if (sinceGrowth > 6 && board.occ.size >= capacity - 1) break;
     }
+  }
+
+  /**
+   * Phase 2 (saturate): scan the vocabulary for words routable with ZERO new
+   * cells — pure reuse of what is already on the grid — until the cap is hit.
+   * Each DFS runs over <= 25 cells, so a full vocabulary scan is cheap; it is
+   * still time-boxed and offset-randomized so different puzzles saturate
+   * differently.
+   */
+  function saturate(board, pools, rng, used, cap, deadline) {
+    const pool = pools.regular;
+    const limit = Math.min(pool.length, CONFIG.saturateScan);
+    const offset = Math.floor(rng() * pool.length);
+    let scanned = 0;
+    for (let i = 0; i < limit && board.paths.length < cap; i++) {
+      const candidate = pool[(offset + i) % pool.length];
+      if (used.has(candidate)) continue;
+      if (!multisetFits(candidate, board.letterCounts)) continue;
+      const path = routeWord(board, candidate, rng, candidate.length, CONFIG.saturateBudget, 0);
+      if (path) {
+        commitPath(board, candidate, path);
+        used.add(candidate);
+      }
+      // Only real DFS runs cost anything; check the clock occasionally.
+      if ((++scanned & 31) === 0 && deadline && Date.now() > deadline) break;
+    }
+  }
+
+  function buildBoard(pools, rng, cap, size, deadline) {
+    const board = createBoard(size, size);
+    const longText = placeBaseWord(board, pools, rng);
+    if (!longText) return null;
+    const used = new Set([longText]);
+    growWords(board, pools, rng, used, cap);
+    saturate(board, pools, rng, used, cap, deadline);
     return { board: board, longText: longText };
+  }
+
+  /**
+   * Score a candidate board. Word count is a hard requirement handled by the
+   * caller; among valid boards we prefer fuller grids, more letter sharing
+   * (letters placed per cell used) and more words.
+   */
+  function scoreBoard(board, minWords, maxWords) {
+    const cells = board.occ.size;
+    const words = board.paths.length;
+    const letters = board.paths.reduce((sum, p) => sum + p.path.length, 0);
+    const sharePerCell = cells ? letters / cells : 0;
+    const base = words >= minWords ? 1000 : words * 8;
+    return base + cells * 6 + sharePerCell * 14 + Math.min(words, maxWords) * 3;
   }
 
   function materialize(board, longText) {
@@ -637,9 +703,17 @@
       found: false,
       isLong: p.text === longText
     }));
-    // Longest word first in the list; the rest sorted for stable display.
+    // The base word leads the list.
     words.sort((a, b) => (b.isLong ? 1 : 0) - (a.isLong ? 1 : 0));
-    const puzzle = { allCells: allCells, cells: [], edges: [], words: words, longWord: longText };
+    const puzzle = {
+      allCells: allCells,
+      cells: [],
+      edges: [],
+      words: words,
+      longWord: longText,
+      gridSize: board.cols,
+      cellsUsed: allCells.length
+    };
     computeUnion(puzzle);
     recenter(puzzle);
     return puzzle;
@@ -649,28 +723,36 @@
     const opts = options || {};
     const rng = opts.rng || createRng(Math.floor(Math.random() * 0xffffffff));
     const pools = resolvePools(opts);
-    const cols = opts.cols || CONFIG.cols;
-    const rows = opts.rows || CONFIG.rows;
+    const size = opts.size || CONFIG.size;
     const minWords = opts.minWords || CONFIG.minWords;
-    const maxWords = opts.maxWords || CONFIG.maxWords;
-    const relaxedMin = opts.relaxedMinWords != null ? opts.relaxedMinWords : CONFIG.relaxedMinWords;
+    // Vary the per-puzzle target so games don't all land on the 16-word cap.
+    const maxWords = opts.maxWords ||
+      (CONFIG.maxWords - 4 + Math.floor(rng() * 5)); // 12..16
     const restarts = opts.restarts || CONFIG.restarts;
+    const capacity = size * size;
+    const started = Date.now();
+    const deadline = started + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
 
     let best = null;
+    let bestScore = -Infinity;
     for (let attempt = 0; attempt < restarts; attempt++) {
-      const target = minWords + Math.floor(rng() * (maxWords - minWords + 1));
-      const built = buildBoard(pools, rng, target, cols, rows, opts.maxNodes || CONFIG.maxNodes);
+      const built = buildBoard(pools, rng, maxWords, size, deadline);
       if (!built) continue;
-      const count = built.board.paths.length;
-      if (!best || count > best.board.paths.length) best = built;
-      if (count >= minWords) return materialize(built.board, built.longText);
+      const score = scoreBoard(built.board, minWords, maxWords);
+      if (score > bestScore) {
+        bestScore = score;
+        best = built;
+      }
+      const words = built.board.paths.length;
+      // A full grid with a healthy word set is as good as it gets — stop early.
+      if (words >= minWords && built.board.occ.size >= capacity) break;
+      // Past the polish budget, the first acceptable board wins. Word count is
+      // never relaxed here; only the hunt for a fuller grid is cut short.
+      if (words >= minWords && Date.now() > deadline) break;
     }
-    // Relaxed acceptance rather than looping forever.
-    if (best && best.board.paths.length >= Math.min(relaxedMin, minWords)) {
-      return materialize(best.board, best.longText);
-    }
-    if (best && best.board.paths.length >= 2) return materialize(best.board, best.longText);
-    return null;
+    if (!best) return null;
+    if (best.board.paths.length < minWords && best.board.paths.length < 2) return null;
+    return materialize(best.board, best.longText);
   }
 
   /* ------------------------------------------------------------------ *
@@ -835,6 +917,8 @@
     isTraceable: isTraceable,
     isValidTrace: isValidTrace,
     traceToWord: traceToWord,
+    multisetFits: multisetFits,
+    scoreBoard: scoreBoard,
     generatePuzzle: generatePuzzle,
     collapse: collapse,
     recenter: recenter,

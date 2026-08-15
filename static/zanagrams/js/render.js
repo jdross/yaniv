@@ -4,7 +4,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const STEP = 100;
-  const PAD = 56;
+  const PAD = 52;
 
   function el(name, attrs) {
     const node = document.createElementNS(SVG_NS, name);
@@ -79,8 +79,8 @@
     function makeNode(cell) {
       const g = el('g', { class: 'node' });
       g.dataset.id = String(cell.id);
-      const hit = el('circle', { class: 'node-hit', r: 46, cx: 0, cy: 0 });
-      const disc = el('circle', { class: 'node-disc', r: 36, cx: 0, cy: 0 });
+      const hit = el('circle', { class: 'node-hit', r: 50, cx: 0, cy: 0 });
+      const disc = el('circle', { class: 'node-disc', r: 40, cx: 0, cy: 0 });
       const text = el('text', { class: 'node-letter', x: 0, y: 1, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
       text.textContent = cell.letter.toUpperCase();
       g.appendChild(hit);
