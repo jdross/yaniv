@@ -365,69 +365,86 @@ body {
   display: block;
 }
 
-/* ---- edges ---- */
+/* ---- lanes (connections as glass tubes with a liquid channel) ---- */
 
-.edge {
-  stroke: var(--edge);
-  stroke-width: 9;
+.lane { transition: opacity .3s ease; }
+.lane.fresh { opacity: 0; }
+
+/* Soft outer glass wall. */
+.lane-glass {
+  stroke: rgba(255, 210, 170, .085);
+  stroke-width: 15;
   stroke-linecap: round;
-  transition: stroke .18s ease, opacity .3s ease, stroke-width .18s ease;
+  transition: stroke .25s ease;
+}
+
+/* Recessed channel inside the tube — kept close to the glass tone so the
+ * lane reads as a soft groove, not a drawn outline. */
+.lane-bore {
+  stroke: rgba(24, 10, 20, .38);
+  stroke-width: 9.5;
+  stroke-linecap: round;
+}
+
+/* The liquid: hidden until the trace pours into the lane. pathLength=1 so
+ * dashoffset 1 -> 0 is a directional fill from the path's start. */
+.lane-liquid {
+  stroke: #ffbb57;
+  stroke-width: 7.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  transition:
+    stroke-dashoffset .17s cubic-bezier(.3, .6, .3, 1),
+    opacity .1s ease;
+}
+
+.lane.filled .lane-liquid {
+  stroke-dashoffset: 0.001;
   opacity: 1;
 }
 
-.edge.fresh { opacity: 0; }
+.lane.filled .lane-glass { stroke: rgba(255, 190, 120, .2); }
 
-.edge.traced {
-  stroke: var(--edge-hot);
-  stroke-width: 14;
+/* A solved word's liquid runs downhill out of the lane. */
+.lane.draining .lane-liquid {
+  stroke-dashoffset: 1;
+  opacity: 1;
+  transition: stroke-dashoffset .4s cubic-bezier(.5, 0, .8, .4), opacity .1s ease;
 }
 
-/* Molten under-glow for whichever edges the finger is riding. */
-.edge-glow {
-  stroke: var(--coral);
-  stroke-width: 22;
-  stroke-linecap: round;
-  opacity: 0;
-  filter: blur(7px);
-  transition: opacity .16s ease;
-  pointer-events: none;
+.lane.melting {
+  animation: lane-melt .6s ease-in .18s forwards;
 }
 
-.edge-glow.traced { opacity: .75; }
-
-.edge.melting {
-  animation: edge-melt .42s ease-in forwards;
-}
-
-@keyframes edge-melt {
+@keyframes lane-melt {
   0% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(16px); stroke-width: 3; }
+  100% { opacity: 0; transform: translateY(14px); }
 }
 
-/* ---- rubber band ---- */
+/* ---- rubber band: last orb -> fingertip ---- */
 
-.trace-line {
+.band {
   stroke: var(--honey);
-  stroke-width: 16;
+  stroke-width: 12;
   stroke-linecap: round;
-  stroke-linejoin: round;
   opacity: 0;
   pointer-events: none;
 }
 
-.trace-line.visible { opacity: .95; }
+.band.visible { opacity: .92; }
 
-.trace-glow {
+.band-glow {
   stroke: var(--ember);
-  stroke-width: 30;
+  stroke-width: 26;
   stroke-linecap: round;
-  stroke-linejoin: round;
   opacity: 0;
   pointer-events: none;
-  filter: blur(9px);
+  filter: blur(8px);
 }
 
-.trace-glow.visible { opacity: .7; }
+.band-glow.visible { opacity: .6; }
 
 .trace-tip {
   opacity: 0;
@@ -437,7 +454,7 @@ body {
 
 .trace-tip.visible { opacity: .9; }
 
-/* ---- letter tiles ---- */
+/* ---- letter orbs ---- */
 
 .node-hit { fill: transparent; }
 
@@ -446,49 +463,64 @@ body {
   will-change: transform;
 }
 
-.node-disc {
-  stroke: rgba(255, 198, 140, .3);
-  stroke-width: 2.5;
-  transition: stroke .16s ease;
-}
+.node-contact { opacity: .85; }
 
-.node-shadow { opacity: .8; }
-
-.node-gloss {
-  opacity: .5;
-  pointer-events: none;
-  transition: opacity .2s ease;
-}
-
-.node-glow {
+.node-aura {
   opacity: 0;
   transition: opacity .18s ease;
   pointer-events: none;
 }
 
+/* Liquid rises from the bottom of the glass when the orb locks. */
+.node-liquid {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transform: scaleY(0);
+  transition: transform .26s cubic-bezier(.3, .7, .25, 1);
+  will-change: transform;
+}
+
+.node-sheen {
+  opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+
+.node-spec { opacity: .85; pointer-events: none; }
+.node-rim { opacity: .8; pointer-events: none; }
+
 .node-letter {
-  fill: var(--ink);
+  fill: #ffeeda;
   font-size: 46px;
   font-weight: 800;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   pointer-events: none;
-  transition: fill .16s ease;
+  transition: fill .18s ease;
 }
 
-/* A few tiles breathe, very slowly and very slightly. */
-.node.shimmer .node-gloss {
-  animation: shimmer-breathe 6.5s ease-in-out infinite;
+.node-letter-shade {
+  fill: rgba(24, 6, 12, .55);
+  font-size: 46px;
+  font-weight: 800;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  pointer-events: none;
+}
+
+/* A few orbs breathe, very slowly and very slightly. */
+.node.shimmer .node-sheen {
+  animation: shimmer-breathe 7s ease-in-out infinite;
 }
 
 @keyframes shimmer-breathe {
-  0%, 100% { opacity: .42; transform: scale(1); }
-  50% { opacity: .78; transform: scale(1.1); }
+  0%, 100% { opacity: .45; transform: scale(1); }
+  50% { opacity: .8; transform: scale(1.08); }
 }
 
-.node.traced .node-disc { stroke: rgba(255, 240, 210, .85); }
-.node.traced .node-gloss { opacity: .8; animation: none; }
-.node.traced .node-glow { opacity: .95; }
-.node.traced .node-letter { fill: #3a1008; }
+.node.traced .node-liquid { transform: scaleY(1); }
+.node.traced .node-aura { opacity: .9; }
+.node.traced .node-sheen { opacity: .85; animation: none; }
+.node.traced .node-letter { fill: #401307; }
+.node.traced .node-letter-shade { fill: rgba(255, 240, 210, .4); }
 
 /* Squash-and-spring the instant a tile locks into the trace. */
 .node.lock .node-inner { animation: tile-lock .34s cubic-bezier(.22, .9, .3, 1.6); }
@@ -519,7 +551,8 @@ body {
   100% { transform: translateY(64px) scale(.3, 1.9); opacity: 0; }
 }
 
-.node.melting .node-letter { animation: letter-smear .72s ease-in forwards; }
+.node.melting .node-letter,
+.node.melting .node-letter-shade { animation: letter-smear .72s ease-in forwards; }
 
 @keyframes letter-smear {
   0% { opacity: 1; }
@@ -527,7 +560,13 @@ body {
   100% { opacity: 0; }
 }
 
-.node.melting .node-disc { stroke: rgba(255, 220, 170, .8); }
+/* Melting orbs read as full of liquid the instant they let go. */
+.node.melting .node-liquid {
+  transform: scaleY(1);
+  transition: none;
+}
+
+.node.melting .node-aura { opacity: .7; }
 
 /* Survivors of a solved word give a happy little bounce. */
 .node.kept .node-inner { animation: tile-bounce .62s cubic-bezier(.2, .9, .25, 1.5); }
@@ -539,10 +578,10 @@ body {
   100% { transform: translateY(0) scale(1); }
 }
 
-.node.bonus .node-glow { opacity: 1; }
+.node.bonus .node-aura { opacity: 1; }
 .node.bonus .node-inner { animation: tile-bounce .6s cubic-bezier(.2, .9, .25, 1.5); }
 
-.node.wrong .node-disc { stroke: var(--bad); stroke-width: 5; }
+.node.wrong .node-letter { fill: var(--bad); }
 .node.wrong .node-inner { animation: tile-wrong .45s ease; }
 
 @keyframes tile-wrong {
@@ -749,9 +788,11 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .ambient i { animation: none; }
-  .node.shimmer .node-gloss { animation: none; }
+  .node.shimmer .node-sheen { animation: none; }
   .drop, .ember, .sheet-burst i { display: none; }
   .node.melting .node-inner { animation: none; opacity: 0; transition: opacity .2s ease; }
+  .node-liquid { transition: none; }
+  .lane-liquid { transition: opacity .15s ease; }
   * {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
@@ -798,7 +839,8 @@ body {
   100% { transform: scale(1); }
 }
 
-.node.again .node-disc { fill: url(#lmDiscHot); opacity: .8; }
+.node.again .node-aura { opacity: .65; }
+.node.again .node-liquid { transform: scaleY(1); }
 
 @media (prefers-reduced-motion: reduce) {
   .current-text.again,
