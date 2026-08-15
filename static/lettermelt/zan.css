@@ -758,3 +758,49 @@ body {
     transition-duration: .01ms !important;
   }
 }
+
+/* ---------------------- Trace feedback (behavioural) ----------------------
+ * Three distinct outcomes, deliberately not lumped together:
+ *   .again  already found  -> neutral amber acknowledgement, no shake
+ *   .short  under 4 letters -> quiet nudge
+ *   .bad    not a word      -> the red shake
+ * Styling here is intentionally plain; the visual pass will redo it. */
+
+.current-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.current-hint.visible { opacity: .85; }
+
+.current-text.again {
+  color: var(--warn);
+  opacity: .75;
+  text-shadow: none;
+  animation: settle .45s ease;
+}
+
+.current-text.short {
+  color: var(--muted);
+  opacity: .8;
+  text-shadow: none;
+  animation: settle .35s ease;
+}
+
+@keyframes settle {
+  0% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+.node.again .node-disc { fill: url(#lmDiscHot); opacity: .8; }
+
+@media (prefers-reduced-motion: reduce) {
+  .current-text.again,
+  .current-text.short { animation: none; }
+}

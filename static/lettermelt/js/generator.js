@@ -42,6 +42,13 @@
     size: 5,                  // THE grid: every puzzle lives inside 5 x 5
     minWords: 10,             // hard floor for the solvable set
     maxWords: 16,             // cap for the solvable set
+    // The solvable set is DERIVED by enumeration, not by construction: we lay
+    // down just enough words to shape the graph, then promote every common
+    // word the finished board can spell. A denser construction spells far more
+    // common words than the target allows (12 laid words -> ~27 traceable
+    // commons), so construction stays deliberately sparse.
+    constructMin: 5,
+    constructMax: 7,
     longMin: 8,
     longMax: 11,
     regularMin: 4,
@@ -593,6 +600,121 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * Lexicon — dictionary + prefix index, built ONCE and reused
+   * ------------------------------------------------------------------ */
+
+  /**
+   * A lexicon answers three questions in O(1):
+   *   has(word)      is this a real word?
+   *   isCommon(word) is it a word every player knows? (normal, never an extra)
+   *   isPrefix(str)  could any real word start with this? (enumeration pruning)
+   *
+   * The prefix index is capped at PREFIX_DEPTH characters: the full prefix set
+   * of a 220k-word list costs tens of megabytes, while the first few letters
+   * do virtually all of the pruning work. Past that depth the DFS is already
+   * confined to a handful of self-avoiding paths on <= 25 nodes.
+   */
+  const PREFIX_DEPTH = 5;
+
+  function buildLexicon(dictRaw, commonList, longList) {
+    const words = new Set();
+    const prefixes = new Set();
+    const common = new Set();
+
+    function addWord(w) {
+      if (!w) return;
+      words.add(w);
+      const n = Math.min(PREFIX_DEPTH, w.length);
+      for (let i = 1; i <= n; i++) prefixes.add(w.slice(0, i));
+    }
+
+    if (typeof dictRaw === 'string' && dictRaw.length) {
+      for (const w of dictRaw.split(/\s+/)) if (w) addWord(w.toLowerCase());
+    } else if (Array.isArray(dictRaw)) {
+      for (const w of dictRaw) if (w) addWord(String(w).toLowerCase());
+    }
+    for (const list of [commonList, longList]) {
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        if (!raw) continue;
+        const w = String(raw).toLowerCase();
+        addWord(w);
+        common.add(w);
+      }
+    }
+    return {
+      size: words.size,
+      commonSize: common.size,
+      has: w => words.has(w),
+      isCommon: w => common.has(w),
+      isPrefix: p => (p.length > PREFIX_DEPTH ? true : prefixes.has(p)),
+      words: words,
+      common: common
+    };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Enumeration — every word the board can actually spell
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Walk every self-avoiding path along the SHOWN edges and collect the ones
+   * that spell a real word. This is the ground truth of "words that exist in
+   * the puzzle": if the player can trace it, it is in here.
+   *
+   * Enumeration is monotone over a game: solving a word only removes nodes and
+   * edges, so no new word can ever become traceable later.
+   *
+   * Returns Map(word -> route as an array of cell ids).
+   */
+  function enumerateWords(cells, edges, lexicon, options) {
+    const opts = options || {};
+    const minLen = opts.minLength || 4;
+    const maxLen = opts.maxLength || 11;
+    const adj = adjacencyMap(cells, edges);
+    const byId = new Map(cells.map(c => [c.id, c]));
+    const found = new Map();
+    const path = [];
+    const used = new Set();
+
+    function walk(id, str) {
+      path.push(id);
+      used.add(id);
+      if (str.length >= minLen && !found.has(str) && lexicon.has(str)) {
+        found.set(str, path.slice());
+      }
+      if (str.length < maxLen) {
+        for (const next of adj.get(id) || []) {
+          if (used.has(next)) continue;
+          const cell = byId.get(next);
+          if (!cell) continue;
+          const nextStr = str + cell.letter;
+          if (!lexicon.isPrefix(nextStr)) continue;
+          walk(next, nextStr);
+        }
+      }
+      path.pop();
+      used.delete(id);
+    }
+
+    for (const cell of cells) {
+      if (!lexicon.isPrefix(cell.letter)) continue;
+      walk(cell.id, cell.letter);
+    }
+    return found;
+  }
+
+  /** Just the common (normal-set-worthy) words the board can spell. */
+  function enumerateCommon(cells, edges, lexicon, options) {
+    const all = enumerateWords(cells, edges, lexicon, options);
+    const out = new Map();
+    for (const [word, route] of all) {
+      if (lexicon.isCommon(word)) out.set(word, route);
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
    * Generation — a fixed 5 x 5 grid, built in three phases
    * ------------------------------------------------------------------ */
 
@@ -675,17 +797,29 @@
   }
 
   /**
-   * Score a candidate board. Word count is a hard requirement handled by the
-   * caller; among valid boards we prefer fuller grids, more letter sharing
-   * (letters placed per cell used) and more words.
+   * Score a finished candidate. Word count and the single-base-word rule are
+   * hard requirements handled by the caller; among valid boards we prefer
+   * fuller grids, more letter sharing, a word count sitting comfortably inside
+   * the target band, and a richer supply of rare words to find as extras.
    */
-  function scoreBoard(board, minWords, maxWords) {
+  function scoreBoard(board, minWords, maxWords, stats) {
     const cells = board.occ.size;
-    const words = board.paths.length;
     const letters = board.paths.reduce((sum, p) => sum + p.path.length, 0);
     const sharePerCell = cells ? letters / cells : 0;
-    const base = words >= minWords ? 1000 : words * 8;
-    return base + cells * 6 + sharePerCell * 14 + Math.min(words, maxWords) * 3;
+    if (!stats) {
+      // Legacy shape: score the construction alone.
+      const words = board.paths.length;
+      const base = words >= minWords ? 1000 : words * 8;
+      return base + cells * 6 + sharePerCell * 14 + Math.min(words, maxWords) * 3;
+    }
+    const words = stats.normalCount;
+    const mid = (minWords + maxWords) / 2;
+    const centred = Math.max(0, 8 - Math.abs(words - mid));   // 0..8
+    return 1000
+      + cells * 8
+      + sharePerCell * 12
+      + centred * 9
+      + Math.min(stats.extraCount, 90) * 0.4;
   }
 
   function materialize(board, longText) {
@@ -703,7 +837,6 @@
       found: false,
       isLong: p.text === longText
     }));
-    // The base word leads the list.
     words.sort((a, b) => (b.isLong ? 1 : 0) - (a.isLong ? 1 : 0));
     const puzzle = {
       allCells: allCells,
@@ -719,40 +852,127 @@
     return puzzle;
   }
 
+  /**
+   * Turn a constructed board into a finished puzzle.
+   *
+   * The normal (solvable) set is defined by COMMONNESS, not by construction
+   * history: every common word the board can spell becomes a normal word, so a
+   * player who traces "find" or "change" solves a word instead of being handed
+   * a bonus. Extras are exclusively the rare dictionary words.
+   *
+   * Words that were laid down keep their constructed path; promoted words take
+   * a route found by the enumerator. Both live inside the constructed graph, so
+   * the union of the normal set is exactly that graph — which is what makes
+   * enumeration valid for the whole game.
+   *
+   * Returns null when the board breaks a hard rule (word count outside the
+   * band, or a second 8+ letter common word that would rival the base word).
+   */
+  function finishPuzzle(board, longText, lexicon, minWords, maxWords) {
+    const puzzle = materialize(board, longText);
+    const commons = enumerateCommon(puzzle.cells, puzzle.edges, lexicon);
+
+    // The base word must be the one and only long word in the solvable set.
+    for (const word of commons.keys()) {
+      if (word.length >= CONFIG.longMin && word !== longText) return null;
+    }
+    if (!commons.has(longText)) return null;
+    if (commons.size < minWords || commons.size > maxWords) {
+      return { rejected: true, normalCount: commons.size, puzzle: null };
+    }
+
+    const placed = new Map(puzzle.words.map(w => [w.text, w]));
+    const words = [];
+    for (const [text, route] of commons) {
+      const existing = placed.get(text);
+      words.push(existing || {
+        text: text,
+        cellIds: route.slice(),
+        found: false,
+        isLong: text === longText,
+        promoted: true
+      });
+    }
+    // Any laid-down word must also be common, so it must have been enumerated;
+    // if the vocabulary ever drifts, keep it rather than orphan its cells.
+    for (const word of puzzle.words) {
+      if (!commons.has(word.text)) words.push(word);
+    }
+    words.sort((a, b) => (b.isLong ? 1 : 0) - (a.isLong ? 1 : 0));
+    puzzle.words = words;
+    computeUnion(puzzle);
+    recenter(puzzle);
+    puzzle.cellsUsed = puzzle.cells.length;
+    return { rejected: false, normalCount: words.length, puzzle: puzzle };
+  }
+
+  /* Lexicon cache: the prefix index costs ~120ms to build over the shipped
+   * dictionary, so it is built once per word-list identity and reused. */
+  let lexiconCache = null;
+  function resolveLexicon(opts, pools) {
+    if (opts.lexicon) return opts.lexicon;
+    const g = typeof globalThis !== 'undefined' ? globalThis : {};
+    const dictRaw = opts.dictRaw != null ? opts.dictRaw : (g.ZAN_DICT_RAW || '');
+    if (lexiconCache && lexiconCache.dictRaw === dictRaw &&
+        lexiconCache.regular === pools.regular && lexiconCache.long === pools.long) {
+      return lexiconCache.lexicon;
+    }
+    const lexicon = buildLexicon(dictRaw, pools.regular, pools.long);
+    lexiconCache = { dictRaw: dictRaw, regular: pools.regular, long: pools.long, lexicon: lexicon };
+    return lexicon;
+  }
+
   function generatePuzzle(options) {
     const opts = options || {};
     const rng = opts.rng || createRng(Math.floor(Math.random() * 0xffffffff));
     const pools = resolvePools(opts);
+    const lexicon = resolveLexicon(opts, pools);
     const size = opts.size || CONFIG.size;
     const minWords = opts.minWords || CONFIG.minWords;
-    // Vary the per-puzzle target so games don't all land on the 16-word cap.
-    const maxWords = opts.maxWords ||
-      (CONFIG.maxWords - 4 + Math.floor(rng() * 5)); // 12..16
+    const maxWords = opts.maxWords || CONFIG.maxWords;
     const restarts = opts.restarts || CONFIG.restarts;
     const capacity = size * size;
-    const started = Date.now();
-    const deadline = started + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
+    const deadline = Date.now() + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
+
+    // How many words to lay down before enumeration takes over. Nudged between
+    // attempts: too many laid words spells too many commons, too few spells too
+    // few, so the search walks itself into the band.
+    let construct = CONFIG.constructMin +
+      Math.floor(rng() * (CONFIG.constructMax - CONFIG.constructMin + 1));
 
     let best = null;
     let bestScore = -Infinity;
+    let attempts = 0;
+    let rejects = 0;
     for (let attempt = 0; attempt < restarts; attempt++) {
-      const built = buildBoard(pools, rng, maxWords, size, deadline);
+      attempts++;
+      const built = buildBoard(pools, rng, construct, size, deadline);
       if (!built) continue;
-      const score = scoreBoard(built.board, minWords, maxWords);
+      const result = finishPuzzle(built.board, built.longText, lexicon, minWords, maxWords);
+      if (!result) { rejects++; continue; }          // rival long word
+      if (result.rejected) {
+        rejects++;
+        if (result.normalCount > maxWords && construct > 3) construct--;
+        else if (result.normalCount < minWords && construct < CONFIG.constructMax + 2) construct++;
+        continue;
+      }
+      const score = scoreBoard(built.board, minWords, maxWords, {
+        normalCount: result.normalCount,
+        extraCount: 0
+      });
       if (score > bestScore) {
         bestScore = score;
-        best = built;
+        best = result.puzzle;
       }
-      const words = built.board.paths.length;
-      // A full grid with a healthy word set is as good as it gets — stop early.
-      if (words >= minWords && built.board.occ.size >= capacity) break;
-      // Past the polish budget, the first acceptable board wins. Word count is
-      // never relaxed here; only the hunt for a fuller grid is cut short.
-      if (words >= minWords && Date.now() > deadline) break;
+      if (result.puzzle.cells.length >= capacity) break;   // full grid: done
+      if (Date.now() > deadline) break;
     }
-    if (!best) return null;
-    if (best.board.paths.length < minWords && best.board.paths.length < 2) return null;
-    return materialize(best.board, best.longText);
+    if (best) {
+      best.attempts = attempts;
+      best.rejects = rejects;
+      return best;
+    }
+    return null;
   }
 
   /* ------------------------------------------------------------------ *
@@ -917,8 +1137,13 @@
     isTraceable: isTraceable,
     isValidTrace: isValidTrace,
     traceToWord: traceToWord,
+    PREFIX_DEPTH: PREFIX_DEPTH,
+    buildLexicon: buildLexicon,
+    enumerateWords: enumerateWords,
+    enumerateCommon: enumerateCommon,
     multisetFits: multisetFits,
     scoreBoard: scoreBoard,
+    finishPuzzle: finishPuzzle,
     generatePuzzle: generatePuzzle,
     collapse: collapse,
     recenter: recenter,

@@ -17,6 +17,7 @@
     longestText: $('longestText'),
     newGame: $('newGame'),
     current: $('currentText'),
+    currentHint: $('currentHint'),
     overlay: $('overlay'),
     sheetEmoji: $('sheetEmoji'),
     sheetTitle: $('sheetTitle'),
@@ -37,10 +38,15 @@
     ? window.ZAN_COMMON_LONG
     : Generator.FALLBACK_LONG;
 
-  const dict = Engine.buildDict(
+  // One lexicon for the whole session: the dictionary the engine validates
+  // against, the "common" set that decides normal-vs-extra, and the prefix
+  // index the generator enumerates with. Built once (~120ms) and reused.
+  const lexicon = Generator.buildLexicon(
     window.ZAN_DICT_RAW || '',
-    commonWords.concat(longWords, Generator.FALLBACK_COMMON, Generator.FALLBACK_LONG, Generator.FALLBACK_EXTRA)
+    commonWords.concat(Generator.FALLBACK_COMMON, Generator.FALLBACK_EXTRA),
+    longWords.concat(Generator.FALLBACK_LONG)
   );
+  const dict = lexicon.words;
 
   const renderer = window.ZanRender.create(els.board);
 
@@ -49,6 +55,7 @@
   let busy = false;
   let lastTick = 0;
   let rafId = null;
+  let hintTimer = null;
 
   /* ------------------------------ helpers ------------------------------ */
 
@@ -109,7 +116,17 @@
     window.setTimeout(() => els.timer.classList.remove('credited'), 700);
   }
 
+  /** Small one-line explanation under the traced word. */
+  function setHint(text) {
+    if (!els.currentHint) return;
+    els.currentHint.textContent = text || '';
+    els.currentHint.classList.toggle('visible', !!text);
+    if (hintTimer) window.clearTimeout(hintTimer);
+    if (text) hintTimer = window.setTimeout(() => setHint(''), 1100);
+  }
+
   function setCurrent(text, mood) {
+    if (!mood) setHint('');
     els.current.className = 'current-text' + (mood ? ' ' + mood : '');
     els.current.textContent = text ? text.toUpperCase() : '';
   }
@@ -232,6 +249,24 @@
       return;
     }
 
+    // Feedback is split by MEANING, not lumped into one rejection:
+    //   already found -> neutral acknowledgement, no red shake
+    //   too short     -> a quiet nudge about the 4-letter minimum
+    //   not a word    -> the red shake
+    if (result.type === 'repeat-required' || result.type === 'repeat-extra') {
+      renderer.pulse(ids, 'again', 620);
+      flashCurrent(word, 'again', 900);
+      setHint('already found');
+      return;
+    }
+
+    if (result.type === 'short') {
+      renderer.pulse(ids, 'again', 420);
+      flashCurrent(word || '·', 'short', 700);
+      setHint('4 letters or more');
+      return;
+    }
+
     renderer.flashTrace(ids, 'wrong');
     flashCurrent(word || '·', 'bad', 620);
   }
@@ -239,8 +274,13 @@
   /* ------------------------------ new game ----------------------------- */
 
   function newGame() {
-    const puzzle = Generator.generatePuzzle({ words: commonWords, longWords: longWords })
-      || Generator.generatePuzzle({ words: Generator.FALLBACK_COMMON, longWords: Generator.FALLBACK_LONG });
+    const puzzle =
+      Generator.generatePuzzle({ words: commonWords, longWords: longWords, lexicon: lexicon }) ||
+      Generator.generatePuzzle({
+        words: Generator.FALLBACK_COMMON,
+        longWords: Generator.FALLBACK_LONG,
+        lexicon: lexicon
+      });
     if (!puzzle) {
       els.sheetEmoji.textContent = '😵';
       els.sheetTitle.textContent = 'Could not build a puzzle';
@@ -270,7 +310,10 @@
     onTraceChange: ids => {
       if (busy) return;
       if (!ids.length) {
-        if (!els.current.classList.contains('bad') && !els.current.classList.contains('good')) setCurrent('');
+        // Releasing the finger clears the live trace text, but never the
+        // verdict a submit just put there (good / again / short / bad) —
+        // flashCurrent owns clearing that.
+        if (els.current.className === 'current-text') setCurrent('');
         return;
       }
       setCurrent(Generator.traceToWord(game.puzzle.cells, ids));
@@ -302,6 +345,11 @@
     newGame: newGame,
     getGame: () => game,
     renderer: renderer,
+    lexicon: lexicon,
+    enumerate: function () {
+      const g = game.puzzle;
+      return Array.from(Generator.enumerateWords(g.cells, g.edges, lexicon).keys());
+    },
     solve: function (text) {
       const result = Engine.submitWord(game, text);
       if (result.type === 'required') {

@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const gen = require(path.join(__dirname, '../../static/lettermelt/js/generator.js'));
 const engine = require(path.join(__dirname, '../../static/lettermelt/js/engine.js'));
+const input = require(path.join(__dirname, '../../static/lettermelt/js/input.js'));
 
 /* Fixed embedded vocabulary so the suite never depends on the generated data
  * files. Lengths 4-7 for regular words, 8-11 for the single longest word. */
@@ -35,12 +36,29 @@ const LONG_WORDS = [
 
 const EXTRA_WORDS = ['lean', 'earn', 'tale', 'teal', 'sale', 'rate', 'tear', 'tone', 'nets', 'stare'];
 
+/* Rare words: real dictionary entries that are NOT common. These are the only
+ * words allowed to surface as extras. */
+const RARE_WORDS = [
+  'alant', 'anear', 'anlace', 'arles', 'astern', 'baled', 'bedel', 'canst', 'carle',
+  'certes', 'clart', 'dolent', 'ealder', 'entera', 'estral', 'lanate', 'leman',
+  'malar', 'meatal', 'nacre', 'natter', 'oaten', 'orant', 'pareo', 'ratel',
+  'reata', 'renal', 'retable', 'salep', 'sental', 'stane', 'taler', 'telamon',
+  'tolane', 'trave', 'antre', 'arene', 'blare', 'crare', 'dorsal', 'elans'
+];
+
+/* The dictionary the tests validate against: every common word plus the rare
+ * ones. Built once, exactly as the game does at startup. */
+const DICT_WORDS = WORDS.concat(LONG_WORDS, EXTRA_WORDS, RARE_WORDS);
+const LEXICON = gen.buildLexicon(DICT_WORDS, WORDS.concat(EXTRA_WORDS), LONG_WORDS);
+
 const PUZZLE_COUNT = 160;
 const SOLVE_COUNT = PUZZLE_COUNT;   // every generated puzzle is solved right through
 
 function makePuzzle(seed) {
   const rng = gen.createRng(seed);
-  const puzzle = gen.generatePuzzle({ rng: rng, words: WORDS, longWords: LONG_WORDS });
+  const puzzle = gen.generatePuzzle({
+    rng: rng, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON
+  });
   assert.ok(puzzle, 'generatePuzzle returned null for seed ' + seed);
   return { puzzle: puzzle, rng: rng };
 }
@@ -127,8 +145,12 @@ test('initial board is exactly the union of the word paths, with no crossings', 
   }
   assert.ok(nodeMax <= 25, 'board exceeded the grid: ' + nodeMax + ' nodes');
   assert.ok(nodeMin >= 12, 'board unexpectedly sparse: ' + nodeMin + ' nodes');
-  // The grid should almost always be filled right up.
-  assert.ok(fullGrids >= PUZZLE_COUNT * 0.6,
+  // The grid is always essentially full. It is not ALWAYS filled to the last
+  // cell any more: construction lays only 5-7 words (enumeration supplies the
+  // rest of the solvable set), and the scoring loop trades a stray empty cell
+  // for a word count inside the 10-16 band.
+  assert.ok(nodeMin >= 20, 'grid left too empty: ' + nodeMin + ' cells');
+  assert.ok(fullGrids >= PUZZLE_COUNT * 0.3,
     'only ' + fullGrids + '/' + PUZZLE_COUNT + ' puzzles filled all 25 cells');
 });
 
@@ -432,6 +454,289 @@ test('the solved-word time credit is tunable', () => {
   assert.equal(game.elapsedMs, 55000);
 });
 
+
+/* ------------------------------------------------------------------ *
+ * The guarantee: every word that EXISTS in the puzzle works
+ * ------------------------------------------------------------------ */
+
+const PROPERTY_COUNT = 60;
+
+/**
+ * Submit every word the board can currently spell through the real engine.
+ * Nothing traceable may ever come back 'unknown', and the normal/extra split
+ * must follow commonness, not construction history.
+ */
+function assertEveryTraceableWordWorks(game, lexicon, context) {
+  const puzzle = game.puzzle;
+  const traceable = gen.enumerateWords(puzzle.cells, puzzle.edges, lexicon);
+  const remaining = new Set(puzzle.words.filter(w => !w.found).map(w => w.text));
+  const solved = new Set(puzzle.words.filter(w => w.found).map(w => w.text));
+
+  for (const [word, route] of traceable) {
+    // The route the enumerator found must be a legal trace.
+    assert.ok(gen.isValidTrace(puzzle.cells, puzzle.edges, route),
+      'enumerated route for "' + word + '" is not traceable ' + context);
+    assert.equal(gen.traceToWord(puzzle.cells, route), word);
+
+    if (lexicon.isCommon(word)) {
+      // A common word is ALWAYS a normal word: solved already, or still to go.
+      assert.ok(remaining.has(word) || solved.has(word),
+        'traceable common word "' + word + '" is not in the normal set ' + context);
+    }
+    if (solved.has(word)) continue;         // already melted away, nothing to submit
+
+    const before = game.puzzle.words.filter(w => !w.found).length;
+    const result = engine.submitWord(game, word);
+    assert.notEqual(result.type, 'unknown',
+      'traceable word "' + word + '" was rejected as not-a-word ' + context);
+    assert.notEqual(result.type, 'short', '"' + word + '" wrongly judged too short');
+
+    if (result.type === 'required') {
+      // Undo: this probe must not actually advance the game.
+      assert.ok(remaining.has(word));
+      assert.equal(game.puzzle.words.filter(w => !w.found).length, before - 1);
+      return { probedSolve: word };
+    }
+    assert.ok(result.type === 'extra' || result.type === 'repeat-extra',
+      'unexpected verdict "' + result.type + '" for "' + word + '" ' + context);
+    // Extras are exclusively rare words.
+    assert.equal(lexicon.isCommon(word), false,
+      'common word "' + word + '" surfaced as an extra ' + context);
+  }
+  return { probedSolve: null };
+}
+
+test('every traceable common word is a normal word, and extras are only rare words', () => {
+  for (let i = 0; i < PROPERTY_COUNT; i++) {
+    const { puzzle } = makePuzzle(1100000 + i);
+    const traceable = gen.enumerateWords(puzzle.cells, puzzle.edges, LEXICON);
+    const normal = new Set(puzzle.words.map(w => w.text));
+
+    // 1. Promotion is total: no traceable common word is left out.
+    for (const word of traceable.keys()) {
+      if (!LEXICON.isCommon(word)) continue;
+      assert.ok(normal.has(word),
+        'traceable common word "' + word + '" was left out of the normal set');
+    }
+    // 2. Every normal word is genuinely traceable.
+    for (const word of puzzle.words) {
+      assert.ok(traceable.has(word.text),
+        'normal word "' + word.text + '" is not traceable on its own board');
+      assert.ok(LEXICON.isCommon(word.text),
+        'normal word "' + word.text + '" is not a common word');
+    }
+    // 3. Exactly one 8+ letter word can be traced, and it is the base word.
+    const longs = Array.from(traceable.keys())
+      .filter(w => w.length >= gen.CONFIG.longMin && LEXICON.isCommon(w));
+    assert.deepEqual(longs, [puzzle.longWord], 'a rival long common word is traceable');
+    // 4. The base word is the longest word in the normal set.
+    for (const word of puzzle.words) {
+      if (word.isLong) continue;
+      assert.ok(word.text.length < puzzle.longWord.length,
+        '"' + word.text + '" is not shorter than the base word');
+    }
+  }
+});
+
+test('no traceable word is ever rejected, at the start or after any solve', () => {
+  for (let i = 0; i < PROPERTY_COUNT; i++) {
+    const { puzzle, rng } = makePuzzle(1200000 + i);
+    const game = engine.createGame({ puzzle: puzzle, dict: LEXICON.words });
+    const seed = 'seed ' + (1200000 + i);
+
+    assertEveryTraceableWordWorks(game, LEXICON, 'at the start (' + seed + ')');
+
+    const order = gen.shuffled(puzzle.words.map((_w, idx) => idx), rng);
+    let step = 0;
+    for (const index of order) {
+      const word = puzzle.words[index];
+      if (word.found) continue;             // a probe may have solved it already
+      const result = engine.submitWord(game, word.text);
+      assert.equal(result.type, 'required', 'could not solve "' + word.text + '"');
+      step++;
+      assertBoardHealthy(puzzle, 'after solve ' + step + ' (' + seed + ')');
+      assertEveryTraceableWordWorks(game, LEXICON, 'after solve ' + step + ' (' + seed + ')');
+    }
+    assert.equal(puzzle.cells.length, 0, 'board not empty after every word was solved');
+    assert.equal(game.status, 'won');
+  }
+});
+
+test('enumeration is monotone: solving never makes a new word traceable', () => {
+  for (let i = 0; i < 40; i++) {
+    const { puzzle, rng } = makePuzzle(1300000 + i);
+    let previous = new Set(gen.enumerateWords(puzzle.cells, puzzle.edges, LEXICON).keys());
+    const order = gen.shuffled(puzzle.words.map((_w, idx) => idx), rng);
+    for (const index of order) {
+      gen.removeWord(puzzle, index);
+      const now = new Set(gen.enumerateWords(puzzle.cells, puzzle.edges, LEXICON).keys());
+      for (const word of now) {
+        assert.ok(previous.has(word),
+          '"' + word + '" became traceable only after a removal — enumeration is not monotone');
+      }
+      previous = now;
+    }
+  }
+});
+
+test('the lexicon answers membership, commonness and prefixes', () => {
+  assert.equal(LEXICON.has('stone'), true);
+  assert.equal(LEXICON.has('zzzzz'), false);
+  assert.equal(LEXICON.isCommon('stone'), true);
+  assert.equal(LEXICON.isCommon('anlace'), false, 'rare words are not common');
+  assert.equal(LEXICON.has('anlace'), true, 'rare words are still real words');
+  assert.equal(LEXICON.isPrefix('sto'), true);
+  assert.equal(LEXICON.isPrefix('zqx'), false);
+  // Past the indexed depth the prefix test degrades to "maybe", never to "no".
+  assert.equal(LEXICON.isPrefix('a'.repeat(gen.PREFIX_DEPTH + 1)), true);
+  for (const word of WORDS.concat(LONG_WORDS)) {
+    assert.equal(LEXICON.isCommon(word), true, word + ' should be common');
+    for (let n = 1; n <= Math.min(gen.PREFIX_DEPTH, word.length); n++) {
+      assert.equal(LEXICON.isPrefix(word.slice(0, n)), true);
+    }
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Tracing (regression: valid words were reaching the engine truncated)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Sample a route the way a real finger does: points spaced evenly ALONG the
+ * path, at an arbitrary phase, so they land between tiles rather than
+ * conveniently on top of them. `spacing` is in svg units; one tile step is
+ * 100, so spacing 80 means roughly one pointer sample per tile — already a
+ * brisk swipe. Browsers deliver 60-120 samples a second, i.e. far denser.
+ */
+function samplePath(points, spacing, phase) {
+  const out = [points[0]];
+  let carry = phase;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    let t = carry;
+    while (t < d) {
+      out.push({ x: a.x + ((b.x - a.x) * t) / d, y: a.y + ((b.y - a.y) * t) / d });
+      t += spacing;
+    }
+    carry = t - d;
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+
+function makeTracer(puzzle, options) {
+  const positions = new Map(puzzle.cells.map(c => [c.id, { x: c.x * input.STEP, y: c.y * input.STEP }]));
+  const adjacency = gen.adjacencyMap(puzzle.cells, puzzle.edges);
+  const tracer = input.createTracer({
+    getAdjacency: () => adjacency,
+    nodeAt: (point, radius, filter) => input.nearestNode(positions, point, radius, filter)
+  }, options);
+  return { tracer: tracer, positions: positions, adjacency: adjacency };
+}
+
+/** Drive the pure tracer along a route with realistic pointer sampling. */
+function traceRoute(puzzle, route, spacing, phase, options) {
+  const rig = makeTracer(puzzle, options);
+  const points = route.map(id => rig.positions.get(id));
+  rig.tracer.down(points[0]);
+  for (const point of samplePath(points, spacing, phase || 0).slice(1)) rig.tracer.move(point);
+  return rig.tracer.end();
+}
+
+test('a traced word reaches the engine complete, however coarsely it is sampled', () => {
+  // The regression: sparse pointer samples used to skip tiles, so a perfectly
+  // good word arrived at the engine truncated ("surge" -> "surg") and was
+  // rejected as not-a-word. The tracer now walks each pointer segment.
+  for (const spacing of [15, 40, 65, 80]) {
+    for (const phase of [0, 23]) {
+      for (let i = 0; i < 20; i++) {
+        const { puzzle } = makePuzzle(1400000 + i);
+        for (const word of puzzle.words) {
+          const ids = traceRoute(puzzle, word.cellIds, spacing, phase);
+          assert.deepEqual(ids, word.cellIds,
+            'sampling every ' + spacing + ' units mangled "' + word.text + '" -> "' +
+            gen.traceToWord(puzzle.cells, ids) + '"');
+        }
+      }
+    }
+  }
+});
+
+test('walking the pointer segment beats sampling only at the reported points', () => {
+  // Same routes, sampled sparsely enough to hurt. Walking the segment must be
+  // strictly better than the old point-sampling behaviour.
+  let walked = 0;
+  let pointOnly = 0;
+  let total = 0;
+  for (let i = 0; i < 20; i++) {
+    const { puzzle } = makePuzzle(1450000 + i);
+    for (const word of puzzle.words) {
+      total++;
+      const a = traceRoute(puzzle, word.cellIds, 130, 11);
+      const b = traceRoute(puzzle, word.cellIds, 130, 11, { walkStep: 1e9, lockRadius: 58 });
+      if (gen.traceToWord(puzzle.cells, a) === word.text) walked++;
+      if (gen.traceToWord(puzzle.cells, b) === word.text) pointOnly++;
+    }
+  }
+  assert.ok(walked > pointOnly,
+    'segment walking (' + walked + '/' + total + ') should beat point sampling (' +
+    pointOnly + '/' + total + ')');
+});
+
+test('the tracer never locks a tile that is not connected to the trace', () => {
+  const { puzzle } = makePuzzle(1500001);
+  const adjacency = gen.adjacencyMap(puzzle.cells, puzzle.edges);
+  for (const word of puzzle.words) {
+    const ids = traceRoute(puzzle, word.cellIds, 30, 7);
+    for (let i = 1; i < ids.length; i++) {
+      assert.ok(adjacency.get(ids[i - 1]).has(ids[i]),
+        'tracer locked a tile with no connecting lane');
+    }
+    assert.equal(new Set(ids).size, ids.length, 'tracer reused a tile');
+  }
+});
+
+test('backtracking over the previous tile undoes a step', () => {
+  const { puzzle } = makePuzzle(1500002);
+  const rig = makeTracer(puzzle);
+  const tracer = rig.tracer;
+  const positions = rig.positions;
+  const route = puzzle.words[0].cellIds;
+  tracer.down(positions.get(route[0]));
+  tracer.move(positions.get(route[1]));
+  tracer.move(positions.get(route[2]));
+  assert.equal(tracer.current().length, 3);
+  tracer.move(positions.get(route[1]));   // drift back
+  assert.deepEqual(tracer.current(), [route[0], route[1]]);
+});
+
+/* ------------------------------------------------------------------ *
+ * Feedback split
+ * ------------------------------------------------------------------ */
+
+test('repeats, short traces and non-words are three distinct verdicts', () => {
+  const { puzzle } = makePuzzle(1600001);
+  const game = engine.createGame({ puzzle: puzzle, dict: LEXICON.words });
+  const normal = puzzle.words.find(w => !w.isLong).text;
+
+  assert.equal(engine.submitWord(game, 'ate').type, 'short');
+  assert.equal(engine.submitWord(game, 'qwxzj').type, 'unknown');
+
+  assert.equal(engine.submitWord(game, normal).type, 'required');
+  assert.equal(engine.submitWord(game, normal).type, 'repeat-required',
+    'a solved word must read as already-found, not as a non-word');
+
+  const traceable = gen.enumerateWords(puzzle.cells, puzzle.edges, LEXICON);
+  const rare = Array.from(traceable.keys()).find(w => !LEXICON.isCommon(w));
+  if (rare) {
+    assert.equal(engine.submitWord(game, rare).type, 'extra');
+    assert.equal(engine.submitWord(game, rare).type, 'repeat-extra',
+      'a found extra must read as already-found, not as a non-word');
+  }
+});
+
 /* ------------------------------------------------------------------ *
  * Real data files (only when they match the current contract)
  * ------------------------------------------------------------------ */
@@ -448,6 +753,16 @@ const realData = (() => {
   }
   if (!Array.isArray(sandbox.ZAN_COMMON_LONG) || !sandbox.ZAN_COMMON_LONG.length) return null;
   if (!Array.isArray(sandbox.ZAN_COMMON) || !sandbox.ZAN_COMMON.length) return null;
+  try {
+    const previous = global.window;
+    global.window = sandbox;
+    require(path.join(__dirname, '../../static/lettermelt/data/dict.js'));
+    global.window = previous;
+  } catch (_e) {
+    return null;
+  }
+  if (typeof sandbox.ZAN_DICT_RAW !== 'string' || !sandbox.ZAN_DICT_RAW.length) return null;
+  sandbox.lexicon = gen.buildLexicon(sandbox.ZAN_DICT_RAW, sandbox.ZAN_COMMON, sandbox.ZAN_COMMON_LONG);
   return sandbox;
 })();
 
@@ -457,7 +772,8 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
     const puzzle = gen.generatePuzzle({
       rng: rng,
       words: realData.ZAN_COMMON,
-      longWords: realData.ZAN_COMMON_LONG
+      longWords: realData.ZAN_COMMON_LONG,
+      lexicon: realData.lexicon
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
     assert.ok(puzzle.words.length >= 10 && puzzle.words.length <= 16,
@@ -473,4 +789,69 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
     }
     assert.equal(puzzle.cells.length, 0);
   }
+});
+
+test('real word lists: every word that exists in the puzzle works', { skip: !realData ? 'no real data' : false }, () => {
+  const lexicon = realData.lexicon;
+  for (let i = 0; i < 20; i++) {
+    const rng = gen.createRng(2000000 + i);
+    const puzzle = gen.generatePuzzle({
+      rng: rng,
+      words: realData.ZAN_COMMON,
+      longWords: realData.ZAN_COMMON_LONG,
+      lexicon: lexicon
+    });
+    assert.ok(puzzle, 'generatePuzzle returned null on real data');
+    const game = engine.createGame({ puzzle: puzzle, dict: lexicon.words });
+    const seed = 'real seed ' + (2000000 + i);
+
+    // No traceable common word may be missing from the normal set, and the
+    // base word is the only long one.
+    const traceable = gen.enumerateWords(puzzle.cells, puzzle.edges, lexicon);
+    const normal = new Set(puzzle.words.map(w => w.text));
+    for (const word of traceable.keys()) {
+      if (!lexicon.isCommon(word)) continue;
+      assert.ok(normal.has(word), 'common word "' + word + '" left as an extra (' + seed + ')');
+      if (word !== puzzle.longWord) {
+        assert.ok(word.length < gen.CONFIG.longMin, 'rival long word "' + word + '" (' + seed + ')');
+      }
+    }
+    assertEveryTraceableWordWorks(game, lexicon, 'at the start (' + seed + ')');
+
+    const order = gen.shuffled(puzzle.words.map((_w, idx) => idx), rng);
+    for (const index of order) {
+      const word = puzzle.words[index];
+      if (word.found) continue;
+      assert.equal(engine.submitWord(game, word.text).type, 'required');
+      assertBoardHealthy(puzzle, 'mid-solve (' + seed + ')');
+      assertEveryTraceableWordWorks(game, lexicon, 'mid-solve (' + seed + ')');
+    }
+    assert.equal(puzzle.cells.length, 0);
+    assert.equal(game.status, 'won');
+  }
+});
+
+test('real-data generation stays inside the time budget', { skip: !realData ? 'no real data' : false }, () => {
+  const times = [];
+  const counts = [];
+  const cells = [];
+  for (let i = 0; i < 50; i++) {
+    const start = Date.now();
+    const puzzle = gen.generatePuzzle({
+      rng: gen.createRng(3000000 + i),
+      words: realData.ZAN_COMMON,
+      longWords: realData.ZAN_COMMON_LONG,
+      lexicon: realData.lexicon
+    });
+    times.push(Date.now() - start);
+    assert.ok(puzzle, 'generation failed');
+    counts.push(puzzle.words.length);
+    cells.push(puzzle.cells.length);
+  }
+  times.sort((a, b) => a - b);
+  const median = times[Math.floor(times.length / 2)];
+  assert.ok(median < 150, 'median generation ' + median + 'ms exceeds the budget');
+  assert.ok(Math.min(...counts) >= 10 && Math.max(...counts) <= 16,
+    'word counts outside 10-16: ' + Math.min(...counts) + '-' + Math.max(...counts));
+  assert.ok(Math.min(...cells) >= 20, 'grid left too empty: ' + Math.min(...cells));
 });

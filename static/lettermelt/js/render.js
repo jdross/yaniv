@@ -106,7 +106,12 @@
       edgeEls: new Map(),   // key -> { line, glow }
       pos: new Map(),       // id -> { x, y } in svg units
       view: { x: 0, y: 0, w: 600, h: 600 },
-      anim: null
+      anim: null,
+      // Bumped by setPuzzle. Node ids restart at 1 for every puzzle, so any
+      // deferred callback from a previous board (melt timeouts, tween frames)
+      // would happily delete or move the NEW board's tiles. Every deferred
+      // step captures this token and no-ops once it is stale.
+      gen: 0
     };
 
     /* --------------------------- geometry --------------------------- */
@@ -306,6 +311,11 @@
     /* --------------------------- public API --------------------------- */
 
     function setPuzzle(puzzle) {
+      state.gen++;
+      if (state.anim) {
+        cancelAnimationFrame(state.anim);
+        state.anim = null;
+      }
       state.puzzle = puzzle;
       for (const node of state.nodeEls.values()) node.g.remove();
       for (const pair of state.edgeEls.values()) { pair.line.remove(); pair.glow.remove(); }
@@ -328,6 +338,7 @@
     /** Tween node positions + viewBox to the puzzle's current layout. */
     function animateTo(duration, done) {
       if (state.anim) cancelAnimationFrame(state.anim);
+      const token = state.gen;
       const from = new Map();
       const to = new Map();
       for (const cell of state.puzzle.cells) {
@@ -340,6 +351,7 @@
       const start = performance.now();
 
       function frame(now) {
+        if (token !== state.gen) { state.anim = null; return; }
         const raw = Math.min(1, (now - start) / duration);
         const t = easeOutCubic(raw);
         for (const [id, f] of from) {
@@ -371,6 +383,7 @@
      * opts: { removedIds, removedEdgeKeys, keptIds, onDone }
      */
     function playFound(opts) {
+      const token = state.gen;
       const removedIds = opts.removedIds || [];
       const goneKeys = new Set(opts.removedEdgeKeys || []);
       const keptIds = opts.keptIds || [];
@@ -408,6 +421,7 @@
       }
 
       window.setTimeout(() => {
+        if (token !== state.gen) return;   // a new puzzle was loaded mid-melt
         for (const id of removedIds) {
           const node = state.nodeEls.get(id);
           if (node) {
