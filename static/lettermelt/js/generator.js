@@ -60,7 +60,12 @@
     saturateBudget: 260,      // DFS steps for a zero-new-cell route
     longRouteBudget: 12000,
     restarts: 26,
-    timeBudgetMs: 150         // total wall-clock budget for polish restarts
+    timeBudgetMs: 150,        // total wall-clock budget for polish restarts
+    // Boards may leave gaps in the 5 x 5 — a hole-punched silhouette reads far
+    // better than a solid block. minCells stops them from getting so sparse
+    // that the puzzle turns into a thin thread.
+    minCells: 17,
+    fillWeight: 2
   };
 
   /* ------------------------------------------------------------------ *
@@ -349,10 +354,13 @@
   /* ------------------------------------------------------------------ *
    * Board under construction
    * ------------------------------------------------------------------ */
-  function createBoard(cols, rows) {
+  function createBoard(cols, rows, cellBudget) {
     return {
       cols: cols,
       rows: rows,
+      // How many of the cols*rows cells this board is allowed to occupy.
+      // Budgets below capacity are what give boards their gaps.
+      cellBudget: Math.min(cellBudget || cols * rows, cols * rows),
       occ: new Map(),          // "x,y" -> { x, y, letter }
       edges: new Set(),        // coord edge keys
       letterCounts: new Map(),
@@ -737,7 +745,7 @@
    * the word cap is reached.
    */
   function growWords(board, pools, rng, used, cap) {
-    const capacity = board.cols * board.rows;
+    const capacity = board.cellBudget || board.cols * board.rows;
     let attempts = 0;
     let sinceGrowth = 0;
     while (board.paths.length < cap && attempts < CONFIG.growAttempts) {
@@ -786,8 +794,8 @@
     }
   }
 
-  function buildBoard(pools, rng, cap, size, deadline) {
-    const board = createBoard(size, size);
+  function buildBoard(pools, rng, cap, size, deadline, cellBudget) {
+    const board = createBoard(size, size, cellBudget);
     const longText = placeBaseWord(board, pools, rng);
     if (!longText) return null;
     const used = new Set([longText]);
@@ -813,10 +821,15 @@
       return base + cells * 6 + sharePerCell * 14 + Math.min(words, maxWords) * 3;
     }
     const words = stats.normalCount;
-    const mid = (minWords + maxWords) / 2;
-    const centred = Math.max(0, 8 - Math.abs(words - mid));   // 0..8
+    // Aim at this puzzle's own target rather than the middle of the band, so
+    // word counts vary across games instead of clustering on the mean.
+    const target = stats.targetWords != null ? stats.targetWords : (minWords + maxWords) / 2;
+    const centred = Math.max(0, 8 - Math.abs(words - target));   // 0..8
+    // The board does NOT have to fill the 5 x 5: holes give each puzzle its own
+    // silhouette. Fill still carries a little weight so boards don't collapse
+    // to the sparse minimum, but word count and letter sharing dominate.
     return 1000
-      + cells * 8
+      + cells * CONFIG.fillWeight
       + sharePerCell * 12
       + centred * 9
       + Math.min(stats.extraCount, 90) * 0.4;
@@ -868,7 +881,7 @@
    * Returns null when the board breaks a hard rule (word count outside the
    * band, or a second 8+ letter common word that would rival the base word).
    */
-  function finishPuzzle(board, longText, lexicon, minWords, maxWords) {
+  function finishPuzzle(board, longText, lexicon, minWords, maxWords, minCells) {
     const puzzle = materialize(board, longText);
     const commons = enumerateCommon(puzzle.cells, puzzle.edges, lexicon);
 
@@ -878,6 +891,11 @@
     }
     if (!commons.has(longText)) return null;
     if (commons.size < minWords || commons.size > maxWords) {
+      return { rejected: true, normalCount: commons.size, puzzle: null };
+    }
+    // Gaps in the 5 x 5 are welcome, but a board this sparse stops reading as
+    // a grid at all.
+    if (puzzle.cells.length < (minCells || CONFIG.minCells)) {
       return { rejected: true, normalCount: commons.size, puzzle: null };
     }
 
@@ -929,7 +947,12 @@
     const lexicon = resolveLexicon(opts, pools);
     const size = opts.size || CONFIG.size;
     const minWords = opts.minWords || CONFIG.minWords;
+    const minCells = opts.minCells || CONFIG.minCells;
     const maxWords = opts.maxWords || CONFIG.maxWords;
+    // One target word count per puzzle, so games differ in size instead of all
+    // landing on the middle of the band.
+    const targetWords = opts.targetWords ||
+      (minWords + Math.floor(rng() * (maxWords - minWords + 1)));
     const restarts = opts.restarts || CONFIG.restarts;
     const capacity = size * size;
     const deadline = Date.now() + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
@@ -946,9 +969,12 @@
     let rejects = 0;
     for (let attempt = 0; attempt < restarts; attempt++) {
       attempts++;
-      const built = buildBoard(pools, rng, construct, size, deadline);
+      // Each attempt gets its own occupancy budget, so boards vary from
+      // hole-punched silhouettes up to the occasional solid 5 x 5.
+      const cellBudget = minCells + Math.floor(rng() * (capacity - minCells + 1));
+      const built = buildBoard(pools, rng, construct, size, deadline, cellBudget);
       if (!built) continue;
-      const result = finishPuzzle(built.board, built.longText, lexicon, minWords, maxWords);
+      const result = finishPuzzle(built.board, built.longText, lexicon, minWords, maxWords, minCells);
       if (!result) { rejects++; continue; }          // rival long word
       if (result.rejected) {
         rejects++;
@@ -958,13 +984,17 @@
       }
       const score = scoreBoard(built.board, minWords, maxWords, {
         normalCount: result.normalCount,
+        targetWords: targetWords,
         extraCount: 0
       });
       if (score > bestScore) {
         bestScore = score;
         best = result.puzzle;
       }
-      if (result.puzzle.cells.length >= capacity) break;   // full grid: done
+      // Hit the target exactly and there is nothing left to search for.
+      if (result.normalCount === targetWords) break;
+      // No early exit on a full grid: filling all 25 cells is no longer the
+      // goal, so every restart in the budget gets a fair shot at scoring.
       if (Date.now() > deadline) break;
     }
     if (best) {

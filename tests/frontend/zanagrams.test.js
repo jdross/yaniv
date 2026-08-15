@@ -122,6 +122,7 @@ test('initial board is exactly the union of the word paths, with no crossings', 
   let nodeMin = Infinity;
   let nodeMax = 0;
   let fullGrids = 0;
+  let gappyGrids = 0;
   for (let i = 0; i < PUZZLE_COUNT; i++) {
     const { puzzle } = makePuzzle(200000 + i);
     assertBoardHealthy(puzzle, 'at generation (seed ' + (200000 + i) + ')');
@@ -142,16 +143,15 @@ test('initial board is exactly the union of the word paths, with no crossings', 
       'more than ' + capacity + ' cells: ' + puzzle.allCells.length);
     assert.equal(puzzle.cellsUsed, puzzle.allCells.length);
     if (puzzle.allCells.length === capacity) fullGrids++;
+    if (puzzle.allCells.length < capacity) gappyGrids++;
   }
   assert.ok(nodeMax <= 25, 'board exceeded the grid: ' + nodeMax + ' nodes');
-  assert.ok(nodeMin >= 12, 'board unexpectedly sparse: ' + nodeMin + ' nodes');
-  // The grid is always essentially full. It is not ALWAYS filled to the last
-  // cell any more: construction lays only 5-7 words (enumeration supplies the
-  // rest of the solvable set), and the scoring loop trades a stray empty cell
-  // for a word count inside the 10-16 band.
-  assert.ok(nodeMin >= 20, 'grid left too empty: ' + nodeMin + ' cells');
-  assert.ok(fullGrids >= PUZZLE_COUNT * 0.3,
-    'only ' + fullGrids + '/' + PUZZLE_COUNT + ' puzzles filled all 25 cells');
+  // Boards are NOT required to fill the 5 x 5 — each one draws a random
+  // occupancy budget, so silhouettes differ from game to game. minCells is the
+  // only floor: below it the board stops reading as a grid.
+  assert.ok(nodeMin >= gen.CONFIG.minCells,
+    'board sparser than minCells: ' + nodeMin + ' cells');
+  assert.ok(gappyGrids > 0, 'no board ever left a gap in the grid');
 });
 
 test('phase-2 saturation prefilter is a correct multiset-subset test', () => {
@@ -870,5 +870,11 @@ test('real-data generation stays inside the time budget', { skip: !realData ? 'n
   assert.ok(median < 150, 'median generation ' + median + 'ms exceeds the budget');
   assert.ok(Math.min(...counts) >= 10 && Math.max(...counts) <= 16,
     'word counts outside 10-16: ' + Math.min(...counts) + '-' + Math.max(...counts));
-  assert.ok(Math.min(...cells) >= 20, 'grid left too empty: ' + Math.min(...cells));
+  assert.ok(Math.min(...cells) >= gen.CONFIG.minCells,
+    'board sparser than minCells: ' + Math.min(...cells));
+  assert.ok(Math.max(...cells) <= 25, 'board exceeded the grid: ' + Math.max(...cells));
+  // Gaps are the point of relaxing the fill rule: real boards must actually
+  // vary in silhouette rather than all arriving as a solid 5 x 5.
+  assert.ok(new Set(cells).size >= 4,
+    'cell counts barely varied: ' + Array.from(new Set(cells)).sort((a, b) => a - b).join(','));
 });
