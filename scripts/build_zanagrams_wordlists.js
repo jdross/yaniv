@@ -209,6 +209,53 @@ function loadFrequencyRankedWords() {
   return null;
 }
 
+/**
+ * Every dictionary word at ANY length, used only for stem lookups. The shipped
+ * dictionary starts at 4 letters, but detecting "dogs" as a plural needs the
+ * 3-letter stem "dog", so inflection tests run against this wider set.
+ */
+function buildStemSet(rawWords) {
+  const set = new Set();
+  for (const w of rawWords) {
+    const word = String(w).toLowerCase();
+    if (LOWER_ALPHA_RE.test(word)) set.add(word);
+  }
+  return set;
+}
+
+/**
+ * Is `word` merely a plural or past-tense form of another word?
+ *
+ * These are excluded from the puzzle's required-word lists: a board offering
+ * both "metal" and "metals" (or "deal" and "dealed"-style pairs) inflates the
+ * word count without adding anything to solve. They stay in the validation
+ * dictionary, so tracing one is still recognised as a bonus word rather than
+ * rejected.
+ */
+function isInflectedForm(word, stemSet) {
+  const has = (s) => s.length >= 2 && stemSet.has(s);
+
+  // Plurals / third-person singular. "ss" endings (glass, less) are not plurals.
+  if (word.endsWith('s') && !word.endsWith('ss')) {
+    if (has(word.slice(0, -1))) return true;                            // dogs, metals, painters
+    if (word.endsWith('es') && has(word.slice(0, -2))) return true;     // boxes, wishes
+    if (word.endsWith('ies') && has(word.slice(0, -3) + 'y')) return true; // cities
+  }
+
+  // Past tense / past participle. Words ending "eed" (seed, need, feed, breed)
+  // are base words that only look like -ed forms, so they are left alone.
+  if (word.endsWith('ed') && !word.endsWith('eed')) {
+    if (has(word.slice(0, -1))) return true;                            // used, liked
+    if (has(word.slice(0, -2))) return true;                            // asked, wanted
+    if (word.endsWith('ied') && has(word.slice(0, -3) + 'y')) return true; // tried
+    const n = word.length;
+    // Doubled final consonant: stopped -> stop, planned -> plan.
+    if (n >= 5 && word[n - 3] === word[n - 4] && has(word.slice(0, -3))) return true;
+  }
+
+  return false;
+}
+
 function buildDictSet(rawWords) {
   const set = new Set();
   for (const w of rawWords) {
@@ -221,7 +268,7 @@ function buildDictSet(rawWords) {
   return set;
 }
 
-function pickCommonWords(dictSet) {
+function pickCommonWords(dictSet, stemSet) {
   const freq = loadFrequencyRankedWords();
   const picked = [];
   const pickedLong = [];
@@ -236,6 +283,7 @@ function pickCommonWords(dictSet) {
     if (w.length < COMMON_MIN_LEN || w.length > COMMON_MAX_LEN) return false;
     if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
     if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces ZAN_COMMON subset dict)
+    if (isInflectedForm(w, stemSet)) return false; // no plurals / -ed forms as required words
     seen.add(w);
     picked.push(w);
     return true;
@@ -249,6 +297,7 @@ function pickCommonWords(dictSet) {
     if (w.length < COMMON_LONG_MIN_LEN || w.length > COMMON_LONG_MAX_LEN) return false;
     if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
     if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces subset-of-dict)
+    if (isInflectedForm(w, stemSet)) return false; // no plurals / -ed forms as required words
     seenLong.add(w);
     pickedLong.push(w);
     return true;
@@ -345,9 +394,10 @@ function main() {
 
   const dictSrc = loadDictionarySource();
   const dictSet = buildDictSet(dictSrc.words);
+  const stemSet = buildStemSet(dictSrc.words);
 
   const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
-    pickCommonWords(dictSet);
+    pickCommonWords(dictSet, stemSet);
 
   // Guarantee subset invariants: every common/common-long word must be in the
   // dict set (ZAN_COMMON and ZAN_COMMON_LONG are disjoint by length range).

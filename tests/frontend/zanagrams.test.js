@@ -766,6 +766,23 @@ const realData = (() => {
   return sandbox;
 })();
 
+test('real word lists carry no plural or past-tense forms', { skip: !realData ? 'no real data' : false }, () => {
+  // Required words are the ones the counter tallies, so "metal" AND "metals"
+  // both counting would inflate the target without adding anything to solve.
+  // Stems are checked against the shipped dictionary; it starts at 4 letters,
+  // so only stems that long are verifiable here (dogs/dog is caught at build
+  // time against the full word list).
+  const dict = new Set(String(realData.ZAN_DICT_RAW).split(/\s+/));
+  const offenders = [];
+  for (const word of realData.ZAN_COMMON.concat(realData.ZAN_COMMON_LONG)) {
+    const plural = word.endsWith('s') && !word.endsWith('ss') && dict.has(word.slice(0, -1));
+    const past = word.endsWith('ed') && !word.endsWith('eed') &&
+      (dict.has(word.slice(0, -1)) || dict.has(word.slice(0, -2)));
+    if (plural || past) offenders.push(word);
+  }
+  assert.deepStrictEqual(offenders, [], 'inflected forms leaked into the required-word lists');
+});
+
 test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.js predates the ZAN_COMMON_LONG contract' : false }, () => {
   for (let i = 0; i < 30; i++) {
     const rng = gen.createRng(1000000 + i);
