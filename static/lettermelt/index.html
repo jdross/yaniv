@@ -27,7 +27,15 @@
         <span class="counter-nums"><b id="solvedCount">0</b> / <span id="totalCount">0</span></span>
         <span class="counter-label">words</span>
       </div>
-      <button class="btn-new" id="newGame" type="button">New</button>
+      <div class="hud-actions">
+        <button class="mode-toggle" id="modeToggle" type="button" aria-label="Difficulty">Hard</button>
+        <button class="btn-new" id="newGame" type="button">New</button>
+      </div>
+    </div>
+
+    <div class="stars-row">
+      <div class="stars" id="stars" aria-label="Star rating"></div>
+      <span class="star-countdown" id="starCountdown"></span>
     </div>
 
     <div class="longest" id="longest">
@@ -56,7 +64,9 @@
       <h1 class="sheet-title" id="sheetTitle">Solved!</h1>
       <div class="sheet-time" id="sheetTime">0:00</div>
       <p class="sheet-sub" id="sheetSub"></p>
+      <div class="sheet-stars" id="sheetStars" aria-label="Stars earned"></div>
       <ul class="sheet-words" id="sheetWords"></ul>
+      <button class="btn-share" id="shareBtn" type="button">Share this puzzle</button>
       <button class="btn-primary" id="playAgain" type="button">Play again</button>
     </div>
   </div>

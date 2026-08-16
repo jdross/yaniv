@@ -289,6 +289,77 @@ test('clonePuzzle produces an independent board', () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * Stars, seeds and plurals
+ * ------------------------------------------------------------------ */
+
+test('stars are spent as the clock climbs', () => {
+  const m = 60 * 1000;
+  assert.equal(engine.starsFor(0), 5);
+  assert.equal(engine.starsFor(4.99 * m), 5);
+  assert.equal(engine.starsFor(5 * m), 4, 'five minutes exactly costs the first star');
+  assert.equal(engine.starsFor(5.99 * m), 4);
+  assert.equal(engine.starsFor(6 * m), 3);
+  assert.equal(engine.starsFor(7.49 * m), 3);
+  assert.equal(engine.starsFor(7.5 * m), 2);
+  assert.equal(engine.starsFor(9.99 * m), 2);
+  assert.equal(engine.starsFor(10 * m), 1);
+  assert.equal(engine.starsFor(60 * m), 1, 'the last star is never lost');
+
+  // The countdown drives the HUD, so it must track the same boundaries.
+  assert.equal(engine.msToNextStarLoss(0), 5 * m);
+  assert.equal(engine.msToNextStarLoss(4 * m), 1 * m);
+  assert.equal(engine.msToNextStarLoss(10 * m), null);
+});
+
+test('an extra word can buy a star back', () => {
+  const { puzzle } = makePuzzle(910001);
+  const game = engine.createGame({ puzzle: puzzle, dict: LEXICON.words });
+  engine.tick(game, 5 * 60 * 1000 + 2000);       // just past the first threshold
+  assert.equal(engine.starsFor(game.elapsedMs), 4);
+  engine.creditTime(game, 10 * 1000);            // an extra word pays out
+  assert.equal(engine.starsFor(game.elapsedMs), 5, 'time credit did not restore the star');
+});
+
+test('a plural is reported as a plural, not as gibberish', () => {
+  const { puzzle } = makePuzzle(910002);
+  const dict = new Set(['reel', 'box', 'city', 'glass']);
+  const game = engine.createGame({ puzzle: puzzle, dict: dict });
+  assert.equal(engine.submitWord(game, 'reels').type, 'plural');
+  assert.equal(engine.submitWord(game, 'boxes').type, 'plural');
+  assert.equal(engine.submitWord(game, 'cities').type, 'plural');
+  // Words that merely end in s are not plurals of anything: "glass" is in the
+  // dictionary and pays out as an extra, "qwxzs" is simply not a word.
+  assert.equal(engine.submitWord(game, 'glass').type, 'extra');
+  assert.equal(engine.submitWord(game, 'qwxzs').type, 'unknown');
+});
+
+test('a seed rebuilds the identical board', () => {
+  for (const seed of [1, 42, 987654321]) {
+    const a = gen.generatePuzzle(Object.assign({
+      seed: seed, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON
+    }, FAST));
+    const b = gen.generatePuzzle(Object.assign({
+      seed: seed, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON
+    }, FAST));
+    assert.ok(a && b, 'generation failed for seed ' + seed);
+    assert.equal(a.seed, seed, 'puzzle did not record its seed');
+    assert.deepEqual(
+      a.words.map(w => w.text).sort(), b.words.map(w => w.text).sort(),
+      'seed ' + seed + ' produced two different boards'
+    );
+    assert.deepEqual(
+      a.cells.map(c => c.letter + c.x + ',' + c.y),
+      b.cells.map(c => c.letter + c.x + ',' + c.y),
+      'seed ' + seed + ' produced two different layouts'
+    );
+  }
+  // Sharing is pointless if every seed gives the same puzzle.
+  const one = gen.generatePuzzle(Object.assign({ seed: 5, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON }, FAST));
+  const two = gen.generatePuzzle(Object.assign({ seed: 6, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON }, FAST));
+  assert.notDeepEqual(one.words.map(w => w.text), two.words.map(w => w.text));
+});
+
+/* ------------------------------------------------------------------ *
  * Performance
  * ------------------------------------------------------------------ */
 
@@ -844,6 +915,20 @@ test('the quality score reacts to the things it claims to measure', () => {
   // More rare words to stumble on is worth more.
   const richer = gen.scorePuzzle(puzzle, LEXICON, 60);
   assert.ok(richer.parts.extras >= baseline.parts.extras, 'extras component ignored the rare-word count');
+});
+
+test('easy mode is a friendlier subset of the hard vocabulary', { skip: !realData ? 'no real data' : false }, () => {
+  const hard = new Set(realData.ZAN_COMMON);
+  const hardLong = new Set(realData.ZAN_COMMON_LONG);
+  assert.ok(realData.ZAN_COMMON_EASY.length > 500, 'easy vocabulary too small to build boards');
+  assert.ok(realData.ZAN_COMMON_EASY.length < realData.ZAN_COMMON.length,
+    'easy vocabulary is not narrower than hard');
+  for (const word of realData.ZAN_COMMON_EASY) {
+    assert.ok(hard.has(word), 'easy word "' + word + '" is not a hard word');
+  }
+  for (const word of realData.ZAN_LONG_EASY) {
+    assert.ok(hardLong.has(word), 'easy long word "' + word + '" is not a hard long word');
+  }
 });
 
 test('base words are the recognisable subset of the long words', { skip: !realData ? 'no real data' : false }, () => {

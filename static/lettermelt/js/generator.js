@@ -674,9 +674,13 @@
       // Shuffle before screening: the list arrives sorted, so stopping early on
       // it would hand a whole session base words from one corner of the
       // alphabet.
+      // Fixed-seed shuffle, not Math.random: the pool must come out the same
+      // in every session or a shared seed would build a different puzzle for
+      // the person you sent it to.
       const order = baseSource.slice();
+      const shuffleRng = createRng(0x5eedf00d);
       for (let i = order.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(shuffleRng() * (i + 1));
         const tmp = order[i];
         order[i] = order[j];
         order[j] = tmp;
@@ -1261,7 +1265,12 @@
 
   function generatePuzzle(options) {
     const opts = options || {};
-    const rng = opts.rng || createRng(Math.floor(Math.random() * 0xffffffff));
+    // Every puzzle records the seed it grew from, so a finished game can be
+    // handed to someone else as a link and rebuild exactly the same board.
+    const seed = (opts.seed === undefined || opts.seed === null)
+      ? Math.floor(Math.random() * 0xffffffff)
+      : (opts.seed >>> 0);
+    const rng = opts.rng || createRng(seed);
     let pools = resolvePools(opts);
     const lexicon = resolveLexicon(opts, pools);
     // Prefer base words that don't embed other common words (see buildLexicon).
@@ -1329,6 +1338,7 @@
     if (best) {
       best.attempts = attempts;
       best.rejects = rejects;
+      best.seed = seed;
       return best;
     }
     return null;

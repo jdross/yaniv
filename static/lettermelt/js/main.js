@@ -25,40 +25,73 @@
     sheetBurst: $('sheetBurst'),
     sheetSub: $('sheetSub'),
     sheetWords: $('sheetWords'),
-    playAgain: $('playAgain')
+    playAgain: $('playAgain'),
+    stars: $('stars'),
+    starCountdown: $('starCountdown'),
+    modeToggle: $('modeToggle'),
+    sheetStars: $('sheetStars'),
+    shareBtn: $('shareBtn')
   };
 
-  const commonWords = (Array.isArray(window.ZAN_COMMON) && window.ZAN_COMMON.length)
-    ? window.ZAN_COMMON
-    : Generator.FALLBACK_COMMON;
+  /* ----------------------------- vocabulary -----------------------------
+   * Two difficulties over one dictionary. Hard uses the full common-word
+   * vocabulary; easy uses a friendlier subset, so a board spells fewer
+   * required words and every one of them is instantly recognisable. Bonus
+   * words are shared: the dictionary does not change with difficulty.
+   */
+  const MODES = {
+    hard: {
+      label: 'Hard',
+      common: window.ZAN_COMMON,
+      long: window.ZAN_COMMON_LONG,
+      base: window.ZAN_BASE
+    },
+    easy: {
+      label: 'Easy',
+      common: window.ZAN_COMMON_EASY,
+      long: window.ZAN_LONG_EASY,
+      base: window.ZAN_BASE_EASY
+    }
+  };
 
-  // Guard: if the data files predate the ZAN_COMMON_LONG contract, keep long
-  // words out of the regular pool and use the embedded long list instead.
-  const longWords = (Array.isArray(window.ZAN_COMMON_LONG) && window.ZAN_COMMON_LONG.length)
-    ? window.ZAN_COMMON_LONG
-    : Generator.FALLBACK_LONG;
-
-  // One lexicon for the whole session: the dictionary the engine validates
-  // against, the "common" set that decides normal-vs-extra, and the prefix
-  // index the generator enumerates with. Built once (~120ms) and reused.
-  //
-  // The embedded fallbacks are a substitute for missing data files, never a
-  // supplement to them: folding them into a real word list would smuggle their
-  // sample words (plurals like "tones" and "metals") into the required-word
-  // set, where the curated lists deliberately exclude such forms.
   const dictSource = (typeof window.ZAN_DICT_RAW === 'string' && window.ZAN_DICT_RAW.length)
     ? window.ZAN_DICT_RAW
     : Generator.FALLBACK_COMMON.concat(Generator.FALLBACK_EXTRA, Generator.FALLBACK_LONG);
 
-  // Two different questions about long words. Every word in longWords counts
-  // as a required word when the board can spell it ("anaconda" should not be a
-  // bonus). Only baseWords are fit to headline a puzzle, which is a higher bar
-  // — the star of the board should be recognised on sight.
-  const baseWords = (Array.isArray(window.ZAN_BASE) && window.ZAN_BASE.length)
-    ? window.ZAN_BASE
-    : longWords;
-  const lexicon = Generator.buildLexicon(dictSource, commonWords, longWords, baseWords);
-  const dict = lexicon.words;
+  const usable = list => (Array.isArray(list) && list.length ? list : null);
+
+  /**
+   * Word pools for a difficulty, falling back to hard (then to the embedded
+   * lists) when the data files predate a contract.
+   *
+   * The embedded fallbacks substitute for missing data, never supplement it:
+   * folding them into a real word list would smuggle their sample plurals
+   * ("tones", "metals") into the required set.
+   */
+  function poolsFor(mode) {
+    const m = MODES[mode] || MODES.hard;
+    const common = usable(m.common) || usable(MODES.hard.common) || Generator.FALLBACK_COMMON;
+    const long = usable(m.long) || usable(MODES.hard.long) || Generator.FALLBACK_LONG;
+    // Every long word counts as required; only base words headline a puzzle.
+    const base = usable(m.base) || usable(MODES.hard.base) || long;
+    return { common: common, long: long, base: base };
+  }
+
+  // Lexicons are ~300ms to build, so each difficulty builds one on first use.
+  const lexicons = {};
+  function lexiconFor(mode) {
+    if (!lexicons[mode]) {
+      const p = poolsFor(mode);
+      lexicons[mode] = Generator.buildLexicon(dictSource, p.common, p.long, p.base);
+    }
+    return lexicons[mode];
+  }
+
+  let mode = 'hard';
+  let lexicon = lexiconFor(mode);
+  let dict = lexicon.words;
+  let currentSeed = null;
+  let shownStars = Engine.MAX_STARS;
 
   const renderer = window.ZanRender.create(els.board);
 
@@ -99,8 +132,38 @@
     }
   }
 
+  /**
+   * Stars, and the countdown to losing the next one. The clock counts up, so
+   * stars are spent as it climbs — and an extra word can buy one back, which
+   * is why the row re-renders from elapsed time rather than latching.
+   */
+  function renderStars(force) {
+    const stars = Engine.starsFor(game.elapsedMs);
+    if (stars !== shownStars || force) {
+      const losing = stars < shownStars ? shownStars : 0;
+      els.stars.innerHTML = '';
+      for (let i = 1; i <= Engine.MAX_STARS; i++) {
+        const star = document.createElement('i');
+        star.textContent = '★';
+        if (i > stars) star.classList.add('spent');
+        if (i === losing && !renderer.prefersReducedMotion()) star.classList.add('losing');
+        els.stars.appendChild(star);
+      }
+      shownStars = stars;
+    }
+    const next = Engine.msToNextStarLoss(game.elapsedMs);
+    if (next === null) {
+      els.starCountdown.textContent = 'last star';
+      els.starCountdown.classList.remove('urgent');
+    } else {
+      els.starCountdown.textContent = Engine.formatTime(next) + ' to next';
+      els.starCountdown.classList.toggle('urgent', next < 30000);
+    }
+  }
+
   function renderHud(tick) {
     els.timerValue.textContent = Engine.formatTime(game.elapsedMs);
+    renderStars();
     const solved = String(Engine.solvedCount(game));
     if (tick && els.solvedCount.textContent !== solved) {
       els.solvedCount.classList.remove('tick');
@@ -210,6 +273,16 @@
       ? extras.length + ' extra word' + (extras.length === 1 ? '' : 's') + ' saved you ' + saved + 's'
       : 'No extra words found — try hunting for bonus words next time.';
 
+    const stars = Engine.starsFor(game.elapsedMs);
+    els.sheetStars.innerHTML = '';
+    for (let i = 1; i <= Engine.MAX_STARS; i++) {
+      const star = document.createElement('i');
+      star.textContent = '★';
+      if (i > stars) star.classList.add('spent');
+      star.style.setProperty('--delay', (0.1 * i).toFixed(2) + 's');
+      els.sheetStars.appendChild(star);
+    }
+
     els.sheetWords.innerHTML = '';
     for (const extra of extras.slice(0, 18)) {
       const li = document.createElement('li');
@@ -217,8 +290,55 @@
       li.textContent = extra.word;
       els.sheetWords.appendChild(li);
     }
+    resetShareButton();
     els.overlay.hidden = false;
     burst();
+  }
+
+  /* ------------------------------ sharing ------------------------------ *
+   * A puzzle is just a seed plus a difficulty, so a link is enough to hand
+   * someone the exact board you played.
+   */
+
+  function puzzleLink() {
+    const url = new URL(window.location.href);
+    url.hash = '';
+    url.searchParams.set('s', String(currentSeed));
+    url.searchParams.set('m', mode);
+    return url.toString();
+  }
+
+  function shareMessage() {
+    const stars = Engine.starsFor(game.elapsedMs);
+    const plural = stars === 1 ? 'star' : 'stars';
+    return 'I got ' + stars + ' ' + plural + ' on ' + MODES[mode].label.toLowerCase() +
+      ' mode, done in ' + Engine.formatTime(game.elapsedMs) + '! Here\'s the puzzle: ' +
+      puzzleLink();
+  }
+
+  function resetShareButton() {
+    els.shareBtn.classList.remove('copied');
+    els.shareBtn.textContent = 'Share this puzzle';
+  }
+
+  function share() {
+    const text = shareMessage();
+    // The share sheet is the natural route on a phone; clipboard is the
+    // fallback, and a selectable prompt the fallback's fallback.
+    if (navigator.share) {
+      navigator.share({ text: text }).catch(() => {});
+      return;
+    }
+    const done = () => {
+      els.shareBtn.classList.add('copied');
+      els.shareBtn.textContent = 'Copied!';
+      window.setTimeout(resetShareButton, 2200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => window.prompt('Copy this:', text));
+    } else {
+      window.prompt('Copy this:', text);
+    }
   }
 
   /* ------------------------------ submit ------------------------------- */
@@ -283,6 +403,15 @@
       return;
     }
 
+    // Plurals are deliberately not in the dictionary, so say that outright
+    // rather than letting the red shake imply the letters spell nothing.
+    if (result.type === 'plural') {
+      renderer.drainTrace('dim', 380);
+      flashCurrent(word, 'again', 900);
+      setHint('no plurals');
+      return;
+    }
+
     if (result.type === 'short') {
       // Grey too: nothing is wrong with the letters, the word is just short.
       renderer.drainTrace('dim', 320);
@@ -298,9 +427,13 @@
 
   /* ------------------------------ new game ----------------------------- */
 
-  function newGame() {
+  function newGame(seed) {
+    const pools = poolsFor(mode);
+    const wanted = (seed === undefined || seed === null) ? undefined : (seed >>> 0);
     const puzzle =
-      Generator.generatePuzzle({ words: commonWords, longWords: baseWords, lexicon: lexicon }) ||
+      Generator.generatePuzzle({
+        words: pools.common, longWords: pools.base, lexicon: lexicon, seed: wanted
+      }) ||
       Generator.generatePuzzle({
         words: Generator.FALLBACK_COMMON,
         longWords: Generator.FALLBACK_LONG,
@@ -314,10 +447,13 @@
       els.overlay.hidden = false;
       return;
     }
+    currentSeed = puzzle.seed;
     game = Engine.createGame({ puzzle: puzzle, dict: dict });
+    shownStars = Engine.MAX_STARS;
     rebuildAdjacency();
     renderer.setPuzzle(puzzle);
     renderHud();
+    renderStars(true);
     renderLongest();
     els.longest.classList.remove('celebrate');
     setCurrent('');
@@ -349,8 +485,22 @@
     onCancel: () => setCurrent('')
   });
 
-  els.newGame.addEventListener('click', newGame);
-  els.playAgain.addEventListener('click', newGame);
+  els.newGame.addEventListener('click', () => newGame());
+  els.playAgain.addEventListener('click', () => newGame());
+  els.shareBtn.addEventListener('click', share);
+
+  function renderMode() {
+    els.modeToggle.textContent = MODES[mode].label;
+    els.modeToggle.classList.toggle('easy', mode === 'easy');
+  }
+
+  els.modeToggle.addEventListener('click', () => {
+    mode = mode === 'hard' ? 'easy' : 'hard';
+    lexicon = lexiconFor(mode);
+    dict = lexicon.words;
+    renderMode();
+    newGame();
+  });
 
   // Kill double-tap zoom and rubber-band scrolling on iOS.
   document.addEventListener('gesturestart', ev => ev.preventDefault());
@@ -363,12 +513,47 @@
     if (game) renderer.refresh();
   });
 
-  newGame();
+  /**
+   * A shared link carries the seed and difficulty, so opening it rebuilds the
+   * exact board the sender played. Anything unparseable just starts a normal
+   * game rather than failing.
+   */
+  function startFromLocation() {
+    let seed = null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const hash = window.location.hash.replace(/^#/, '');
+      const fromHash = hash ? new URLSearchParams(hash) : null;
+      const rawMode = params.get('m') || (fromHash && fromHash.get('m'));
+      const rawSeed = params.get('s') || (fromHash && fromHash.get('s'));
+      if (rawMode && MODES[rawMode]) {
+        mode = rawMode;
+        lexicon = lexiconFor(mode);
+        dict = lexicon.words;
+      }
+      if (rawSeed && /^\d+$/.test(rawSeed)) seed = Number(rawSeed) >>> 0;
+    } catch (_e) { /* malformed URL: just play a fresh board */ }
+    renderMode();
+    newGame(seed);
+  }
+
+  startFromLocation();
 
   // Test/debug hook.
   window.ZAN = {
     newGame: newGame,
     getGame: () => game,
+    getSeed: () => currentSeed,
+    getMode: () => mode,
+    setMode: function (next) {
+      if (!MODES[next]) return false;
+      mode = next;
+      lexicon = lexiconFor(mode);
+      dict = lexicon.words;
+      renderMode();
+      return true;
+    },
+    shareMessage: () => shareMessage(),
     renderer: renderer,
     lexicon: lexicon,
     enumerate: function () {

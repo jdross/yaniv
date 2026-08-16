@@ -35,6 +35,40 @@
     }
   };
 
+  /*
+   * Stars. The clock still counts up, but it now spends a rating rather than
+   * just recording a time: you start on five stars and drop one each time the
+   * elapsed time crosses a threshold. Extra words push the clock back, so
+   * finding them can win a star back.
+   */
+  const STAR_THRESHOLDS = [
+    { stars: 5, withinMs: 5 * 60 * 1000 },
+    { stars: 4, withinMs: 6 * 60 * 1000 },
+    { stars: 3, withinMs: 7.5 * 60 * 1000 },
+    { stars: 2, withinMs: 10 * 60 * 1000 }
+  ];
+  const MIN_STARS = 1;
+  const MAX_STARS = STAR_THRESHOLDS[0].stars;
+
+  /** Stars a run finishing at `elapsedMs` would earn. */
+  function starsFor(elapsedMs) {
+    for (const tier of STAR_THRESHOLDS) {
+      if (elapsedMs < tier.withinMs) return tier.stars;
+    }
+    return MIN_STARS;
+  }
+
+  /**
+   * Milliseconds until the next star is lost, or null on the last star.
+   * Drives the countdown beside the star row.
+   */
+  function msToNextStarLoss(elapsedMs) {
+    for (const tier of STAR_THRESHOLDS) {
+      if (elapsedMs < tier.withinMs) return tier.withinMs - elapsedMs;
+    }
+    return null;
+  }
+
   /** Seconds an extra word of the given length shaves off the clock. */
   function extraSeconds(length, table) {
     const t = table || DEFAULTS.extraSeconds;
@@ -106,7 +140,7 @@
    * Judge a traced string.
    * Returns { type, word, ... } where type is one of:
    *   'required' | 'extra' | 'short' | 'repeat-required' | 'repeat-extra' |
-   *   'unknown' | 'inactive'
+   *   'plural' | 'unknown' | 'inactive'
    */
   function submitWord(state, rawWord) {
     const word = String(rawWord || '').toLowerCase();
@@ -153,7 +187,24 @@
       state.savedMs += credited;
       return { type: 'extra', word: word, seconds: secs, timeSaved: credited };
     }
+    if (looksLikePlural(word, state.dict)) return { type: 'plural', word: word };
     return { type: 'unknown', word: word };
+  }
+
+  /**
+   * Is this rejected trace just a plural of a real word?
+   *
+   * Plurals are deliberately absent from the dictionary — "reels" is not a
+   * separate find from "reel" — so they land as 'unknown' alongside genuine
+   * non-words. Telling the two apart lets the board say "no plurals" instead
+   * of implying the letters spell nothing.
+   */
+  function looksLikePlural(word, dict) {
+    if (!dict || word.length < 5 || !word.endsWith('s') || word.endsWith('ss')) return false;
+    if (dict.has(word.slice(0, -1))) return true;                       // reels -> reel
+    if (word.endsWith('es') && dict.has(word.slice(0, -2))) return true; // boxes -> box
+    if (word.endsWith('ies') && dict.has(word.slice(0, -3) + 'y')) return true; // cities -> city
+    return false;
   }
 
   /** Format ms as M:SS for the HUD. */
@@ -166,6 +217,12 @@
 
   return {
     DEFAULTS: DEFAULTS,
+    STAR_THRESHOLDS: STAR_THRESHOLDS,
+    MAX_STARS: MAX_STARS,
+    MIN_STARS: MIN_STARS,
+    starsFor: starsFor,
+    looksLikePlural: looksLikePlural,
+    msToNextStarLoss: msToNextStarLoss,
     extraSeconds: extraSeconds,
     buildDict: buildDict,
     createGame: createGame,

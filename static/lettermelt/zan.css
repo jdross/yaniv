@@ -263,6 +263,80 @@ body {
 
 .btn-new:active { transform: scale(.94); background: rgba(255, 176, 77, .34); }
 
+.hud-actions { display: flex; align-items: center; gap: 8px; }
+
+.mode-toggle {
+  appearance: none;
+  border: 1px solid rgba(255, 176, 77, .28);
+  background: rgba(255, 137, 61, .1);
+  color: var(--muted);
+  font: inherit;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 8px 11px;
+  border-radius: 999px;
+  transition: transform .12s ease, color .2s ease, background .2s ease;
+}
+
+.mode-toggle:active { transform: scale(.94); }
+
+.mode-toggle.easy {
+  color: #8fe08f;
+  border-color: rgba(111, 214, 111, .4);
+  background: rgba(111, 214, 111, .12);
+}
+
+/* ---- stars: the rating the clock is spending ---- */
+
+.stars-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+  min-height: 22px;
+}
+
+.stars { display: flex; gap: 4px; }
+
+.stars i {
+  font-style: normal;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--honey);
+  text-shadow: 0 0 12px rgba(255, 209, 102, .55);
+  transition: color .4s ease, opacity .4s ease, transform .4s ease;
+}
+
+.stars i.spent {
+  color: rgba(255, 220, 180, .16);
+  text-shadow: none;
+  transform: scale(.82);
+}
+
+/* The moment a star is lost, it flares and drops away. */
+.stars i.losing { animation: star-loss .9s cubic-bezier(.3, .8, .3, 1); }
+
+@keyframes star-loss {
+  0% { transform: scale(1); color: var(--honey); }
+  25% { transform: scale(1.5) rotate(-12deg); color: #fff3e6; }
+  100% { transform: scale(.82); color: rgba(255, 220, 180, .16); }
+}
+
+.star-countdown {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  transition: color .3s ease;
+}
+
+.star-countdown.urgent { color: var(--coral); }
+
 /* The one long word: a dimmed teaser until it is found, then it goes gold. */
 .longest {
   position: relative;
@@ -833,11 +907,57 @@ body {
 
 .sheet-words li.extra { background: rgba(255, 176, 77, .2); color: var(--honey); }
 
+/* Stars on the win sheet, landing one after another. */
+.sheet-stars {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.sheet-stars i {
+  font-style: normal;
+  color: var(--honey);
+  text-shadow: 0 0 20px rgba(255, 209, 102, .7);
+  animation: star-land .5s cubic-bezier(.2, .9, .3, 1.6) both;
+  animation-delay: var(--delay, 0s);
+}
+
+.sheet-stars i.spent {
+  color: rgba(255, 220, 180, .18);
+  text-shadow: none;
+}
+
+@keyframes star-land {
+  from { opacity: 0; transform: scale(2.2) rotate(-20deg); }
+  to { opacity: 1; transform: none; }
+}
+
+.btn-share {
+  appearance: none;
+  width: 100%;
+  margin-top: 16px;
+  padding: 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 186, 130, .34);
+  background: rgba(255, 176, 77, .12);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  transition: transform .12s ease, background .2s ease;
+}
+
+.btn-share:active { transform: scale(.97); }
+.btn-share.copied { background: rgba(111, 214, 111, .2); color: #b6f0b6; }
+
 .btn-primary {
   appearance: none;
   border: 0;
   width: 100%;
-  margin-top: 18px;
+  margin-top: 12px;
   padding: 15px;
   border-radius: 16px;
   font: inherit;
