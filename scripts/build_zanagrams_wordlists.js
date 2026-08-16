@@ -44,12 +44,12 @@ const DICT_SIZE_CAP_BYTES = 2.3 * 1024 * 1024; // ~2.3 MB
 const COMMON_MIN_LEN = 4;
 const COMMON_MAX_LEN = 7;
 const COMMON_TARGET_MIN = 1500;
-const COMMON_TARGET_MAX = 7000;
+const COMMON_TARGET_MAX = 12000;
 
 const COMMON_LONG_MIN_LEN = 8;
 const COMMON_LONG_MAX_LEN = 11;
 const COMMON_LONG_TARGET_MIN = 500;
-const COMMON_LONG_TARGET_MAX = 2000;
+const COMMON_LONG_TARGET_MAX = 4000;
 // The frequency-ranked list thins out badly past its top few thousand
 // entries at 8-11 letters (place names, brand names, adult/spam terms start
 // dominating). Cap how deep we'll walk it for ZAN_COMMON_LONG specifically,
@@ -59,9 +59,14 @@ const COMMON_LONG_MAX_FREQ_RANK = 3500;
 
 // Highest wordlist-english tier that still counts as "a word everyone knows",
 // and therefore belongs in the required-word set rather than the bonus pool.
-// Tier 20 covers everyday vocabulary like "heap", "swamp" and "vein"; tier 35
-// is where genuinely uncommon words (pluck, murky, thorn) start.
-const COMMON_TIER_MAX = 20;
+// Tier 35 is the boundary: it covers everyday vocabulary like "clap", "clan",
+// "reel", "snap", "pond" and "dusk" that tier 20 leaves out, while tier 40+
+// holds the genuinely uncommon words that should stay bonus-only.
+const COMMON_TIER_MAX = 35;
+
+// The base word is the puzzle's headline, so it is held to a stricter bar than
+// the 4-7 letter fill: everyone should recognise it on sight.
+const COMMON_LONG_TIER_MAX = 20;
 
 const LOWER_ALPHA_RE = /^[a-z]+$/;
 
@@ -192,6 +197,7 @@ function loadGradedWordTiers() {
   if (!graded || typeof graded !== 'object') return null;
 
   const common = new Set();
+  const commonLong = new Set();
   const all = new Set();
   let sawCommonTier = false;
 
@@ -209,10 +215,11 @@ function loadGradedWordTiers() {
         common.add(word);
         sawCommonTier = true;
       }
+      if (tier <= COMMON_LONG_TIER_MAX) commonLong.add(word);
     }
   }
   if (!sawCommonTier || all.size < 5000) return null;
-  return { common, all, source: 'wordlist-english (SCOWL tiers <= ' + COMMON_TIER_MAX + ', MIT)' };
+  return { common, commonLong, all, source: 'wordlist-english (SCOWL tiers <= ' + COMMON_TIER_MAX + ', base words <= ' + COMMON_LONG_TIER_MAX + ', MIT)' };
 }
 
 function loadDictionarySource() {
@@ -296,8 +303,22 @@ const STANDALONE_ING = new Set([
   'wing', 'king', 'ring', 'sing', 'bring', 'cling', 'fling', 'wring', 'ginseng'
 ]);
 
+// Words ending -ier/-iest that are nouns, not comparatives of a "-y" word.
+const NOT_COMPARATIVE = new Set([
+  'carrier', 'terrier', 'priest', 'barrier', 'soldier', 'cashier', 'courier',
+  'frontier', 'premier', 'glacier', 'brier', 'friar', 'pliers', 'skier'
+]);
+
 function isInflectedForm(word, stemSet) {
   const has = (s) => s.length >= 2 && stemSet.has(s);
+
+  // Comparative / superlative of a "-y" adjective: tiny -> tinier -> tiniest.
+  // Only the -i- spellings are tested; a bare -er/-est rule would also strike
+  // corner, center, quarter, brother, forest and digest.
+  if (!NOT_COMPARATIVE.has(word)) {
+    if (word.endsWith('ier') && has(word.slice(0, -3) + 'y')) return true;
+    if (word.endsWith('iest') && has(word.slice(0, -4) + 'y')) return true;
+  }
 
   // Present participle / gerund: asking -> ask, baking -> bake, running -> run.
   if (word.endsWith('ing') && word.length >= 5 && !STANDALONE_ING.has(word)) {
@@ -331,10 +352,13 @@ function isInflectedForm(word, stemSet) {
   return false;
 }
 
-function buildDictSet(rawWords) {
+function buildDictSet(rawWords, stemSet) {
   const set = new Set();
   for (const w of rawWords) {
     const word = String(w).toLowerCase();
+    // Inflected forms are not playable at all, not even as bonus words:
+    // "reels" is not a separate find from "reel".
+    if (stemSet && isInflectedForm(word, stemSet)) continue;
     if (!LOWER_ALPHA_RE.test(word)) continue;
     if (word.length < DICT_MIN_LEN || word.length > DICT_MAX_LEN) continue;
     if (BLOCKLIST.has(word)) continue;
@@ -385,9 +409,8 @@ function pickCommonWords(dictSet, stemSet, tiers) {
   // brand tokens that the tiers correctly leave out.
   if (tiers) {
     freqSourceLabel = tiers.source;
-    const graded = Array.from(tiers.common).sort();
-    for (const word of graded) tryAdd(word);
-    for (const word of graded) tryAddLong(word);
+    for (const word of Array.from(tiers.common).sort()) tryAdd(word);
+    for (const word of Array.from(tiers.commonLong).sort()) tryAddLong(word);
   }
 
   if (freq && !tiers) {
@@ -486,8 +509,8 @@ function main() {
   const dictWordsRaw = tiers
     ? dictSrc.words.filter((w) => tiers.all.has(String(w).toLowerCase()))
     : dictSrc.words;
-  const dictSet = buildDictSet(dictWordsRaw);
   const stemSet = buildStemSet(dictWordsRaw);
+  const dictSet = buildDictSet(dictWordsRaw, stemSet);
 
   const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
     pickCommonWords(dictSet, stemSet, tiers);

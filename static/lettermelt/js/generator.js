@@ -664,8 +664,22 @@
     const commonByLen = Array.from(common).filter(w => w.length >= 4);
     const baseWords = [];
     const baseRoomy = [];
-    if (Array.isArray(longList)) {
-      for (const raw of longList) {
+    // Screening is O(long x common), so stop once there are plenty of clean
+    // base words rather than grading the whole list every session.
+    const BASE_POOL_TARGET = 320;
+    if (Array.isArray(longList) && longList.length) {
+      // Shuffle before screening: the list arrives sorted, so stopping early on
+      // it would hand a whole session base words from one corner of the
+      // alphabet.
+      const order = longList.slice();
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+      }
+      for (const raw of order) {
+        if (baseWords.length >= BASE_POOL_TARGET) break;
         const w = String(raw).toLowerCase();
         let embedded = 0;
         for (const c of commonByLen) {
@@ -843,7 +857,9 @@
       // long stretches where the board sits still.
       melt: (ramp(1 - flow.inertShare, 0.3, 0.7) + (1 - ramp(flow.longestInertRun, 2, 6))) / 2,
       variety: ramp(lengths.size, 2, 5),
-      extras: ramp(extraCount || 0, 6, 40)
+      // Rare words are genuinely rare now that everyday vocabulary counts as
+      // required: a board typically offers a handful, not dozens.
+      extras: ramp(extraCount || 0, 2, 14)
     };
     const score = Math.round(
       parts.density * 32 +
