@@ -3,7 +3,7 @@
  * The board is drawn as glass-and-liquid apparatus: letter orbs are layered
  * radial gradients (contact shadow, glass body, liquid fill, sheen, specular,
  * rim light — no strokes, no filters on static layers), and connections are
- * capsule "lanes" trimmed to each orb's rim so nothing overlaps a letter.
+ * capsule "lanes" that run under the orbs so tube and letter read as one piece.
  * Each lane carries a hidden liquid channel (pathLength=1 + dashoffset) that
  * fills directionally as the player traces and drains downhill when a word
  * melts. Everything animates via transform/opacity/dashoffset only.
@@ -16,8 +16,11 @@
   const PAD = 54;
   const MELT_MS = 760;
   const ORB_R = 40;          // drawn orb radius
-  const LANE_GAP = 7;        // clearance between orb rim and lane end
-  const LANE_TRIM = ORB_R + LANE_GAP;
+  // Lanes tuck UNDER the orbs (the node layer paints over the edge layer), so
+  // a tube reads as running into the letter instead of stopping short of it.
+  const LANE_OVERLAP = 13;
+  const LANE_TRIM = ORB_R - LANE_OVERLAP;
+  const HOLD_MS = 400;       // survivors keep the verdict colour this long
   const SHIMMER_SHARE = 0.2;
 
   function el(name, attrs) {
@@ -313,7 +316,7 @@
       placeEdges();
     }
 
-    /** Lane endpoints, trimmed back to each orb's rim. */
+    /** Lane endpoints, pushed just inside each orb so the seam is hidden. */
     function laneEnds(lane) {
       const a = state.pos.get(lane.a);
       const b = state.pos.get(lane.b);
@@ -521,12 +524,18 @@
         if (p) dripAt(p.x, p.y + ORB_R * 0.5);
       }
 
-      // Letters other words still need get a happy little bounce.
+      // Letters other words still need hold the verdict's colour for a beat —
+      // the same beat a grey repeat gets — before their liquid drains, then
+      // give a happy little bounce.
       for (const id of keptIds) {
         const node = state.nodeEls.get(id);
         if (!node) continue;
         node.g.classList.remove('traced');
+        node.g.classList.add('held');
         node.g.classList.add('kept');
+        window.setTimeout(() => {
+          if (token === state.gen) node.g.classList.remove('held');
+        }, HOLD_MS);
         window.setTimeout(() => node.g.classList.remove('kept'), 650);
       }
 

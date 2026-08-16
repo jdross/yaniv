@@ -388,19 +388,21 @@ body {
 .lane { transition: opacity .3s ease; }
 .lane.fresh { opacity: 0; }
 
-/* Soft outer glass wall. */
+/* Outer glass wall. Bright enough that an empty lane reads as a lit-up rail
+ * you can obviously drag along — the two slivers left either side of the bore
+ * are the tube's visible borders. */
 .lane-glass {
-  stroke: rgba(255, 210, 170, .085);
-  stroke-width: 15;
+  stroke: rgba(255, 208, 168, .3);
+  stroke-width: 19;
   stroke-linecap: round;
   transition: stroke .25s ease;
 }
 
-/* Recessed channel inside the tube — kept close to the glass tone so the
- * lane reads as a soft groove, not a drawn outline. */
+/* Recessed channel inside the tube. Darker than the wall so the lane reads as
+ * an empty groove waiting to be filled, with the glass as its visible border. */
 .lane-bore {
-  stroke: rgba(24, 10, 20, .38);
-  stroke-width: 9.5;
+  stroke: rgba(26, 11, 21, .5);
+  stroke-width: 12;
   stroke-linecap: round;
 }
 
@@ -408,7 +410,7 @@ body {
  * dashoffset 1 -> 0 is a directional fill from the path's start. */
 .lane-liquid {
   stroke: #ffbb57;
-  stroke-width: 7.5;
+  stroke-width: 9.5;
   stroke-linecap: round;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
@@ -423,7 +425,7 @@ body {
   opacity: 1;
 }
 
-.lane.filled .lane-glass { stroke: rgba(255, 190, 120, .2); }
+.lane.filled .lane-glass { stroke: rgba(255, 190, 120, .38); }
 
 /* A solved word's liquid runs downhill out of the lane. */
 .lane.draining .lane-liquid {
@@ -450,10 +452,13 @@ body {
 .tone-good .lane.filled .lane-liquid,
 .tone-good .lane.draining .lane-liquid { stroke: #6fd66f; }
 .tone-good .node.traced .node-liquid,
+.tone-good .node.held .node-liquid,
 .tone-good .node.melting .node-liquid { fill: url(#lmLiquidGood); }
 .tone-good .node.traced .node-aura,
+.tone-good .node.held .node-aura,
 .tone-good .node.melting .node-aura { opacity: .55; }
-.tone-good .node.traced .node-letter { fill: #0b3d1c; }
+.tone-good .node.traced .node-letter,
+.tone-good .node.held .node-letter { fill: #0b3d1c; }
 .tone-good .drop { fill: url(#lmLiquidGood); }
 
 .tone-extra .lane.filled .lane-liquid,
@@ -573,11 +578,18 @@ body {
   50% { opacity: .8; transform: scale(1.08); }
 }
 
-.node.traced .node-liquid { transform: scaleY(1); }
-.node.traced .node-aura { opacity: .9; }
-.node.traced .node-sheen { opacity: .85; animation: none; }
-.node.traced .node-letter { fill: #401307; }
-.node.traced .node-letter-shade { fill: rgba(255, 240, 210, .4); }
+/* `.held` is `.traced` after the fact: a survivor of a solved word keeps the
+ * verdict's fill for a beat once the trace itself has been cleared. */
+.node.traced .node-liquid,
+.node.held .node-liquid { transform: scaleY(1); }
+.node.traced .node-aura,
+.node.held .node-aura { opacity: .9; }
+.node.traced .node-sheen,
+.node.held .node-sheen { opacity: .85; animation: none; }
+.node.traced .node-letter,
+.node.held .node-letter { fill: #401307; }
+.node.traced .node-letter-shade,
+.node.held .node-letter-shade { fill: rgba(255, 240, 210, .4); }
 
 /* Squash-and-spring the instant a tile locks into the trace. */
 .node.lock .node-inner { animation: tile-lock .34s cubic-bezier(.22, .9, .3, 1.6); }
