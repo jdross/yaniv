@@ -160,6 +160,13 @@ body {
   animation: credit-pop .7s cubic-bezier(.2, .9, .3, 1.5);
 }
 
+/* An extra word pays out time: the clock goes blue while it drops. */
+.timer.credited-extra {
+  color: #7cc9ff;
+  text-shadow: 0 0 28px rgba(99, 184, 245, .8);
+  animation: credit-pop .7s cubic-bezier(.2, .9, .3, 1.5);
+}
+
 @keyframes credit-pop {
   0% { transform: scale(1); }
   30% { transform: scale(1.18); }
@@ -185,6 +192,11 @@ body {
   font-weight: 800;
   color: var(--honey);
   text-shadow: 0 2px 14px rgba(255, 176, 77, .6);
+}
+
+.toast-extra {
+  color: #7cc9ff;
+  text-shadow: 0 2px 16px rgba(99, 184, 245, .7);
   animation: float-up 1.25s ease-out forwards;
   pointer-events: none;
 }
@@ -329,8 +341,14 @@ body {
 }
 
 .current-text.good {
-  color: var(--honey);
-  text-shadow: 0 4px 30px rgba(255, 209, 102, .75);
+  color: #8fe08f;
+  text-shadow: 0 4px 30px rgba(111, 214, 111, .6);
+  animation: chunky-pop .55s cubic-bezier(.2, .9, .28, 1.6);
+}
+
+.current-text.extra {
+  color: #7cc9ff;
+  text-shadow: 0 4px 30px rgba(99, 184, 245, .6);
   animation: chunky-pop .55s cubic-bezier(.2, .9, .28, 1.6);
 }
 
@@ -422,6 +440,45 @@ body {
   0% { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(14px); }
 }
+
+/* ---- outcome tones ----------------------------------------------------
+ * The liquid itself carries the verdict, so the board answers before any
+ * text is read: green solved a word, blue paid out time, grey means you
+ * already had it (or it was too short), red is not a word.
+ */
+
+.tone-good .lane.filled .lane-liquid,
+.tone-good .lane.draining .lane-liquid { stroke: #6fd66f; }
+.tone-good .node.traced .node-liquid,
+.tone-good .node.melting .node-liquid { fill: url(#lmLiquidGood); }
+.tone-good .node.traced .node-aura,
+.tone-good .node.melting .node-aura { opacity: .55; }
+.tone-good .node.traced .node-letter { fill: #0b3d1c; }
+.tone-good .drop { fill: url(#lmLiquidGood); }
+
+.tone-extra .lane.filled .lane-liquid,
+.tone-extra .lane.draining .lane-liquid { stroke: #63b8f5; }
+.tone-extra .node.traced .node-liquid { fill: url(#lmLiquidExtra); }
+.tone-extra .node.traced .node-aura { opacity: .5; }
+.tone-extra .node.traced .node-letter { fill: #06284d; }
+
+.tone-dim .lane.filled .lane-liquid,
+.tone-dim .lane.draining .lane-liquid { stroke: #9b929b; }
+.tone-dim .node.traced .node-liquid { fill: url(#lmLiquidDim); }
+.tone-dim .node.traced .node-aura { opacity: 0; }
+.tone-dim .node.traced .node-letter { fill: #241f26; }
+
+.tone-bad .lane.filled .lane-liquid,
+.tone-bad .lane.draining .lane-liquid { stroke: #f0736e; }
+.tone-bad .node.traced .node-liquid { fill: url(#lmLiquidBad); }
+.tone-bad .node.traced .node-aura { opacity: .35; }
+.tone-bad .node.traced .node-letter { fill: #3d0b0b; }
+
+/* The band chasing the fingertip is gone by the time a verdict lands, but
+ * keep it in step if a tone is set while it is still visible. */
+.tone-good .band { stroke: #6fd66f; }
+.tone-extra .band { stroke: #63b8f5; }
+.tone-dim .band, .tone-bad .band { opacity: 0; }
 
 /* ---- rubber band: last orb -> fingertip ---- */
 

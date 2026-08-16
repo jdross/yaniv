@@ -93,6 +93,24 @@
       // Fingertip glow.
       gradient('radialGradient', 'lmTip', { cx: '50%', cy: '50%', r: '50%' }, [
         ['0%', '#fff3d0', 0.9], ['42%', '#ffb04d', 0.5], ['100%', '#ff6b5a', 0]
+      ]),
+      // Outcome tones. The liquid recolours the moment a trace is judged, so
+      // the answer is legible from the board itself before any text is read.
+      gradient('radialGradient', 'lmLiquidGood', { cx: '38%', cy: '22%', r: '90%' }, [
+        ['0%', '#e8ffd8'], ['32%', '#96e86b'], ['62%', '#4cc862'],
+        ['88%', '#2f9d4e'], ['100%', '#218040']
+      ]),
+      gradient('radialGradient', 'lmLiquidExtra', { cx: '38%', cy: '22%', r: '90%' }, [
+        ['0%', '#dff2ff'], ['32%', '#7cc9ff'], ['62%', '#3e9df5'],
+        ['88%', '#2274d6'], ['100%', '#1a5fb8']
+      ]),
+      gradient('radialGradient', 'lmLiquidDim', { cx: '38%', cy: '22%', r: '90%' }, [
+        ['0%', '#e6e2e6'], ['32%', '#b3aab3'], ['62%', '#8b8189'],
+        ['88%', '#6a6169'], ['100%', '#57505a']
+      ]),
+      gradient('radialGradient', 'lmLiquidBad', { cx: '38%', cy: '22%', r: '90%' }, [
+        ['0%', '#ffe0e0'], ['32%', '#ff9a95'], ['62%', '#f4635f'],
+        ['88%', '#d8433f'], ['100%', '#b83430']
       ])
     ];
     for (const g of grads) defs.appendChild(g);
@@ -431,6 +449,7 @@
       syncNodes();
       syncEdges();
       clearTrace();
+      setTone(null);
     }
 
     function refresh() {
@@ -636,6 +655,31 @@
       setTrace([], null);
     }
 
+    const TONES = ['tone-good', 'tone-extra', 'tone-dim', 'tone-bad'];
+
+    /** Recolour the liquid to signal an outcome ('good'|'extra'|'dim'|'bad'). */
+    function setTone(tone) {
+      for (const name of TONES) svg.classList.remove(name);
+      if (tone) svg.classList.add('tone-' + tone);
+    }
+
+    /**
+     * Hold the traced fill for a beat in the colour of its verdict, then let
+     * it drain away. Solving a word is green, an extra is blue, and anything
+     * already found (or too short to count) drains grey.
+     */
+    function drainTrace(tone, holdMs) {
+      const token = state.gen;
+      setTone(tone || null);
+      window.setTimeout(() => {
+        if (token !== state.gen) return;
+        clearTrace();
+        window.setTimeout(() => {
+          if (token === state.gen) setTone(null);
+        }, 320);
+      }, holdMs == null ? 280 : holdMs);
+    }
+
     function flashTrace(ids, className) {
       const nodes = ids.map(id => state.nodeEls.get(id)).filter(Boolean);
       for (const n of nodes) n.g.classList.add(className);
@@ -717,6 +761,8 @@
       animateTo: animateTo,
       setTrace: setTrace,
       clearTrace: clearTrace,
+      setTone: setTone,
+      drainTrace: drainTrace,
       flashTrace: flashTrace,
       pulse: pulse,
       lockPulse: lockPulse,

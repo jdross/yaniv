@@ -197,7 +197,9 @@
       ev.preventDefault();
       release();
       const submitted = tracer.end();
-      renderer.clearTrace();
+      // The fill is deliberately NOT cleared here: the submit handler recolours
+      // it to the verdict's tone and drains it from there.
+      renderer.setTrace(submitted, null);
       if (hooks.onSubmit) hooks.onSubmit(submitted);
       if (hooks.onTraceChange) hooks.onTraceChange([]);
     }

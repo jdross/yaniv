@@ -104,20 +104,21 @@
     els.totalCount.textContent = String(Engine.totalWords(game));
   }
 
-  function toast(text) {
+  function toast(text, tone) {
     const node = document.createElement('div');
-    node.className = 'toast';
+    node.className = tone ? 'toast toast-' + tone : 'toast';
     node.textContent = text;
     els.timerToasts.appendChild(node);
     window.setTimeout(() => node.remove(), 1300);
   }
 
-  function flashTimer() {
-    els.timer.classList.remove('credited');
+  function flashTimer(tone) {
+    const cls = tone === 'extra' ? 'credited-extra' : 'credited';
+    els.timer.classList.remove('credited', 'credited-extra');
     // Force a reflow so the animation restarts on rapid extras.
     void els.timer.offsetWidth;
-    els.timer.classList.add('credited');
-    window.setTimeout(() => els.timer.classList.remove('credited'), 700);
+    els.timer.classList.add(cls);
+    window.setTimeout(() => els.timer.classList.remove(cls), 900);
   }
 
   /** Small one-line explanation under the traced word. */
@@ -216,6 +217,8 @@
 
   function handleSubmit(ids) {
     if (!game || game.status !== 'playing' || busy || !ids.length) {
+      renderer.clearTrace();
+      renderer.setTone(null);
       setCurrent('');
       return;
     }
@@ -228,6 +231,9 @@
       renderHud(true);
       renderLongest();
       if (result.isLong) els.longest.classList.add('celebrate');
+      // Green: a word off the board. The tone rides through the melt, so the
+      // letters run green as they go.
+      renderer.setTone('good');
       renderer.playFound({
         removedIds: result.removedIds,
         removedEdgeKeys: result.removedEdgeKeys,
@@ -236,6 +242,7 @@
           rebuildAdjacency();
           busy = false;
           setCurrent('');
+          renderer.setTone(null);
           els.longest.classList.remove('celebrate');
           if (result.solved) finish();
         }
@@ -244,11 +251,12 @@
     }
 
     if (result.type === 'extra') {
-      renderer.pulse(ids, 'bonus', 620);
+      // Blue: a rare word, worth time back rather than a place on the board.
+      renderer.drainTrace('extra', 520);
       renderer.sparkAt(ids[ids.length - 1]);
-      toast('-' + result.seconds + 's');
-      flashTimer();
-      flashCurrent(word, 'good', 800);
+      toast('-' + result.seconds + 's', 'extra');
+      flashTimer('extra');
+      flashCurrent(word, 'extra', 800);
       renderHud();
       return;
     }
@@ -258,19 +266,22 @@
     //   too short     -> a quiet nudge about the 4-letter minimum
     //   not a word    -> the red shake
     if (result.type === 'repeat-required' || result.type === 'repeat-extra') {
-      renderer.pulse(ids, 'again', 620);
+      // Grey: you already have this one, nothing more to win from it.
+      renderer.drainTrace('dim', 380);
       flashCurrent(word, 'again', 900);
       setHint('already found');
       return;
     }
 
     if (result.type === 'short') {
-      renderer.pulse(ids, 'again', 420);
+      // Grey too: nothing is wrong with the letters, the word is just short.
+      renderer.drainTrace('dim', 320);
       flashCurrent(word || '·', 'short', 700);
       setHint('4 letters or more');
       return;
     }
 
+    renderer.drainTrace('bad', 320);
     renderer.flashTrace(ids, 'wrong');
     flashCurrent(word || '·', 'bad', 620);
   }
