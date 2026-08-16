@@ -668,12 +668,15 @@
      * it drain away. Solving a word is green, an extra is blue, and anything
      * already found (or too short to count) drains grey.
      */
-    function drainTrace(tone, holdMs) {
+    function drainTrace(tone, holdMs, keepTone) {
       const token = state.gen;
       setTone(tone || null);
       window.setTimeout(() => {
         if (token !== state.gen) return;
         clearTrace();
+        // A solved word keeps its tone until the melt finishes; the caller
+        // clears it. Everything else fades back to neutral on its own.
+        if (keepTone) return;
         window.setTimeout(() => {
           if (token === state.gen) setTone(null);
         }, 320);

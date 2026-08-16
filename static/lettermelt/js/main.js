@@ -231,9 +231,11 @@
       renderHud(true);
       renderLongest();
       if (result.isLong) els.longest.classList.add('celebrate');
-      // Green: a word off the board. The tone rides through the melt, so the
-      // letters run green as they go.
-      renderer.setTone('good');
+      // Green: a word off the board. The fill drains once the verdict has
+      // registered — letters shared with other words keep their connections,
+      // so leaving the trace up would strand them filled. The tone itself
+      // rides through the melt and is cleared in onDone below.
+      renderer.drainTrace('good', 260, true);
       renderer.playFound({
         removedIds: result.removedIds,
         removedEdgeKeys: result.removedEdgeKeys,
