@@ -846,8 +846,16 @@ test('real word lists carry no plural or past-tense forms', { skip: !realData ? 
   // so only stems that long are verifiable here (dogs/dog is caught at build
   // time against the full word list).
   const dict = new Set(String(realData.ZAN_DICT_RAW).split(/\s+/));
+  // Nouns whose normal form ends in -s are deliberately kept: "binoculars" is
+  // not "binocular" plus an s the way "reels" is "reel" plus an s.
+  const pluralOnly = new Set([
+    'scissors', 'trousers', 'pliers', 'tweezers', 'binoculars', 'pajamas',
+    'jeans', 'goggles', 'shears', 'suds', 'dregs', 'alms', 'series', 'species',
+    'news', 'shorts', 'tongs', 'bellows', 'premises', 'measles', 'mumps'
+  ]);
   const offenders = [];
   for (const word of realData.ZAN_COMMON.concat(realData.ZAN_COMMON_LONG)) {
+    if (pluralOnly.has(word)) continue;
     const plural = word.endsWith('s') && !word.endsWith('ss') && dict.has(word.slice(0, -1));
     const past = word.endsWith('ed') && !word.endsWith('eed') &&
       (dict.has(word.slice(0, -1)) || dict.has(word.slice(0, -2)));

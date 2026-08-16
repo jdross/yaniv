@@ -85,6 +85,27 @@ const BLOCKLIST = new Set([
   'verzeichnis', 'epinions', 'postposted',
 ]);
 
+/*
+ * Familiar words the graded tiers rank too low.
+ *
+ * The tiers are built from spell-checker frequency, which is a good proxy for
+ * "does everyone know this word" but not a perfect one: it puts "anaconda" and
+ * "octane" in the same band as "carfare" and "vintner". Moving the whole
+ * boundary down to catch the first pair would make the second pair REQUIRED
+ * words, which is far worse than leaving a familiar word as a bonus — a player
+ * cannot finish a board without every required word.
+ *
+ * So the boundary stays conservative and known gaps are promoted by name.
+ * Sweeping 354 everyday words across animals, science, food, tools, clothing
+ * and transport found only these 21 below the line, so the list is expected to
+ * stay short; add to it whenever a familiar word turns up as a bonus.
+ */
+const PROMOTED_COMMON = new Set([
+  'anaconda', 'octane', 'gecko', 'seagull', 'isotope', 'obsidian', 'argon',
+  'joule', 'blender', 'doormat', 'savanna', 'burrito', 'sushi', 'hoodie',
+  'tram', 'binoculars', 'tsunami', 'hippo', 'lemur', 'meerkat', 'platypus',
+]);
+
 // Words on the shared profanity list that are perfectly ordinary in a word
 // game and worth keeping playable.
 const PROFANITY_ALLOWLIST = new Set(['escort', 'snatch', 'suck', 'sucker']);
@@ -337,7 +358,19 @@ const NOT_COMPARATIVE = new Set([
   'frontier', 'premier', 'glacier', 'brier', 'friar', 'pliers', 'skier'
 ]);
 
+/*
+ * Nouns whose normal form happens to end in -s. These are not "the singular
+ * plus an s" the way "reels" is: nobody reaches for a "scissor" or a
+ * "binocular", so blocking them would lose ordinary vocabulary.
+ */
+const PLURAL_ONLY_NOUNS = new Set([
+  'scissors', 'trousers', 'pliers', 'tweezers', 'binoculars', 'pajamas',
+  'jeans', 'goggles', 'shears', 'suds', 'dregs', 'alms', 'series', 'species',
+  'news', 'shorts', 'tongs', 'bellows', 'premises', 'measles', 'mumps',
+]);
+
 function isInflectedForm(word, stemSet) {
+  if (PLURAL_ONLY_NOUNS.has(word)) return false;
   const has = (s) => s.length >= 2 && stemSet.has(s);
 
   // Comparative / superlative of a "-y" adjective: tiny -> tinier -> tiniest.
@@ -463,6 +496,12 @@ function pickCommonWords(dictSet, stemSet, tiers, isBlocked) {
     freqSourceLabel = tiers.source;
     for (const word of Array.from(tiers.common).sort()) tryAdd(word);
     for (const word of Array.from(tiers.commonLong).sort()) tryAddLong(word);
+  }
+
+  // Named gaps go in whatever the tiers said, at the length that fits.
+  for (const word of Array.from(PROMOTED_COMMON).sort()) {
+    if (word.length <= COMMON_MAX_LEN) tryAdd(word);
+    else tryAddLong(word);
   }
 
   if (freq && !tiers) {
