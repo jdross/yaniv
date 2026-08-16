@@ -85,9 +85,30 @@ const BLOCKLIST = new Set([
   'verzeichnis', 'epinions', 'postposted',
 ]);
 
-// Crude / sexual / otherwise awkward words kept out of the prominently shown
-// required-word list only. They remain in the validation dictionary, so they
-// still count as bonus words if a player traces one.
+// Words on the shared profanity list that are perfectly ordinary in a word
+// game and worth keeping playable.
+const PROFANITY_ALLOWLIST = new Set(['escort', 'snatch', 'suck', 'sucker']);
+
+// Endings appended to a blocked root that should also be blocked, so the list
+// does not have to enumerate every form.
+const BLOCK_SUFFIXES = ['s', 'es', 'y', 'ies', 'er', 'ers', 'ed', 'ing', 'ish'];
+
+/**
+ * Load the shared profanity/obscenity list (LDNOOBW via naughty-words) and
+ * reduce it to single lowercase words. Returns an empty array if unavailable,
+ * since the embedded lists below still cover the worst of it.
+ */
+function loadProfanityList() {
+  const naughty = tryRequire('naughty-words');
+  const list = naughty && Array.isArray(naughty.en) ? naughty.en : [];
+  return list
+    .map((w) => String(w).toLowerCase())
+    .filter((w) => LOWER_ALPHA_RE.test(w) && w.length >= 3 && !PROFANITY_ALLOWLIST.has(w));
+}
+
+// Crude / sexual / otherwise mature words. These are blocked everywhere: not
+// as required words and not as bonus words either, so tracing one is simply
+// not a word.
 const COMMON_ONLY_BLOCKLIST = new Set([
   'sex', 'sexy', 'sexual', 'porn', 'porno', 'nude', 'nudes', 'naked',
   'penis', 'vagina', 'nipple', 'nipples', 'breast', 'breasts', 'boob',
@@ -100,6 +121,13 @@ const COMMON_ONLY_BLOCKLIST = new Set([
   'suicide', 'murder', 'murders', 'killer', 'killers', 'corpse', 'corpses',
   'hardcore', 'lesbians', 'phentermine', 'personals', 'gangbang', 'blowjobs',
   'gangbangs', 'blowjob',
+  // Anatomy, bodily waste and vulgar slang the shared list misses.
+  'turd', 'scrotum', 'bugger', 'prick', 'feces', 'faeces', 'urine', 'phallus',
+  'jizz', 'schlong', 'pecker', 'wanker', 'tosser', 'arsehole', 'bollock',
+  'minge', 'knacker', 'genital', 'genitals', 'genitalia', 'testicle',
+  'testicles', 'uterus', 'nipples', 'buttock', 'buttocks', 'rectal',
+  'sodomize', 'fondle', 'lewd', 'obscene', 'raunchy', 'skank', 'hussy',
+  'harlot', 'floozy', 'strumpet', 'pimp', 'brothel', 'bordello',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -352,7 +380,31 @@ function isInflectedForm(word, stemSet) {
   return false;
 }
 
-function buildDictSet(rawWords, stemSet) {
+/**
+ * One blocked-word test used everywhere. Covers the embedded lists, the shared
+ * profanity list, and simple derivations of any blocked root ("shitty",
+ * "wanker") so the lists don't have to spell out every form.
+ */
+function makeBlockTest(extraRoots) {
+  const roots = new Set([...BLOCKLIST, ...COMMON_ONLY_BLOCKLIST, ...(extraRoots || [])]);
+  return function isBlocked(word) {
+    if (PROFANITY_ALLOWLIST.has(word)) return false;
+    if (roots.has(word)) return true;
+    for (const suffix of BLOCK_SUFFIXES) {
+      if (!word.endsWith(suffix)) continue;
+      const stem = word.slice(0, -suffix.length);
+      if (stem.length >= 3 && roots.has(stem)) return true;
+      // doubled consonant before the ending: "shitting" -> "shit"
+      if (stem.length >= 4 && stem[stem.length - 1] === stem[stem.length - 2] &&
+          roots.has(stem.slice(0, -1))) {
+        return true;
+      }
+    }
+    return false;
+  };
+}
+
+function buildDictSet(rawWords, stemSet, isBlocked) {
   const set = new Set();
   for (const w of rawWords) {
     const word = String(w).toLowerCase();
@@ -361,13 +413,13 @@ function buildDictSet(rawWords, stemSet) {
     if (stemSet && isInflectedForm(word, stemSet)) continue;
     if (!LOWER_ALPHA_RE.test(word)) continue;
     if (word.length < DICT_MIN_LEN || word.length > DICT_MAX_LEN) continue;
-    if (BLOCKLIST.has(word)) continue;
+    if (isBlocked ? isBlocked(word) : BLOCKLIST.has(word)) continue;
     set.add(word);
   }
   return set;
 }
 
-function pickCommonWords(dictSet, stemSet, tiers) {
+function pickCommonWords(dictSet, stemSet, tiers, isBlocked) {
   const freq = loadFrequencyRankedWords();
   const picked = [];
   const pickedLong = [];
@@ -380,7 +432,7 @@ function pickCommonWords(dictSet, stemSet, tiers) {
     if (seen.has(w)) return false;
     if (!LOWER_ALPHA_RE.test(w)) return false;
     if (w.length < COMMON_MIN_LEN || w.length > COMMON_MAX_LEN) return false;
-    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
+    if (isBlocked(w)) return false;
     if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces ZAN_COMMON subset dict)
     if (isInflectedForm(w, stemSet)) return false; // no plurals / -ed forms as required words
     seen.add(w);
@@ -394,7 +446,7 @@ function pickCommonWords(dictSet, stemSet, tiers) {
     if (seenLong.has(w)) return false;
     if (!LOWER_ALPHA_RE.test(w)) return false;
     if (w.length < COMMON_LONG_MIN_LEN || w.length > COMMON_LONG_MAX_LEN) return false;
-    if (BLOCKLIST.has(w) || COMMON_ONLY_BLOCKLIST.has(w)) return false;
+    if (isBlocked(w)) return false;
     if (!dictSet.has(w)) return false; // must be a real dictionary word (also enforces subset-of-dict)
     if (isInflectedForm(w, stemSet)) return false; // no plurals / -ed forms as required words
     seenLong.add(w);
@@ -510,10 +562,12 @@ function main() {
     ? dictSrc.words.filter((w) => tiers.all.has(String(w).toLowerCase()))
     : dictSrc.words;
   const stemSet = buildStemSet(dictWordsRaw);
-  const dictSet = buildDictSet(dictWordsRaw, stemSet);
+  const profanity = loadProfanityList();
+  const isBlocked = makeBlockTest(profanity);
+  const dictSet = buildDictSet(dictWordsRaw, stemSet, isBlocked);
 
   const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
-    pickCommonWords(dictSet, stemSet, tiers);
+    pickCommonWords(dictSet, stemSet, tiers, isBlocked);
 
   // Guarantee subset invariants: every common/common-long word must be in the
   // dict set (ZAN_COMMON and ZAN_COMMON_LONG are disjoint by length range).

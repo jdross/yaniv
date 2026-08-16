@@ -1095,15 +1095,101 @@
    * Returns null when the board breaks a hard rule (word count outside the
    * band, or a second 8+ letter common word that would rival the base word).
    */
-  function finishPuzzle(board, longText, lexicon, minWords, maxWords, minCells) {
-    const puzzle = materialize(board, longText);
-    const traceable = enumerateWords(puzzle.cells, puzzle.edges, lexicon);
+  /** Split an enumeration into the common (solvable) words and a rare count. */
+  function splitTraceable(traceable, lexicon) {
     const commons = new Map();
     let extraCount = 0;
     for (const [word, route] of traceable) {
       if (lexicon.isCommon(word)) commons.set(word, route);
       else extraCount++;
     }
+    return { commons: commons, extraCount: extraCount };
+  }
+
+  function routeEdgeKeys(route) {
+    const keys = [];
+    for (let i = 1; i < route.length; i++) keys.push(edgeKey(route[i - 1], route[i]));
+    return keys;
+  }
+
+  /**
+   * Snip connections until the board spells the target number of common words.
+   *
+   * Every edge carries some set of words; cutting one removes exactly those,
+   * so this is a cheaper and better-behaved fix than discarding the board. Two
+   * things are protected: the base word's own route (the puzzle must keep its
+   * headline) and any cut that would drop the count below the floor.
+   */
+  function trimToWordCount(cells, edges, split, lexicon, longText, minWords, maxWords) {
+    let liveEdges = edges.slice();
+    let current = split;
+
+    const baseRoute = current.commons.get(longText);
+    const protectedKeys = new Set(baseRoute ? routeEdgeKeys(baseRoute) : []);
+
+    for (let pass = 0; pass < 24 && current.commons.size > maxWords; pass++) {
+      // How many words would each candidate edge take with it?
+      const cost = new Map();
+      for (const [word, route] of current.commons) {
+        if (word === longText) continue;
+        for (const k of routeEdgeKeys(route)) {
+          if (protectedKeys.has(k)) continue;
+          cost.set(k, (cost.get(k) || 0) + 1);
+        }
+      }
+      if (!cost.size) break;
+
+      const excess = current.commons.size - maxWords;
+      const floorRoom = current.commons.size - minWords;
+      let bestKey = null;
+      let bestScore = Infinity;
+      for (const [k, n] of cost) {
+        if (n > floorRoom) continue;           // would cut below the floor
+        // Prefer the cut that lands closest to the target, breaking ties
+        // toward the larger cut so this converges quickly.
+        const score = Math.abs(n - excess) * 10 + (excess - Math.min(n, excess));
+        if (score < bestScore) {
+          bestScore = score;
+          bestKey = k;
+        }
+      }
+      if (bestKey === null) break;
+
+      const candidate = liveEdges.filter(e => edgeKey(e[0], e[1]) !== bestKey);
+      const next = splitTraceable(enumerateWords(cells, candidate, lexicon), lexicon);
+      // Words can have more than one route, so a cut may remove fewer words
+      // than predicted — or, if it strands the base word or undershoots the
+      // floor, it is simply not taken.
+      if (!next.commons.has(longText) || next.commons.size < minWords) break;
+      if (next.commons.size >= current.commons.size) {
+        protectedKeys.add(bestKey);   // useless cut: stop reconsidering it
+        continue;
+      }
+      liveEdges = candidate;
+      current = next;
+    }
+
+    return { edges: liveEdges, split: current };
+  }
+
+  function finishPuzzle(board, longText, lexicon, minWords, maxWords, minCells) {
+    const puzzle = materialize(board, longText);
+    let edges = puzzle.edges;
+    let split = splitTraceable(enumerateWords(puzzle.cells, edges, lexicon), lexicon);
+
+    // Too many words is not a reason to throw the board away: snipping a
+    // connection removes the words that ran through it, so trim down to the
+    // target instead of re-rolling a board that is otherwise good.
+    if (split.commons.size > maxWords) {
+      const trimmed = trimToWordCount(
+        puzzle.cells, edges, split, lexicon, longText, minWords, maxWords
+      );
+      edges = trimmed.edges;
+      split = trimmed.split;
+      puzzle.edges = edges;
+    }
+    const commons = split.commons;
+    let extraCount = split.extraCount;
 
     // The base word must be the one and only long word in the solvable set.
     for (const word of commons.keys()) {
@@ -1113,34 +1199,39 @@
     if (commons.size < minWords || commons.size > maxWords) {
       return { rejected: true, normalCount: commons.size, puzzle: null };
     }
-    // Gaps in the 5 x 5 are welcome, but a board this sparse stops reading as
-    // a grid at all.
-    if (puzzle.cells.length < (minCells || CONFIG.minCells)) {
-      return { rejected: true, normalCount: commons.size, puzzle: null };
-    }
 
-    const placed = new Map(puzzle.words.map(w => [w.text, w]));
+    // Every word takes the route the enumerator found for it, including words
+    // that were laid down during construction. Their original path may have
+    // crossed a connection that trimming has since cut, and reusing it would
+    // put that connection back — reviving the words the cut was meant to
+    // remove and breaking the "everything shown is used" promise.
     const words = [];
     for (const [text, route] of commons) {
-      const existing = placed.get(text);
-      words.push(existing || {
+      words.push({
         text: text,
         cellIds: route.slice(),
         found: false,
-        isLong: text === longText,
-        promoted: true
+        isLong: text === longText
       });
-    }
-    // Any laid-down word must also be common, so it must have been enumerated;
-    // if the vocabulary ever drifts, keep it rather than orphan its cells.
-    for (const word of puzzle.words) {
-      if (!commons.has(word.text)) words.push(word);
     }
     words.sort((a, b) => (b.isLong ? 1 : 0) - (a.isLong ? 1 : 0));
     puzzle.words = words;
     computeUnion(puzzle);
+    // Trimming can leave a cell with no word running through it. Nothing has
+    // been solved yet, so such a cell was never part of this puzzle: drop it
+    // from the master list rather than carrying a letter no word can use.
+    const liveIds = new Set(puzzle.cells.map(c => c.id));
+    if (liveIds.size !== puzzle.allCells.length) {
+      puzzle.allCells = puzzle.allCells.filter(c => liveIds.has(c.id));
+    }
     recenter(puzzle);
     puzzle.cellsUsed = puzzle.cells.length;
+
+    // Checked after the union settles: trimming can strand cells, and it is
+    // the final board that has to read as a grid.
+    if (puzzle.cells.length < (minCells || CONFIG.minCells)) {
+      return { rejected: true, normalCount: commons.size, puzzle: null };
+    }
     return {
       rejected: false,
       normalCount: words.length,
