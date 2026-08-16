@@ -13,8 +13,6 @@
     timerToasts: $('timerToasts'),
     solvedCount: $('solvedCount'),
     totalCount: $('totalCount'),
-    longest: $('longest'),
-    longestText: $('longestText'),
     newGame: $('newGame'),
     current: $('currentText'),
     currentHint: $('currentHint'),
@@ -27,7 +25,9 @@
     sheetWords: $('sheetWords'),
     playAgain: $('playAgain'),
     stars: $('stars'),
-    starCountdown: $('starCountdown'),
+    tube: $('tube'),
+    tubeFill: $('tubeFill'),
+    tubeTicks: $('tubeTicks'),
     modeToggle: $('modeToggle'),
     sheetStars: $('sheetStars'),
     shareBtn: $('shareBtn')
@@ -116,29 +116,35 @@
     return word.cellIds.filter(id => !gone.has(id));
   }
 
-  function renderLongest() {
-    const word = Generator.longestWord(game.puzzle);
-    if (!word) {
-      els.longest.hidden = true;
-      return;
-    }
-    els.longest.hidden = false;
-    if (word.found) {
-      els.longest.classList.add('found');
-      els.longestText.textContent = word.text.toUpperCase();
-    } else {
-      els.longest.classList.remove('found');
-      els.longestText.textContent = word.text.length + ' letters';
+  /* --------------------------- the clock ---------------------------- *
+   * The clock is a tube of liquid draining away, not a number ticking up.
+   * It starts full at TIME_LIMIT and empties to the right; the notches mark
+   * where each star goes. Run past the limit and the tube sits empty while a
+   * red overtime counter climbs.
+   */
+  const TIME_LIMIT_MS = 10 * 60 * 1000;
+
+  /** Fraction of the tube still full when `elapsedMs` has passed. */
+  function fillFraction(elapsedMs) {
+    return Math.max(0, Math.min(1, 1 - elapsedMs / TIME_LIMIT_MS));
+  }
+
+  /** Notches sit where the draining edge will be as each star is lost. */
+  function buildTicks() {
+    els.tubeTicks.innerHTML = '';
+    for (const tier of Engine.STAR_THRESHOLDS) {
+      const at = fillFraction(tier.withinMs);
+      if (at <= 0 || at >= 1) continue;   // the last notch is the tube's end
+      const tick = document.createElement('i');
+      tick.style.left = (at * 100).toFixed(2) + '%';
+      tick.dataset.at = String(tier.withinMs);
+      els.tubeTicks.appendChild(tick);
     }
   }
 
-  /**
-   * Stars, and the countdown to losing the next one. The clock counts up, so
-   * stars are spent as it climbs — and an extra word can buy one back, which
-   * is why the row re-renders from elapsed time rather than latching.
-   */
   function renderStars(force) {
     const stars = Engine.starsFor(game.elapsedMs);
+    const next = Engine.msToNextStarLoss(game.elapsedMs);
     if (stars !== shownStars || force) {
       const losing = stars < shownStars ? shownStars : 0;
       els.stars.innerHTML = '';
@@ -151,18 +157,39 @@
       }
       shownStars = stars;
     }
-    const next = Engine.msToNextStarLoss(game.elapsedMs);
-    if (next === null) {
-      els.starCountdown.textContent = 'last star';
-      els.starCountdown.classList.remove('urgent');
-    } else {
-      els.starCountdown.textContent = Engine.formatTime(next) + ' to next';
-      els.starCountdown.classList.toggle('urgent', next < 30000);
+    // The star about to go beats faster the nearer it gets, from a slow pulse
+    // a minute out down to a flutter in the last seconds.
+    const atRisk = els.stars.children[stars - 1];
+    for (const star of els.stars.children) star.classList.remove('atrisk');
+    if (atRisk && next !== null && next < 60000 && !renderer.prefersReducedMotion()) {
+      atRisk.classList.add('atrisk');
+      atRisk.style.setProperty('--beat', (0.3 + (next / 60000) * 1.1).toFixed(2) + 's');
+    }
+  }
+
+  function renderClock() {
+    const elapsed = game.elapsedMs;
+    const remaining = TIME_LIMIT_MS - elapsed;
+    const fill = fillFraction(elapsed);
+    els.tubeFill.style.width = (fill * 100).toFixed(2) + '%';
+
+    const overtime = remaining <= 0;
+    els.tube.classList.toggle('overtime', overtime);
+    els.tube.classList.toggle('empty', fill <= 0);
+    els.timerValue.textContent = overtime
+      ? '+' + Engine.formatTime(-remaining)
+      : Engine.formatTime(remaining);
+
+    const next = Engine.msToNextStarLoss(elapsed);
+    els.tube.classList.toggle('warn', !overtime && next !== null && next < 30000);
+
+    for (const tick of els.tubeTicks.children) {
+      tick.classList.toggle('passed', elapsed >= Number(tick.dataset.at));
     }
   }
 
   function renderHud(tick) {
-    els.timerValue.textContent = Engine.formatTime(game.elapsedMs);
+    renderClock();
     renderStars();
     const solved = String(Engine.solvedCount(game));
     if (tick && els.solvedCount.textContent !== solved) {
@@ -183,13 +210,13 @@
     window.setTimeout(() => node.remove(), 1300);
   }
 
+  /** An extra word buys time back: the tube flashes blue as it refills. */
   function flashTimer(tone) {
     const cls = tone === 'extra' ? 'credited-extra' : 'credited';
-    els.timer.classList.remove('credited', 'credited-extra');
-    // Force a reflow so the animation restarts on rapid extras.
-    void els.timer.offsetWidth;
-    els.timer.classList.add(cls);
-    window.setTimeout(() => els.timer.classList.remove(cls), 900);
+    els.tube.classList.remove('credited', 'credited-extra');
+    void els.tube.offsetWidth;   // restart the flash on rapid extras
+    els.tube.classList.add(cls);
+    window.setTimeout(() => els.tube.classList.remove(cls), 900);
   }
 
   /** Small one-line explanation under the traced word. */
@@ -357,8 +384,9 @@
       busy = true;
       setCurrent(word, 'good');
       renderHud(true);
-      renderLongest();
-      if (result.isLong) els.longest.classList.add('celebrate');
+      // The base word no longer sits on a pill waiting to be found; solving it
+      // just says so, and the message fades like every other.
+      if (result.isLong) setHint('longest word!');
       // Green: a word off the board. The fill holds for the same beat a grey
       // repeat gets, then drains — letters shared with other words keep their
       // connections, so leaving the trace up would strand them filled. The
@@ -373,7 +401,6 @@
           busy = false;
           setCurrent('');
           renderer.setTone(null);
-          els.longest.classList.remove('celebrate');
           if (result.solved) finish();
         }
       });
@@ -452,10 +479,9 @@
     shownStars = Engine.MAX_STARS;
     rebuildAdjacency();
     renderer.setPuzzle(puzzle);
+    buildTicks();
     renderHud();
     renderStars(true);
-    renderLongest();
-    els.longest.classList.remove('celebrate');
     setCurrent('');
     els.overlay.hidden = true;
     busy = false;
@@ -564,7 +590,6 @@
       const result = Engine.submitWord(game, text);
       if (result.type === 'required') {
         renderHud();
-        renderLongest();
         renderer.playFound({
           removedIds: result.removedIds,
           removedEdgeKeys: result.removedEdgeKeys,

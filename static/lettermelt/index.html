@@ -19,28 +19,24 @@
 
   <header class="hud">
     <div class="hud-row">
-      <div class="timer" id="timer">
-        <span class="timer-value" id="timerValue">0:00</span>
-        <div class="timer-toasts" id="timerToasts"></div>
-      </div>
       <div class="counter" id="counter">
         <span class="counter-nums"><b id="solvedCount">0</b> / <span id="totalCount">0</span></span>
         <span class="counter-label">words</span>
       </div>
+      <div class="stars" id="stars" aria-label="Stars remaining"></div>
       <div class="hud-actions">
         <button class="mode-toggle" id="modeToggle" type="button" aria-label="Difficulty">Hard</button>
         <button class="btn-new" id="newGame" type="button">New</button>
       </div>
     </div>
 
-    <div class="stars-row">
-      <div class="stars" id="stars" aria-label="Star rating"></div>
-      <span class="star-countdown" id="starCountdown"></span>
-    </div>
-
-    <div class="longest" id="longest">
-      <span class="longest-star">★</span>
-      <span class="longest-text" id="longestText">—</span>
+    <!-- The clock as a draining tube: full at 10:00, empty when the last star
+         goes. The notches are where the next star is lost. -->
+    <div class="tube" id="tube">
+      <div class="tube-fill" id="tubeFill"><span class="tube-crest"></span></div>
+      <div class="tube-ticks" id="tubeTicks" aria-hidden="true"></div>
+      <span class="tube-time" id="timerValue">10:00</span>
+      <div class="timer-toasts" id="timerToasts"></div>
     </div>
 
     <div class="current" id="current" aria-live="polite"><span class="current-text" id="currentText"></span>
