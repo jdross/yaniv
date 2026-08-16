@@ -49,7 +49,15 @@
   const dictSource = (typeof window.ZAN_DICT_RAW === 'string' && window.ZAN_DICT_RAW.length)
     ? window.ZAN_DICT_RAW
     : Generator.FALLBACK_COMMON.concat(Generator.FALLBACK_EXTRA, Generator.FALLBACK_LONG);
-  const lexicon = Generator.buildLexicon(dictSource, commonWords, longWords);
+
+  // Two different questions about long words. Every word in longWords counts
+  // as a required word when the board can spell it ("anaconda" should not be a
+  // bonus). Only baseWords are fit to headline a puzzle, which is a higher bar
+  // — the star of the board should be recognised on sight.
+  const baseWords = (Array.isArray(window.ZAN_BASE) && window.ZAN_BASE.length)
+    ? window.ZAN_BASE
+    : longWords;
+  const lexicon = Generator.buildLexicon(dictSource, commonWords, longWords, baseWords);
   const dict = lexicon.words;
 
   const renderer = window.ZanRender.create(els.board);
@@ -292,7 +300,7 @@
 
   function newGame() {
     const puzzle =
-      Generator.generatePuzzle({ words: commonWords, longWords: longWords, lexicon: lexicon }) ||
+      Generator.generatePuzzle({ words: commonWords, longWords: baseWords, lexicon: lexicon }) ||
       Generator.generatePuzzle({
         words: Generator.FALLBACK_COMMON,
         longWords: Generator.FALLBACK_LONG,

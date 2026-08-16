@@ -773,7 +773,14 @@ const realData = (() => {
     return null;
   }
   if (typeof sandbox.ZAN_DICT_RAW !== 'string' || !sandbox.ZAN_DICT_RAW.length) return null;
-  sandbox.lexicon = gen.buildLexicon(sandbox.ZAN_DICT_RAW, sandbox.ZAN_COMMON, sandbox.ZAN_COMMON_LONG);
+  // Mirror the game: every long word counts as common, but base words are
+  // drawn from the stricter ZAN_BASE subset.
+  sandbox.ZAN_BASE = Array.isArray(sandbox.ZAN_BASE) && sandbox.ZAN_BASE.length
+    ? sandbox.ZAN_BASE
+    : sandbox.ZAN_COMMON_LONG;
+  sandbox.lexicon = gen.buildLexicon(
+    sandbox.ZAN_DICT_RAW, sandbox.ZAN_COMMON, sandbox.ZAN_COMMON_LONG, sandbox.ZAN_BASE
+  );
   return sandbox;
 })();
 
@@ -785,7 +792,7 @@ test('real boards are dense, fresh, and score as fun', { skip: !realData ? 'no r
     const puzzle = gen.generatePuzzle({
       rng: gen.createRng(7000000 + i),
       words: realData.ZAN_COMMON,
-      longWords: realData.ZAN_COMMON_LONG,
+      longWords: realData.ZAN_BASE,
       lexicon: realData.lexicon
     });
     assert.ok(puzzle, 'generation failed');
@@ -839,6 +846,20 @@ test('the quality score reacts to the things it claims to measure', () => {
   assert.ok(richer.parts.extras >= baseline.parts.extras, 'extras component ignored the rare-word count');
 });
 
+test('base words are the recognisable subset of the long words', { skip: !realData ? 'no real data' : false }, () => {
+  const long = new Set(realData.ZAN_COMMON_LONG);
+  for (const word of realData.ZAN_BASE) {
+    assert.ok(long.has(word), 'base word "' + word + '" is not in the common long list');
+    assert.ok(word.length >= 8 && word.length <= 11, 'base word out of range: ' + word);
+  }
+  // Being common and being fit to headline a puzzle are different bars, so the
+  // base pool must be a genuine subset rather than a copy of the long list.
+  assert.ok(realData.ZAN_BASE.length < realData.ZAN_COMMON_LONG.length,
+    'base pool is not narrower than the long list');
+  assert.ok(realData.ZAN_BASE.length >= 400,
+    'base pool too small for variety: ' + realData.ZAN_BASE.length);
+});
+
 test('real word lists carry no plural or past-tense forms', { skip: !realData ? 'no real data' : false }, () => {
   // Required words are the ones the counter tallies, so "metal" AND "metals"
   // both counting would inflate the target without adding anything to solve.
@@ -870,7 +891,7 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
     const puzzle = gen.generatePuzzle({
       rng: rng,
       words: realData.ZAN_COMMON,
-      longWords: realData.ZAN_COMMON_LONG,
+      longWords: realData.ZAN_BASE,
       lexicon: realData.lexicon,
       minFunScore: 0, timeBudgetMs: 80, restarts: 20
     });
@@ -897,7 +918,7 @@ test('real word lists: every word that exists in the puzzle works', { skip: !rea
     const puzzle = gen.generatePuzzle({
       rng: rng,
       words: realData.ZAN_COMMON,
-      longWords: realData.ZAN_COMMON_LONG,
+      longWords: realData.ZAN_BASE,
       lexicon: lexicon,
       minFunScore: 0, timeBudgetMs: 80, restarts: 20
     });
@@ -940,7 +961,7 @@ test('real-data generation stays inside the time budget', { skip: !realData ? 'n
     const puzzle = gen.generatePuzzle({
       rng: gen.createRng(3000000 + i),
       words: realData.ZAN_COMMON,
-      longWords: realData.ZAN_COMMON_LONG,
+      longWords: realData.ZAN_BASE,
       lexicon: realData.lexicon
     });
     times.push(Date.now() - start);

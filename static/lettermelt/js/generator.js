@@ -631,7 +631,7 @@
    */
   const PREFIX_DEPTH = 5;
 
-  function buildLexicon(dictRaw, commonList, longList) {
+  function buildLexicon(dictRaw, commonList, longList, baseList) {
     const words = new Set();
     const prefixes = new Set();
     const common = new Set();
@@ -661,17 +661,20 @@
     // traceable, so a compound like "background" hands the board back/ground/
     // round for free — filler words that pad the count without being finds.
     // Prefer base words that embed few common words.
+    // Screen base-word candidates from `baseList` when one is supplied: every
+    // long word counts as common, but only some are fit to headline a puzzle.
+    const baseSource = Array.isArray(baseList) && baseList.length ? baseList : longList;
     const commonByLen = Array.from(common).filter(w => w.length >= 4);
     const baseWords = [];
     const baseRoomy = [];
     // Screening is O(long x common), so stop once there are plenty of clean
     // base words rather than grading the whole list every session.
     const BASE_POOL_TARGET = 320;
-    if (Array.isArray(longList) && longList.length) {
+    if (Array.isArray(baseSource) && baseSource.length) {
       // Shuffle before screening: the list arrives sorted, so stopping early on
       // it would hand a whole session base words from one corner of the
       // alphabet.
-      const order = longList.slice();
+      const order = baseSource.slice();
       for (let i = order.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         const tmp = order[i];

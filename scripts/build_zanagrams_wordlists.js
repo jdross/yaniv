@@ -57,16 +57,22 @@ const COMMON_LONG_TARGET_MAX = 4000;
 // for recognizability — see the build report for the tradeoff writeup.
 const COMMON_LONG_MAX_FREQ_RANK = 3500;
 
-// Highest wordlist-english tier that still counts as "a word everyone knows",
-// and therefore belongs in the required-word set rather than the bonus pool.
-// Tier 35 is the boundary: it covers everyday vocabulary like "clap", "clan",
-// "reel", "snap", "pond" and "dusk" that tier 20 leaves out, while tier 40+
-// holds the genuinely uncommon words that should stay bonus-only.
-const COMMON_TIER_MAX = 35;
-
-// The base word is the puzzle's headline, so it is held to a stricter bar than
-// the 4-7 letter fill: everyone should recognise it on sight.
-const COMMON_LONG_TIER_MAX = 20;
+/*
+ * How "is this word common?" is decided.
+ *
+ * Spell-checker tiers are the wrong instrument for this: they rank "lath" in
+ * an early tier and "gator" in a late one, which is the reverse of how often
+ * anyone meets those words. Zipf frequency (log10 occurrences per billion
+ * words) ranks them correctly, so it is the primary signal — see
+ * scripts/dump_word_zipf.py for how the data is produced.
+ *
+ * The tiers still do one job frequency cannot: they exclude lowercase proper
+ * nouns. "york", "german" and "henry" are all frequent, so a threshold alone
+ * would make them required words; capping the tier drops them.
+ */
+const COMMON_MIN_ZIPF = 2.8;   // required words: lath 2.15 out, gator 3.19 in
+const BASE_MIN_ZIPF = 3.6;     // the base word is the headline; hold it higher
+const COMMON_TIER_MAX = 55;    // above this the graded lists are mostly names
 
 const LOWER_ALPHA_RE = /^[a-z]+$/;
 
@@ -86,24 +92,25 @@ const BLOCKLIST = new Set([
 ]);
 
 /*
- * Familiar words the graded tiers rank too low.
- *
- * The tiers are built from spell-checker frequency, which is a good proxy for
- * "does everyone know this word" but not a perfect one: it puts "anaconda" and
- * "octane" in the same band as "carfare" and "vintner". Moving the whole
- * boundary down to catch the first pair would make the second pair REQUIRED
- * words, which is far worse than leaving a familiar word as a bonus — a player
- * cannot finish a board without every required word.
- *
- * So the boundary stays conservative and known gaps are promoted by name.
- * Sweeping 354 everyday words across animals, science, food, tools, clothing
- * and transport found only these 21 below the line, so the list is expected to
- * stay short; add to it whenever a familiar word turns up as a bonus.
+ * Escape hatch: words forced into the required set regardless of frequency.
+ * Frequency handles this correctly on its own now, so the list is empty; add
+ * a word here if one ever needs promoting by hand.
  */
-const PROMOTED_COMMON = new Set([
-  'anaconda', 'octane', 'gecko', 'seagull', 'isotope', 'obsidian', 'argon',
-  'joule', 'blender', 'doormat', 'savanna', 'burrito', 'sushi', 'hoodie',
-  'tram', 'binoculars', 'tsunami', 'hippo', 'lemur', 'meerkat', 'platypus',
+const PROMOTED_COMMON = new Set([]);
+
+/*
+ * Real words the graded spell-check lists simply do not carry, so the
+ * proper-noun filter would drop them. Loanwords are the usual case: "nori"
+ * and "noir" are ordinary English but appear in no tier. Kept playable as
+ * bonus words (their frequency still decides whether they are required).
+ *
+ * A blanket rule cannot replace this list: the words missing from the tiers
+ * are overwhelmingly proper nouns ("warsaw", "murray") and British spellings
+ * ("colour", "realise"), which readmitting wholesale would be worse.
+ */
+const DICT_ALLOWLIST = new Set([
+  'nori', 'noir', 'udon', 'sashimi', 'bento', 'gelato', 'panini', 'churro',
+  'lychee', 'dojo',
 ]);
 
 // Words on the shared profanity list that are perfectly ordinary in a word
@@ -241,12 +248,31 @@ function tryRequire(pkg) {
  *
  * Returns { common, all } as Sets, or null when the package is unavailable.
  */
+/**
+ * Load Zipf frequencies produced by scripts/dump_word_zipf.py. Returns a Map
+ * of word -> zipf, or null when the file is missing (the build then falls back
+ * to tiers alone, which is worse but still produces playable lists).
+ */
+function loadWordFrequencies() {
+  const file = path.join(ROOT, 'scripts', 'data', 'word-zipf.txt');
+  if (!fs.existsSync(file)) return null;
+  const map = new Map();
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (!line || line[0] === '#') continue;
+    const space = line.indexOf(' ');
+    if (space < 1) continue;
+    const word = line.slice(0, space);
+    const zipf = Number(line.slice(space + 1));
+    if (LOWER_ALPHA_RE.test(word) && !Number.isNaN(zipf)) map.set(word, zipf);
+  }
+  return map.size > 1000 ? map : null;
+}
+
 function loadGradedWordTiers() {
   const graded = tryRequire('wordlist-english');
   if (!graded || typeof graded !== 'object') return null;
 
   const common = new Set();
-  const commonLong = new Set();
   const all = new Set();
   let sawCommonTier = false;
 
@@ -264,11 +290,10 @@ function loadGradedWordTiers() {
         common.add(word);
         sawCommonTier = true;
       }
-      if (tier <= COMMON_LONG_TIER_MAX) commonLong.add(word);
     }
   }
   if (!sawCommonTier || all.size < 5000) return null;
-  return { common, commonLong, all, source: 'wordlist-english (SCOWL tiers <= ' + COMMON_TIER_MAX + ', base words <= ' + COMMON_LONG_TIER_MAX + ', MIT)' };
+  return { common, all, source: 'wordlist-english (SCOWL tiers <= ' + COMMON_TIER_MAX + ', MIT)' };
 }
 
 function loadDictionarySource() {
@@ -452,10 +477,11 @@ function buildDictSet(rawWords, stemSet, isBlocked) {
   return set;
 }
 
-function pickCommonWords(dictSet, stemSet, tiers, isBlocked) {
+function pickCommonWords(dictSet, stemSet, tiers, isBlocked, zipf) {
   const freq = loadFrequencyRankedWords();
   const picked = [];
   const pickedLong = [];
+  const pickedBase = [];
   const seen = new Set();
   const seenLong = new Set();
 
@@ -492,13 +518,34 @@ function pickCommonWords(dictSet, stemSet, tiers, isBlocked) {
   // Preferred spine: the graded tiers. Frequency ordering (below) then acts
   // only as a top-up, because a web-scraped frequency list drags in names and
   // brand tokens that the tiers correctly leave out.
-  if (tiers) {
-    freqSourceLabel = tiers.source;
-    for (const word of Array.from(tiers.common).sort()) tryAdd(word);
-    for (const word of Array.from(tiers.commonLong).sort()) tryAddLong(word);
+  if (zipf && tiers) {
+    freqSourceLabel = 'wordfreq Zipf >= ' + COMMON_MIN_ZIPF +
+      ' (base >= ' + BASE_MIN_ZIPF + '), names filtered by ' + tiers.source;
+    // Frequency decides; the tier set decides only whether a word is a word
+    // rather than a lowercase proper noun.
+    const candidates = Array.from(zipf.keys()).filter(
+      (w) => zipf.get(w) >= COMMON_MIN_ZIPF && tiers.common.has(w)
+    );
+    candidates.sort();
+    for (const word of candidates) {
+      if (word.length <= COMMON_MAX_LEN) {
+        tryAdd(word);
+      } else if (tryAddLong(word) && zipf.get(word) >= BASE_MIN_ZIPF) {
+        // Long words are required whenever they are common enough, but only
+        // the well-known ones are fit to headline a puzzle as the base word.
+        pickedBase.push(word);
+      }
+    }
+  } else if (tiers) {
+    // No frequency data: fall back to the graded tiers on their own.
+    freqSourceLabel = tiers.source + ' (no frequency data — run scripts/dump_word_zipf.py)';
+    for (const word of Array.from(tiers.common).sort()) {
+      if (word.length <= COMMON_MAX_LEN) tryAdd(word);
+      else tryAddLong(word);
+    }
   }
 
-  // Named gaps go in whatever the tiers said, at the length that fits.
+  // Hand-promoted gaps, at whichever length fits.
   for (const word of Array.from(PROMOTED_COMMON).sort()) {
     if (word.length <= COMMON_MAX_LEN) tryAdd(word);
     else tryAddLong(word);
@@ -557,12 +604,17 @@ function pickCommonWords(dictSet, stemSet, tiers, isBlocked) {
 
   picked.sort();
   pickedLong.sort();
-  return { words: picked, wordsLong: pickedLong, freqSourceLabel, longToppedUpFromDict };
+  pickedBase.sort();
+  return {
+    words: picked, wordsLong: pickedLong, wordsBase: pickedBase,
+    freqSourceLabel, longToppedUpFromDict
+  };
 }
 
-function toJsFileCommon(words, wordsLong) {
+function toJsFileCommon(words, wordsLong, wordsBase) {
   const json = JSON.stringify(words);
   const jsonLong = JSON.stringify(wordsLong);
+  const jsonBase = JSON.stringify(wordsBase && wordsBase.length ? wordsBase : wordsLong);
   return (
     '// Auto-generated by scripts/build_zanagrams_wordlists.js — do not edit by hand.\n' +
     '// Common, everyday English words (lengths 4-7) used as required puzzle words.\n' +
@@ -573,7 +625,11 @@ function toJsFileCommon(words, wordsLong) {
     '// single "longest word". Sourced further down the same frequency ranking\n' +
     "// used for ZAN_COMMON, so they should still be words an average player\n" +
     '// knows (e.g. birthday, elephant, chocolate, dangerous, basketball).\n' +
-    'window.ZAN_COMMON_LONG = ' + jsonLong + ';\n'
+    'window.ZAN_COMMON_LONG = ' + jsonLong + ';\n\n' +
+    '// The subset of the above fit to headline a puzzle as its base word: the\n' +
+    '// long words a player should recognise on sight. Every base word is a\n' +
+    '// common word, but not every common long word makes a good headline.\n' +
+    'window.ZAN_BASE = ' + jsonBase + ';\n'
   );
 }
 
@@ -593,20 +649,25 @@ function main() {
 
   const dictSrc = loadDictionarySource();
   const tiers = loadGradedWordTiers();
+  const zipf = loadWordFrequencies();
 
   // Bonus words are drawn from the dictionary, so strip entries that are only
   // in it as lowercase proper nouns ("eric", "texas") while keeping obscure
   // words that have a genuine sense ("murky", and "roger" as an acknowledgement).
   const dictWordsRaw = tiers
-    ? dictSrc.words.filter((w) => tiers.all.has(String(w).toLowerCase()))
+    ? dictSrc.words.filter((w) => {
+      const word = String(w).toLowerCase();
+      return tiers.all.has(word) || DICT_ALLOWLIST.has(word);
+    })
     : dictSrc.words;
   const stemSet = buildStemSet(dictWordsRaw);
   const profanity = loadProfanityList();
   const isBlocked = makeBlockTest(profanity);
   const dictSet = buildDictSet(dictWordsRaw, stemSet, isBlocked);
 
-  const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
-    pickCommonWords(dictSet, stemSet, tiers, isBlocked);
+  const { words: commonWords, wordsLong: commonLongWords, wordsBase: baseWords,
+    freqSourceLabel, longToppedUpFromDict } =
+    pickCommonWords(dictSet, stemSet, tiers, isBlocked, zipf);
 
   // Guarantee subset invariants: every common/common-long word must be in the
   // dict set (ZAN_COMMON and ZAN_COMMON_LONG are disjoint by length range).
@@ -631,7 +692,7 @@ function main() {
     dictWords = Array.from(cappedSet).sort();
   }
 
-  fs.writeFileSync(COMMON_OUT, toJsFileCommon(commonWords, commonLongWords));
+  fs.writeFileSync(COMMON_OUT, toJsFileCommon(commonWords, commonLongWords, baseWords));
   fs.writeFileSync(DICT_OUT, toJsFileDict(dictWords, dictMaxLen));
 
   const commonSize = fs.statSync(COMMON_OUT).size;
