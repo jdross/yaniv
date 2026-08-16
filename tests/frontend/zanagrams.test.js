@@ -54,11 +54,16 @@ const LEXICON = gen.buildLexicon(DICT_WORDS, WORDS.concat(EXTRA_WORDS), LONG_WOR
 const PUZZLE_COUNT = 160;
 const SOLVE_COUNT = PUZZLE_COUNT;   // every generated puzzle is solved right through
 
+// Structural tests care about invariants, not about how long the generator is
+// willing to hunt for a high-scoring board, so they run with the quality gate
+// open and a small restart budget. The quality tuning has its own tests.
+const FAST = { minFunScore: 0, timeBudgetMs: 80, restarts: 20 };
+
 function makePuzzle(seed) {
   const rng = gen.createRng(seed);
-  const puzzle = gen.generatePuzzle({
+  const puzzle = gen.generatePuzzle(Object.assign({
     rng: rng, words: WORDS, longWords: LONG_WORDS, lexicon: LEXICON
-  });
+  }, FAST));
   assert.ok(puzzle, 'generatePuzzle returned null for seed ' + seed);
   return { puzzle: puzzle, rng: rng };
 }
@@ -291,7 +296,7 @@ test('generation is fast', () => {
   const times = [];
   for (let i = 0; i < 60; i++) {
     const start = Date.now();
-    gen.generatePuzzle({ rng: gen.createRng(800000 + i), words: WORDS, longWords: LONG_WORDS });
+    gen.generatePuzzle(Object.assign({ rng: gen.createRng(800000 + i), words: WORDS, longWords: LONG_WORDS }, FAST));
     times.push(Date.now() - start);
   }
   times.sort((a, b) => a - b);
@@ -858,7 +863,8 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
       rng: rng,
       words: realData.ZAN_COMMON,
       longWords: realData.ZAN_COMMON_LONG,
-      lexicon: realData.lexicon
+      lexicon: realData.lexicon,
+      minFunScore: 0, timeBudgetMs: 80, restarts: 20
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
     assert.ok(puzzle.words.length >= 10 && puzzle.words.length <= 16,
@@ -884,7 +890,8 @@ test('real word lists: every word that exists in the puzzle works', { skip: !rea
       rng: rng,
       words: realData.ZAN_COMMON,
       longWords: realData.ZAN_COMMON_LONG,
-      lexicon: lexicon
+      lexicon: lexicon,
+      minFunScore: 0, timeBudgetMs: 80, restarts: 20
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
     const game = engine.createGame({ puzzle: puzzle, dict: lexicon.words });

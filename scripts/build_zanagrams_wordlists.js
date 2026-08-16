@@ -44,7 +44,7 @@ const DICT_SIZE_CAP_BYTES = 2.3 * 1024 * 1024; // ~2.3 MB
 const COMMON_MIN_LEN = 4;
 const COMMON_MAX_LEN = 7;
 const COMMON_TARGET_MIN = 1500;
-const COMMON_TARGET_MAX = 4000;
+const COMMON_TARGET_MAX = 7000;
 
 const COMMON_LONG_MIN_LEN = 8;
 const COMMON_LONG_MAX_LEN = 11;
@@ -56,6 +56,12 @@ const COMMON_LONG_TARGET_MAX = 2000;
 // trading list size (we land well within the 500-2000 target either way)
 // for recognizability — see the build report for the tradeoff writeup.
 const COMMON_LONG_MAX_FREQ_RANK = 3500;
+
+// Highest wordlist-english tier that still counts as "a word everyone knows",
+// and therefore belongs in the required-word set rather than the bonus pool.
+// Tier 20 covers everyday vocabulary like "heap", "swamp" and "vein"; tier 35
+// is where genuinely uncommon words (pluck, murky, thorn) start.
+const COMMON_TIER_MAX = 20;
 
 const LOWER_ALPHA_RE = /^[a-z]+$/;
 
@@ -166,6 +172,49 @@ function tryRequire(pkg) {
   }
 }
 
+/**
+ * wordlist-english groups words by how widely known they are: tier 10 is
+ * everyday vocabulary, and each higher tier adds rarer words. Two properties
+ * make it the right spine for this game:
+ *
+ *  - The low tiers are proper-noun free. "eric", "texas" and "cyprus" are in
+ *    the raw ENABLE dictionary as lowercase strings, but they are not English
+ *    words, and they never appear here.
+ *  - Membership at ANY tier means the lowercase string has a real English
+ *    sense. "roger" (to acknowledge), "kelly" (green) and "marc" (grape
+ *    pressings) are listed; "eric" and "intel" are not. That is exactly the
+ *    line between a proper noun worth keeping as a bonus word and one to drop.
+ *
+ * Returns { common, all } as Sets, or null when the package is unavailable.
+ */
+function loadGradedWordTiers() {
+  const graded = tryRequire('wordlist-english');
+  if (!graded || typeof graded !== 'object') return null;
+
+  const common = new Set();
+  const all = new Set();
+  let sawCommonTier = false;
+
+  for (const key of Object.keys(graded)) {
+    // The package also ships british/canadian/australian variants; mixing them
+    // in would offer "marvellous" alongside "marvelous". Stick to one spelling.
+    if (!/^english(\/american)?\/\d+$/.test(key)) continue;
+    const list = graded[key];
+    if (!Array.isArray(list)) continue;
+    const tier = Number((key.match(/(\d+)$/) || [])[1]);
+    for (const raw of list) {
+      const word = String(raw).toLowerCase();
+      all.add(word);
+      if (tier <= COMMON_TIER_MAX) {
+        common.add(word);
+        sawCommonTier = true;
+      }
+    }
+  }
+  if (!sawCommonTier || all.size < 5000) return null;
+  return { common, all, source: 'wordlist-english (SCOWL tiers <= ' + COMMON_TIER_MAX + ', MIT)' };
+}
+
 function loadDictionarySource() {
   // Preferred: an-array-of-english-words (ENABLE list, ~275k words, MIT).
   const enable = tryRequire('an-array-of-english-words');
@@ -232,8 +281,34 @@ function buildStemSet(rawWords) {
  * dictionary, so tracing one is still recognised as a bonus word rather than
  * rejected.
  */
+// -ing words that are ordinary nouns in their own right, not just a verb
+// wearing a participle ending. These stay eligible as required words.
+const STANDALONE_ING = new Set([
+  'morning', 'evening', 'ceiling', 'feeling', 'meeting', 'building', 'painting',
+  'drawing', 'clothing', 'pudding', 'wedding', 'blessing', 'greeting', 'offering',
+  'opening', 'warning', 'meaning', 'setting', 'housing', 'nothing', 'something',
+  'everything', 'anything', 'during', 'spring', 'string', 'herring', 'sterling',
+  'viking', 'lightning', 'engineering', 'shilling', 'earring', 'sibling',
+  'stocking', 'pudding', 'bearing', 'crossing', 'dressing', 'ending', 'evening',
+  'filing', 'finding', 'footing', 'gathering', 'hearing', 'holding', 'landing',
+  'listing', 'living', 'lodging', 'making', 'morning', 'outing', 'padding',
+  'parking', 'saving', 'sibling', 'sitting', 'sting', 'swing', 'thing', 'timing',
+  'wing', 'king', 'ring', 'sing', 'bring', 'cling', 'fling', 'wring', 'ginseng'
+]);
+
 function isInflectedForm(word, stemSet) {
   const has = (s) => s.length >= 2 && stemSet.has(s);
+
+  // Present participle / gerund: asking -> ask, baking -> bake, running -> run.
+  if (word.endsWith('ing') && word.length >= 5 && !STANDALONE_ING.has(word)) {
+    const trunk = word.slice(0, -3);
+    const n = trunk.length;
+    if (has(trunk)) return true;                                   // ask + ing
+    if (has(trunk + 'e')) return true;                             // bake + ing
+    if (n >= 3 && trunk[n - 1] === trunk[n - 2] && has(trunk.slice(0, -1))) {
+      return true;                                                 // run + n + ing
+    }
+  }
 
   // Plurals / third-person singular. "ss" endings (glass, less) are not plurals.
   if (word.endsWith('s') && !word.endsWith('ss')) {
@@ -268,7 +343,7 @@ function buildDictSet(rawWords) {
   return set;
 }
 
-function pickCommonWords(dictSet, stemSet) {
+function pickCommonWords(dictSet, stemSet, tiers) {
   const freq = loadFrequencyRankedWords();
   const picked = [];
   const pickedLong = [];
@@ -305,7 +380,17 @@ function pickCommonWords(dictSet, stemSet) {
 
   let freqSourceLabel = 'embedded fallback list only';
 
-  if (freq) {
+  // Preferred spine: the graded tiers. Frequency ordering (below) then acts
+  // only as a top-up, because a web-scraped frequency list drags in names and
+  // brand tokens that the tiers correctly leave out.
+  if (tiers) {
+    freqSourceLabel = tiers.source;
+    const graded = Array.from(tiers.common).sort();
+    for (const word of graded) tryAdd(word);
+    for (const word of graded) tryAddLong(word);
+  }
+
+  if (freq && !tiers) {
     freqSourceLabel = freq.source;
     // Single pass down the frequency-ranked list: short/mid-length words feed
     // ZAN_COMMON, longer-but-still-frequent words feed ZAN_COMMON_LONG. This
@@ -393,11 +478,19 @@ function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   const dictSrc = loadDictionarySource();
-  const dictSet = buildDictSet(dictSrc.words);
-  const stemSet = buildStemSet(dictSrc.words);
+  const tiers = loadGradedWordTiers();
+
+  // Bonus words are drawn from the dictionary, so strip entries that are only
+  // in it as lowercase proper nouns ("eric", "texas") while keeping obscure
+  // words that have a genuine sense ("murky", and "roger" as an acknowledgement).
+  const dictWordsRaw = tiers
+    ? dictSrc.words.filter((w) => tiers.all.has(String(w).toLowerCase()))
+    : dictSrc.words;
+  const dictSet = buildDictSet(dictWordsRaw);
+  const stemSet = buildStemSet(dictWordsRaw);
 
   const { words: commonWords, wordsLong: commonLongWords, freqSourceLabel, longToppedUpFromDict } =
-    pickCommonWords(dictSet, stemSet);
+    pickCommonWords(dictSet, stemSet, tiers);
 
   // Guarantee subset invariants: every common/common-long word must be in the
   // dict set (ZAN_COMMON and ZAN_COMMON_LONG are disjoint by length range).

@@ -41,11 +41,15 @@
   // One lexicon for the whole session: the dictionary the engine validates
   // against, the "common" set that decides normal-vs-extra, and the prefix
   // index the generator enumerates with. Built once (~120ms) and reused.
-  const lexicon = Generator.buildLexicon(
-    window.ZAN_DICT_RAW || '',
-    commonWords.concat(Generator.FALLBACK_COMMON, Generator.FALLBACK_EXTRA),
-    longWords.concat(Generator.FALLBACK_LONG)
-  );
+  //
+  // The embedded fallbacks are a substitute for missing data files, never a
+  // supplement to them: folding them into a real word list would smuggle their
+  // sample words (plurals like "tones" and "metals") into the required-word
+  // set, where the curated lists deliberately exclude such forms.
+  const dictSource = (typeof window.ZAN_DICT_RAW === 'string' && window.ZAN_DICT_RAW.length)
+    ? window.ZAN_DICT_RAW
+    : Generator.FALLBACK_COMMON.concat(Generator.FALLBACK_EXTRA, Generator.FALLBACK_LONG);
+  const lexicon = Generator.buildLexicon(dictSource, commonWords, longWords);
   const dict = lexicon.words;
 
   const renderer = window.ZanRender.create(els.board);
