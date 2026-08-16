@@ -117,22 +117,23 @@
   }
 
   /* --------------------------- the clock ---------------------------- *
-   * The clock is a tube of liquid draining away, not a number ticking up.
-   * It starts full at TIME_LIMIT and empties to the right; the notches mark
-   * where each star goes. Run past the limit and the tube sits empty while a
-   * red overtime counter climbs.
+   * A vial of lava draining away rather than a number ticking up. It starts
+   * full and empties to the right; the notches mark where each star goes, and
+   * running it dry ends the game. Each difficulty has its own schedule.
    */
-  const TIME_LIMIT_MS = 10 * 60 * 1000;
+  function schedule() {
+    return game ? game.schedule : Engine.scheduleFor(mode);
+  }
 
-  /** Fraction of the tube still full when `elapsedMs` has passed. */
+  /** Fraction of the vial still full when `elapsedMs` has passed. */
   function fillFraction(elapsedMs) {
-    return Math.max(0, Math.min(1, 1 - elapsedMs / TIME_LIMIT_MS));
+    return Math.max(0, Math.min(1, 1 - elapsedMs / schedule().failMs));
   }
 
   /** Notches sit where the draining edge will be as each star is lost. */
   function buildTicks() {
     els.tubeTicks.innerHTML = '';
-    for (const tier of Engine.STAR_THRESHOLDS) {
+    for (const tier of schedule().tiers) {
       const at = fillFraction(tier.withinMs);
       if (at <= 0 || at >= 1) continue;   // the last notch is the tube's end
       const tick = document.createElement('i');
@@ -143,8 +144,8 @@
   }
 
   function renderStars(force) {
-    const stars = Engine.starsFor(game.elapsedMs);
-    const next = Engine.msToNextStarLoss(game.elapsedMs);
+    const stars = Engine.starsFor(game.elapsedMs, game.schedule);
+    const next = Engine.msToNextStarLoss(game.elapsedMs, game.schedule);
     if (stars !== shownStars || force) {
       const losing = stars < shownStars ? shownStars : 0;
       els.stars.innerHTML = '';
@@ -169,19 +170,14 @@
 
   function renderClock() {
     const elapsed = game.elapsedMs;
-    const remaining = TIME_LIMIT_MS - elapsed;
+    const remaining = Math.max(0, schedule().failMs - elapsed);
     const fill = fillFraction(elapsed);
     els.tubeFill.style.width = (fill * 100).toFixed(2) + '%';
-
-    const overtime = remaining <= 0;
-    els.tube.classList.toggle('overtime', overtime);
     els.tube.classList.toggle('empty', fill <= 0);
-    els.timerValue.textContent = overtime
-      ? '+' + Engine.formatTime(-remaining)
-      : Engine.formatTime(remaining);
+    els.timerValue.textContent = Engine.formatTime(remaining);
 
-    const next = Engine.msToNextStarLoss(elapsed);
-    els.tube.classList.toggle('warn', !overtime && next !== null && next < 30000);
+    const next = Engine.msToNextStarLoss(elapsed, game.schedule);
+    els.tube.classList.toggle('warn', next !== null && next < 30000);
 
     for (const tick of els.tubeTicks.children) {
       tick.classList.toggle('passed', elapsed >= Number(tick.dataset.at));
@@ -248,8 +244,9 @@
     if (!game || game.status !== 'playing') return;
     const dt = lastTick ? now - lastTick : 0;
     lastTick = now;
-    if (dt > 0 && dt < 2000) Engine.tick(game, dt);
+    const ranOut = dt > 0 && dt < 2000 ? Engine.tick(game, dt) : false;
     renderHud();
+    if (ranOut) fail();
   }
 
   /* ------------------------------ endgame ------------------------------ */
@@ -300,7 +297,7 @@
       ? extras.length + ' extra word' + (extras.length === 1 ? '' : 's') + ' saved you ' + saved + 's'
       : 'No extra words found — try hunting for bonus words next time.';
 
-    const stars = Engine.starsFor(game.elapsedMs);
+    const stars = Engine.starsFor(game.elapsedMs, game.schedule);
     els.sheetStars.innerHTML = '';
     for (let i = 1; i <= Engine.MAX_STARS; i++) {
       const star = document.createElement('i');
@@ -322,6 +319,41 @@
     burst();
   }
 
+  /** The vial ran dry: show what was left on the board. */
+  function fail() {
+    busy = true;
+    renderHud();
+    renderer.clearTrace();
+    renderer.setTone(null);
+    const missed = Engine.remainingWords(game);
+    els.sheetEmoji.textContent = '💀';
+    els.sheetTitle.textContent = 'Out of time';
+    els.sheetTime.textContent = Engine.formatTime(schedule().failMs);
+    els.sheetSub.textContent = missed.length === 1
+      ? 'One word got away.'
+      : missed.length + ' words got away.';
+
+    els.sheetStars.innerHTML = '';
+    for (let i = 1; i <= Engine.MAX_STARS; i++) {
+      const star = document.createElement('i');
+      star.textContent = '★';
+      star.classList.add('spent');
+      star.style.setProperty('--delay', (0.05 * i).toFixed(2) + 's');
+      els.sheetStars.appendChild(star);
+    }
+
+    els.sheetWords.innerHTML = '';
+    for (const word of missed.slice(0, 18)) {
+      const li = document.createElement('li');
+      li.className = 'missed';
+      li.textContent = word.text;
+      els.sheetWords.appendChild(li);
+    }
+    els.sheetBurst.innerHTML = '';
+    resetShareButton();
+    els.overlay.hidden = false;
+  }
+
   /* ------------------------------ sharing ------------------------------ *
    * A puzzle is just a seed plus a difficulty, so a link is enough to hand
    * someone the exact board you played.
@@ -336,9 +368,14 @@
   }
 
   function shareMessage() {
-    const stars = Engine.starsFor(game.elapsedMs);
+    const label = MODES[mode].label.toLowerCase();
+    if (game.status === 'lost') {
+      return 'The clock beat me on ' + label + ' mode. Think you can solve it? ' +
+        puzzleLink();
+    }
+    const stars = Engine.starsFor(game.elapsedMs, game.schedule);
     const plural = stars === 1 ? 'star' : 'stars';
-    return 'I got ' + stars + ' ' + plural + ' on ' + MODES[mode].label.toLowerCase() +
+    return 'I got ' + stars + ' ' + plural + ' on ' + label +
       ' mode, done in ' + Engine.formatTime(game.elapsedMs) + '! Here\'s the puzzle: ' +
       puzzleLink();
   }
@@ -475,7 +512,7 @@
       return;
     }
     currentSeed = puzzle.seed;
-    game = Engine.createGame({ puzzle: puzzle, dict: dict });
+    game = Engine.createGame({ puzzle: puzzle, dict: dict, mode: mode });
     shownStars = Engine.MAX_STARS;
     rebuildAdjacency();
     renderer.setPuzzle(puzzle);

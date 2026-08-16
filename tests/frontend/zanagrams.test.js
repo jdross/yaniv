@@ -57,7 +57,7 @@ const SOLVE_COUNT = PUZZLE_COUNT;   // every generated puzzle is solved right th
 // Structural tests care about invariants, not about how long the generator is
 // willing to hunt for a high-scoring board, so they run with the quality gate
 // open and a small restart budget. The quality tuning has its own tests.
-const FAST = { minFunScore: 0, timeBudgetMs: 80, restarts: 20 };
+const FAST = { minFunScore: 0, restarts: 20 };
 
 function makePuzzle(seed) {
   const rng = gen.createRng(seed);
@@ -292,32 +292,59 @@ test('clonePuzzle produces an independent board', () => {
  * Stars, seeds and plurals
  * ------------------------------------------------------------------ */
 
-test('stars are spent as the clock climbs', () => {
+test('stars are spent as the clock drains, and running out is a loss', () => {
   const m = 60 * 1000;
-  assert.equal(engine.starsFor(0), 5);
-  assert.equal(engine.starsFor(4.99 * m), 5);
-  assert.equal(engine.starsFor(5 * m), 4, 'five minutes exactly costs the first star');
-  assert.equal(engine.starsFor(5.99 * m), 4);
-  assert.equal(engine.starsFor(6 * m), 3);
-  assert.equal(engine.starsFor(7.49 * m), 3);
-  assert.equal(engine.starsFor(7.5 * m), 2);
-  assert.equal(engine.starsFor(9.99 * m), 2);
-  assert.equal(engine.starsFor(10 * m), 1);
-  assert.equal(engine.starsFor(60 * m), 1, 'the last star is never lost');
+  const hard = engine.scheduleFor('hard');
+  assert.equal(engine.starsFor(0, hard), 5);
+  assert.equal(engine.starsFor(4.99 * m, hard), 5);
+  assert.equal(engine.starsFor(5 * m, hard), 4, 'five minutes exactly costs the first star');
+  assert.equal(engine.starsFor(5.99 * m, hard), 4);
+  assert.equal(engine.starsFor(6 * m, hard), 3);
+  assert.equal(engine.starsFor(7.49 * m, hard), 3);
+  assert.equal(engine.starsFor(7.5 * m, hard), 2);
+  assert.equal(engine.starsFor(9.99 * m, hard), 2);
+  assert.equal(engine.starsFor(10 * m, hard), 0, 'the deadline is a loss, not a one-star finish');
+
+  // Easy runs a tighter ladder over a shorter, five-minute vial.
+  const easy = engine.scheduleFor('easy');
+  assert.equal(engine.starsFor(2.99 * m, easy), 5);
+  assert.equal(engine.starsFor(3 * m, easy), 4);
+  assert.equal(engine.starsFor(3.5 * m, easy), 3);
+  assert.equal(engine.starsFor(4 * m, easy), 2);
+  assert.equal(engine.starsFor(4.5 * m, easy), 1);
+  assert.equal(engine.starsFor(5 * m, easy), 0);
+
+  // The last tier boundary IS the deadline, in both modes.
+  assert.equal(hard.tiers[hard.tiers.length - 1].withinMs, hard.failMs);
+  assert.equal(easy.tiers[easy.tiers.length - 1].withinMs, easy.failMs);
+
+  // An unknown mode falls back to hard rather than throwing.
+  assert.equal(engine.starsFor(0, 'nonsense'), 5);
 
   // The countdown drives the HUD, so it must track the same boundaries.
-  assert.equal(engine.msToNextStarLoss(0), 5 * m);
-  assert.equal(engine.msToNextStarLoss(4 * m), 1 * m);
-  assert.equal(engine.msToNextStarLoss(10 * m), null);
+  assert.equal(engine.msToNextStarLoss(0, hard), 5 * m);
+  assert.equal(engine.msToNextStarLoss(4 * m, hard), 1 * m);
+  assert.equal(engine.msToNextStarLoss(10 * m, hard), null);
+  assert.equal(engine.msToNextStarLoss(0, easy), 3 * m);
 });
 
 test('an extra word can buy a star back', () => {
   const { puzzle } = makePuzzle(910001);
   const game = engine.createGame({ puzzle: puzzle, dict: LEXICON.words });
   engine.tick(game, 5 * 60 * 1000 + 2000);       // just past the first threshold
-  assert.equal(engine.starsFor(game.elapsedMs), 4);
+  assert.equal(engine.starsFor(game.elapsedMs, game.schedule), 4);
   engine.creditTime(game, 10 * 1000);            // an extra word pays out
-  assert.equal(engine.starsFor(game.elapsedMs), 5, 'time credit did not restore the star');
+  assert.equal(engine.starsFor(game.elapsedMs, game.schedule), 5, 'time credit did not restore the star');
+});
+
+test('the mode picks the schedule the game is played on', () => {
+  const { puzzle } = makePuzzle(910003);
+  const hard = engine.createGame({ puzzle: puzzle, dict: new Set(), mode: 'hard' });
+  const easy = engine.createGame({ puzzle: puzzle, dict: new Set(), mode: 'easy' });
+  assert.equal(hard.schedule.failMs, 10 * 60 * 1000);
+  assert.equal(easy.schedule.failMs, 5 * 60 * 1000);
+  // No mode at all is hard, so an old-style call still behaves.
+  assert.equal(engine.createGame({ puzzle: puzzle, dict: new Set() }).schedule.failMs, 10 * 60 * 1000);
 });
 
 test('a plural is reported as a plural, not as gibberish', () => {
@@ -385,18 +412,37 @@ function newGame(seed, dictWords) {
   return { game: engine.createGame({ puzzle: puzzle, dict: dict }), puzzle: puzzle };
 }
 
-test('the stopwatch counts up and never ends the game', () => {
+test('the clock runs the game out at the deadline', () => {
   const { game } = newGame(900001);
   assert.equal(game.elapsedMs, 0);
   assert.equal(game.status, 'playing');
   assert.equal(engine.tick(game, 1000), false);
   assert.equal(game.elapsedMs, 1000);
-  engine.tick(game, 599000);
+  assert.equal(engine.tick(game, 598999), false, 'a millisecond short is still playable');
+  assert.equal(game.status, 'playing');
+
+  // The tick that reaches the deadline reports it, exactly once.
+  assert.equal(engine.tick(game, 1), true, 'the deadline tick must announce the loss');
+  assert.equal(game.elapsedMs, 600000, 'the clock is pinned at the deadline, never past it');
+  assert.equal(game.status, 'lost');
+  assert.ok(game.finishedAt, 'a lost game records when it ended');
+  assert.equal(engine.tick(game, 999999), false, 'a lost game does not keep ticking');
   assert.equal(game.elapsedMs, 600000);
-  assert.equal(game.status, 'playing', 'there is no lose state');
+  assert.equal(engine.submitWord(game, EXTRA_WORDS[0]).type, 'inactive');
+
   assert.equal(engine.formatTime(0), '0:00');
   assert.equal(engine.formatTime(65000), '1:05');
   assert.equal(engine.formatTime(600000), '10:00');
+});
+
+test('easy mode runs out twice as fast as hard', () => {
+  const { puzzle } = makePuzzle(900011);
+  const game = engine.createGame({ puzzle: puzzle, dict: new Set(), mode: 'easy' });
+  assert.equal(engine.tick(game, 5 * 60 * 1000 - 1), false);
+  assert.equal(game.status, 'playing');
+  assert.equal(engine.tick(game, 1), true);
+  assert.equal(game.status, 'lost');
+  assert.equal(engine.starsFor(game.elapsedMs, game.schedule), 0);
 });
 
 test('traces shorter than four letters are always rejected', () => {
@@ -470,7 +516,10 @@ test('the game ends if and only if every normal word is solved and the board is 
   for (let i = 0; i < 60; i++) {
     const { puzzle, rng } = makePuzzle(950000 + i);
     const dict = engine.buildDict(EXTRA_WORDS.join(' '));
-    const game = engine.createGame({ puzzle: puzzle, dict: dict });
+    // The deadline is tested on its own; here it is pushed out of reach so the
+    // only thing that can end the game is the board emptying.
+    const endless = { failMs: Infinity, tiers: [{ stars: 5, withinMs: Infinity }] };
+    const game = engine.createGame({ puzzle: puzzle, dict: dict, schedule: endless });
     const order = gen.shuffled(puzzle.words.map((_w, idx) => idx), rng);
 
     for (let step = 0; step < order.length; step++) {
@@ -481,9 +530,9 @@ test('the game ends if and only if every normal word is solved and the board is 
       assert.ok(puzzle.cells.length > 0, 'board emptied before the last word');
       assert.equal(game.status, 'playing', 'game ended early');
 
-      // Time passing never ends the game, however much of it passes.
+      // Short of the deadline, time passing never ends the game.
       engine.tick(game, 600000);
-      assert.equal(game.status, 'playing', 'the stopwatch must never end the game');
+      assert.equal(game.status, 'playing', 'the clock ended the game before the board emptied');
 
       // Extras never end the game either.
       const puzzleTexts = new Set(puzzle.words.map(w => w.text));
@@ -978,7 +1027,7 @@ test('real word lists build healthy puzzles', { skip: !realData ? 'data/common.j
       words: realData.ZAN_COMMON,
       longWords: realData.ZAN_BASE,
       lexicon: realData.lexicon,
-      minFunScore: 0, timeBudgetMs: 80, restarts: 20
+      minFunScore: 0, restarts: 20
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
     assert.ok(puzzle.words.length >= 10 && puzzle.words.length <= 16,
@@ -1005,7 +1054,7 @@ test('real word lists: every word that exists in the puzzle works', { skip: !rea
       words: realData.ZAN_COMMON,
       longWords: realData.ZAN_BASE,
       lexicon: lexicon,
-      minFunScore: 0, timeBudgetMs: 80, restarts: 20
+      minFunScore: 0, restarts: 20
     });
     assert.ok(puzzle, 'generatePuzzle returned null on real data');
     const game = engine.createGame({ puzzle: puzzle, dict: lexicon.words });
@@ -1037,6 +1086,34 @@ test('real word lists: every word that exists in the puzzle works', { skip: !rea
   }
 });
 
+test('a shared seed rebuilds the same real puzzle', { skip: !realData ? 'no real data' : false }, () => {
+  // The seed in a share link is the whole payload: whatever the recipient's
+  // device does, it has to land on the identical board. This is the full
+  // production path — real vocabulary, real restart count, no FAST shortcuts —
+  // because that is where a wall-clock budget used to cut the search short at
+  // a different point on every load.
+  for (const seed of [3977333653, 42, 1]) {
+    const build = () => gen.generatePuzzle({
+      seed: seed,
+      words: realData.ZAN_COMMON,
+      longWords: realData.ZAN_BASE,
+      lexicon: realData.lexicon
+    });
+    const a = build();
+    const b = build();
+    assert.ok(a && b, 'generation failed for seed ' + seed);
+    assert.equal(a.seed, seed);
+    assert.deepEqual(a.words.map(w => w.text), b.words.map(w => w.text),
+      'seed ' + seed + ' built two different word sets');
+    assert.deepEqual(
+      a.cells.map(c => c.letter + '@' + c.x + ',' + c.y),
+      b.cells.map(c => c.letter + '@' + c.x + ',' + c.y),
+      'seed ' + seed + ' built two different layouts');
+    assert.deepEqual(a.edges.map(e => e.a + '-' + e.b), b.edges.map(e => e.a + '-' + e.b),
+      'seed ' + seed + ' built two different connection sets');
+  }
+});
+
 test('real-data generation stays inside the time budget', { skip: !realData ? 'no real data' : false }, () => {
   const times = [];
   const counts = [];
@@ -1056,10 +1133,12 @@ test('real-data generation stays inside the time budget', { skip: !realData ? 'n
   }
   times.sort((a, b) => a - b);
   const median = times[Math.floor(times.length / 2)];
-  // The generator spends its budget re-rolling until a board clears the
-  // quality bar, so the ceiling is the configured budget plus one attempt.
-  assert.ok(median < gen.CONFIG.timeBudgetMs + 60,
-    'median generation ' + median + 'ms exceeds the budget');
+  // Generation has no wall-clock governor — the restart count is the budget —
+  // so this guards the cost of a full run rather than enforcing it.
+  assert.ok(median < 400, 'median generation ' + median + 'ms is too slow to feel instant');
+  // ...and the reason it has no governor: a deadline makes the board depend on
+  // how fast the device happened to be, which breaks shared links.
+  assert.equal(gen.CONFIG.timeBudgetMs, undefined, 'the generator must not be wall-clock bounded');
   assert.ok(Math.min(...counts) >= 10 && Math.max(...counts) <= 16,
     'word counts outside 10-16: ' + Math.min(...counts) + '-' + Math.max(...counts));
   assert.ok(Math.min(...cells) >= gen.CONFIG.minCells,

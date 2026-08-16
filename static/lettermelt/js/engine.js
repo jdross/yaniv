@@ -1,10 +1,12 @@
 /* Lettermelt — game engine (pure logic, works in browser and Node).
  *
- * The game is a race against an INCREMENTING STOPWATCH. There is no time-out
- * and no lose state: play always ends by solving every hidden word, and the
- * score is the final elapsed time (lower is better). Extra words (valid
- * dictionary words that are not puzzle words) SUBTRACT time from the
- * stopwatch, clamped at zero.
+ * The game is a race against a DRAINING CLOCK. Elapsed time counts up; the
+ * vial shows what is left of the mode's deadline. Crossing a tier boundary
+ * costs a star, and reaching the deadline ends the run as a loss. The only
+ * win is emptying the board — solving every hidden word — and the score is
+ * the stars left when that happens. Extra words (valid dictionary words that
+ * are not puzzle words) SUBTRACT elapsed time, clamped at zero, so they can
+ * buy a spent star back.
  *
  * All board mutation is delegated to ZanGenerator.
  */
@@ -36,34 +38,56 @@
   };
 
   /*
-   * Stars. The clock still counts up, but it now spends a rating rather than
-   * just recording a time: you start on five stars and drop one each time the
-   * elapsed time crosses a threshold. Extra words push the clock back, so
-   * finding them can win a star back.
+   * Stars and the deadline.
+   *
+   * Each difficulty gets its own schedule: the clock drains from `failMs` to
+   * nothing, crossing a tier boundary costs a star, and reaching zero ends the
+   * run. Easy is a shorter, tighter race over an easier vocabulary; hard gives
+   * twice the time for a much wider one.
    */
-  const STAR_THRESHOLDS = [
-    { stars: 5, withinMs: 5 * 60 * 1000 },
-    { stars: 4, withinMs: 6 * 60 * 1000 },
-    { stars: 3, withinMs: 7.5 * 60 * 1000 },
-    { stars: 2, withinMs: 10 * 60 * 1000 }
-  ];
-  const MIN_STARS = 1;
-  const MAX_STARS = STAR_THRESHOLDS[0].stars;
+  const STAR_SCHEDULES = {
+    hard: {
+      failMs: 10 * 60 * 1000,
+      tiers: [
+        { stars: 5, withinMs: 5 * 60 * 1000 },
+        { stars: 4, withinMs: 6 * 60 * 1000 },
+        { stars: 3, withinMs: 7.5 * 60 * 1000 },
+        { stars: 2, withinMs: 10 * 60 * 1000 }
+      ]
+    },
+    easy: {
+      failMs: 5 * 60 * 1000,
+      tiers: [
+        { stars: 5, withinMs: 3 * 60 * 1000 },
+        { stars: 4, withinMs: 3.5 * 60 * 1000 },
+        { stars: 3, withinMs: 4 * 60 * 1000 },
+        { stars: 2, withinMs: 4.5 * 60 * 1000 },
+        { stars: 1, withinMs: 5 * 60 * 1000 }
+      ]
+    }
+  };
+  const MAX_STARS = 5;
 
-  /** Stars a run finishing at `elapsedMs` would earn. */
-  function starsFor(elapsedMs) {
-    for (const tier of STAR_THRESHOLDS) {
+  function scheduleFor(mode) {
+    return STAR_SCHEDULES[mode] || STAR_SCHEDULES.hard;
+  }
+
+  /** Stars a run finishing at `elapsedMs` earns; 0 means the clock ran out. */
+  function starsFor(elapsedMs, schedule) {
+    const s = schedule && schedule.tiers ? schedule : scheduleFor(schedule);
+    for (const tier of s.tiers) {
       if (elapsedMs < tier.withinMs) return tier.stars;
     }
-    return MIN_STARS;
+    return 0;
   }
 
   /**
-   * Milliseconds until the next star is lost, or null on the last star.
-   * Drives the countdown beside the star row.
+   * Milliseconds until the next star is lost. The final boundary is the
+   * deadline itself, so this drives both the countdown and the vial.
    */
-  function msToNextStarLoss(elapsedMs) {
-    for (const tier of STAR_THRESHOLDS) {
+  function msToNextStarLoss(elapsedMs, schedule) {
+    const s = schedule && schedule.tiers ? schedule : scheduleFor(schedule);
+    for (const tier of s.tiers) {
       if (elapsedMs < tier.withinMs) return tier.withinMs - elapsedMs;
     }
     return null;
@@ -100,8 +124,9 @@
       puzzle: puzzle,
       dict: opts.dict || new Set(),
       config: opts,
+      schedule: opts.schedule && opts.schedule.tiers ? opts.schedule : scheduleFor(opts.mode),
       elapsedMs: 0,
-      status: 'playing',            // 'playing' | 'won'
+      status: 'playing',            // 'playing' | 'won' | 'lost'
       foundWords: [],               // puzzle words, in the order found
       extraWords: [],               // { word, seconds }
       savedMs: 0,                   // total time shaved off by extras
@@ -128,11 +153,17 @@
     return before - state.elapsedMs;
   }
 
-  /** Advance the stopwatch by dtMs. */
+  /** Advance the clock. Returns true when this tick ran it out. */
   function tick(state, dtMs) {
     if (state.status !== 'playing') return false;
     if (!(dtMs > 0)) return false;
     state.elapsedMs += dtMs;
+    if (state.elapsedMs >= state.schedule.failMs) {
+      state.elapsedMs = state.schedule.failMs;
+      state.status = 'lost';
+      state.finishedAt = Date.now();
+      return true;
+    }
     return false;
   }
 
@@ -217,9 +248,9 @@
 
   return {
     DEFAULTS: DEFAULTS,
-    STAR_THRESHOLDS: STAR_THRESHOLDS,
+    STAR_SCHEDULES: STAR_SCHEDULES,
     MAX_STARS: MAX_STARS,
-    MIN_STARS: MIN_STARS,
+    scheduleFor: scheduleFor,
     starsFor: starsFor,
     looksLikePlural: looksLikePlural,
     msToNextStarLoss: msToNextStarLoss,

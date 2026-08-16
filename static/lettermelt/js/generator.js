@@ -59,8 +59,11 @@
     routeBudgetRelaxed: 600,  // DFS steps for the fallback (reuse >= 1) route
     saturateBudget: 260,      // DFS steps for a zero-new-cell route
     longRouteBudget: 12000,
+    // The search is bounded by restarts and by the DFS step budgets above, and
+    // by nothing else. A wall-clock deadline would make the board depend on how
+    // fast the device ran, which would stop a shared seed from rebuilding the
+    // same puzzle; 40 restarts is ~200ms, so the clock is not needed anyway.
     restarts: 40,
-    timeBudgetMs: 200,        // total wall-clock budget for polish restarts
     // Boards may leave gaps in the 5 x 5 — a hole-punched silhouette reads far
     // better than a solid block. minCells stops them from getting so sparse
     // that the puzzle turns into a thin thread.
@@ -70,8 +73,8 @@
     // capacity is what forces words to share letters instead of sprawling.
     budgetMin: 14,
     budgetMax: 20,
-    // Boards below this quality score are re-rolled while the time budget
-    // lasts; the best one found is used if none clears the bar.
+    // Boards below this quality score are re-rolled until the restarts run
+    // out; the best one found is used if none clears the bar.
     minFunScore: 78
   };
 
@@ -992,15 +995,14 @@
   /**
    * Phase 2 (saturate): scan the vocabulary for words routable with ZERO new
    * cells — pure reuse of what is already on the grid — until the cap is hit.
-   * Each DFS runs over <= 25 cells, so a full vocabulary scan is cheap; it is
-   * still time-boxed and offset-randomized so different puzzles saturate
-   * differently.
+   * Each DFS runs over <= 25 cells, so a full vocabulary scan is cheap; the
+   * scan is bounded by saturateScan and offset-randomized so different puzzles
+   * saturate differently.
    */
-  function saturate(board, pools, rng, used, cap, deadline) {
+  function saturate(board, pools, rng, used, cap) {
     const pool = pools.regular;
     const limit = Math.min(pool.length, CONFIG.saturateScan);
     const offset = Math.floor(rng() * pool.length);
-    let scanned = 0;
     for (let i = 0; i < limit && board.paths.length < cap; i++) {
       const candidate = pool[(offset + i) % pool.length];
       if (used.has(candidate)) continue;
@@ -1010,18 +1012,16 @@
         commitPath(board, candidate, path);
         used.add(candidate);
       }
-      // Only real DFS runs cost anything; check the clock occasionally.
-      if ((++scanned & 31) === 0 && deadline && Date.now() > deadline) break;
     }
   }
 
-  function buildBoard(pools, rng, cap, size, deadline, cellBudget) {
+  function buildBoard(pools, rng, cap, size, cellBudget) {
     const board = createBoard(size, size, cellBudget);
     const longText = placeBaseWord(board, pools, rng);
     if (!longText) return null;
     const used = new Set([longText]);
     growWords(board, pools, rng, used, cap);
-    saturate(board, pools, rng, used, cap, deadline);
+    saturate(board, pools, rng, used, cap);
     return { board: board, longText: longText };
   }
 
@@ -1290,7 +1290,6 @@
     const minFunScore = opts.minFunScore != null ? opts.minFunScore : CONFIG.minFunScore;
     const restarts = opts.restarts || CONFIG.restarts;
     const capacity = size * size;
-    const deadline = Date.now() + (opts.timeBudgetMs || CONFIG.timeBudgetMs);
 
     // How many words to lay down before enumeration takes over. Nudged between
     // attempts: too many laid words spells too many commons, too few spells too
@@ -1309,7 +1308,7 @@
       const budgetMin = Math.max(1, opts.budgetMin || CONFIG.budgetMin);
       const budgetMax = Math.min(capacity, opts.budgetMax || CONFIG.budgetMax);
       const cellBudget = budgetMin + Math.floor(rng() * Math.max(1, budgetMax - budgetMin + 1));
-      const built = buildBoard(pools, rng, construct, size, deadline, cellBudget);
+      const built = buildBoard(pools, rng, construct, size, cellBudget);
       if (!built) continue;
       const result = finishPuzzle(built.board, built.longText, lexicon, minWords, maxWords, minCells);
       if (!result) { rejects++; continue; }          // rival long word
@@ -1332,8 +1331,7 @@
       }
       if (quality.score >= minFunScore && result.normalCount === targetWords) break;
       // No early exit on a full grid: filling all 25 cells is no longer the
-      // goal, so every restart in the budget gets a fair shot at scoring.
-      if (Date.now() > deadline) break;
+      // goal, so every restart gets a fair shot at scoring.
     }
     if (best) {
       best.attempts = attempts;

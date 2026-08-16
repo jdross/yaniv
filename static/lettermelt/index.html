@@ -30,12 +30,21 @@
       </div>
     </div>
 
-    <!-- The clock as a draining tube: full at 10:00, empty when the last star
-         goes. The notches are where the next star is lost. -->
-    <div class="tube" id="tube">
-      <div class="tube-fill" id="tubeFill"><span class="tube-crest"></span></div>
-      <div class="tube-ticks" id="tubeTicks" aria-hidden="true"></div>
-      <span class="tube-time" id="timerValue">10:00</span>
+    <!-- The clock as a vial of lava draining away: notches mark where each
+         star goes, and reaching the end of the vial ends the run. -->
+    <div class="vial" id="tube">
+      <div class="vial-bore">
+        <div class="vial-liquid" id="tubeFill">
+          <span class="vial-glow"></span>
+          <span class="vial-bubbles" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </span>
+          <span class="vial-surface"></span>
+        </div>
+        <div class="vial-ticks" id="tubeTicks" aria-hidden="true"></div>
+      </div>
+      <span class="vial-glass" aria-hidden="true"></span>
+      <span class="vial-time" id="timerValue">10:00</span>
       <div class="timer-toasts" id="timerToasts"></div>
     </div>
 
